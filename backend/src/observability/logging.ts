@@ -1,4 +1,4 @@
-import pino from 'pino';
+import { pino } from 'pino';
 import { env } from '../config/env.js';
 
 const isDevelopment = env.NODE_ENV === 'development';
