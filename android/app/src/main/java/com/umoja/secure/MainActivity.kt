@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +42,7 @@ import com.umoja.secure.transport.EnrollmentApi
 import com.umoja.secure.transport.EnrollmentException
 import com.umoja.secure.transport.EnrollmentRequest
 import com.umoja.secure.transport.HttpClient
+import com.umoja.secure.transport.WebSocketClient
 import com.umoja.secure.ui.theme.UmojaSecureTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -76,6 +78,17 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     var status by remember { mutableStateOf<String?>(null) }
     var isBusy by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
+    var envelopesReceived by remember { mutableStateOf(0) }
+
+    val app = context.applicationContext as UmojaApplication
+    val wsState by app.webSocketClient.state.collectAsState()
+
+    // Observe incoming envelopes. Day 20 will decrypt and route them.
+    LaunchedEffect(Unit) {
+        app.webSocketClient.envelopes.collect {
+            envelopesReceived += 1
+        }
+    }
 
     var tokenInput by remember { mutableStateOf("") }
     var labelInput by remember { mutableStateOf("Android device") }
@@ -160,7 +173,21 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 deviceId = deviceId!!,
                 expiresAt = sessionExpiresAt!!,
                 prekeyStatus = prekeyStatusText,
+                wsState = wsState,
+                envelopesReceived = envelopesReceived,
                 isBusy = isBusy,
+                onConnectWs = {
+                    val storage = SecureStorage(context)
+                    val token = storage.get("session_token")
+                    if (token != null) {
+                        app.webSocketClient.connect(token)
+                    } else {
+                        status = "No session token"
+                    }
+                },
+                onDisconnectWs = {
+                    app.webSocketClient.disconnect()
+                },
                 onUploadPrekeys = {
                     isBusy = true
                     status = null
@@ -285,7 +312,11 @@ private fun AuthenticatedPanel(
     deviceId: String,
     expiresAt: String,
     prekeyStatus: String?,
+    wsState: WebSocketClient.State,
+    envelopesReceived: Int,
     isBusy: Boolean,
+    onConnectWs: () -> Unit,
+    onDisconnectWs: () -> Unit,
     onUploadPrekeys: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -308,7 +339,34 @@ private fun AuthenticatedPanel(
         Spacer(modifier = Modifier.height(4.dp))
         Text(text = it, style = MaterialTheme.typography.bodySmall)
     }
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(
+        text = "WebSocket: ${wsStateLabel(wsState)}",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(
+        text = "Envelopes received: $envelopesReceived",
+        style = MaterialTheme.typography.bodySmall,
+    )
     Spacer(modifier = Modifier.height(24.dp))
+
+    val isConnected = wsState is WebSocketClient.State.Ready ||
+        wsState is WebSocketClient.State.Connecting ||
+        wsState is WebSocketClient.State.Authenticating ||
+        wsState is WebSocketClient.State.Reconnecting
+
+    if (isConnected) {
+        OutlinedButton(onClick = onDisconnectWs, enabled = !isBusy) {
+            Text("Disconnect WebSocket")
+        }
+    } else {
+        Button(onClick = onConnectWs, enabled = !isBusy) {
+            Text("Connect WebSocket")
+        }
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
     Button(onClick = onUploadPrekeys, enabled = !isBusy) {
         Text(if (isBusy) "Working..." else "Upload prekeys")
     }
@@ -316,6 +374,16 @@ private fun AuthenticatedPanel(
     OutlinedButton(onClick = onLogout, enabled = !isBusy) {
         Text("Log out")
     }
+}
+
+private fun wsStateLabel(state: WebSocketClient.State): String = when (state) {
+    is WebSocketClient.State.Disconnected -> "Disconnected"
+    is WebSocketClient.State.Connecting -> "Connecting"
+    is WebSocketClient.State.Authenticating -> "Authenticating"
+    is WebSocketClient.State.Ready -> "Ready"
+    is WebSocketClient.State.Reconnecting -> "Reconnecting"
+    is WebSocketClient.State.Failed -> "Failed: ${state.reason}"
+    is WebSocketClient.State.Revoked -> "Revoked"
 }
 
 @Composable

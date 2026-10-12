@@ -1,15 +1,34 @@
 package com.umoja.secure
 
 import android.app.Application
+import com.umoja.secure.transport.WebSocketClient
 
 /**
  * Umoja Secure application entry point.
  *
- * Phase 1: minimal. Will host service locator / dependency graph in later tasks.
+ * Holds the WebSocketClient singleton so its connection state survives
+ * Activity recreation. Future tasks will migrate this to a proper DI graph.
  */
 class UmojaApplication : Application() {
+
+    lateinit var webSocketClient: WebSocketClient
+        private set
+
     override fun onCreate() {
         super.onCreate()
-        // Reserved for service locator initialization (later tasks)
+        webSocketClient = WebSocketClient(
+            url = WS_URL,
+            appContext = applicationContext,
+        )
+    }
+
+    override fun onTerminate() {
+        webSocketClient.shutdown()
+        super.onTerminate()
+    }
+
+    companion object {
+        // Dev-only. In production this is a Tor onion service.
+        const val WS_URL = "ws://10.0.2.2:8080/ws"
     }
 }
