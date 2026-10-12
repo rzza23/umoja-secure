@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.umoja.secure.auth.PreKeyUploader
 import com.umoja.secure.auth.SessionManager
 import com.umoja.secure.crypto.DeviceIdentity
 import com.umoja.secure.crypto.DeviceKeyManager
@@ -69,6 +70,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
 
     var deviceId by remember { mutableStateOf<String?>(null) }
     var sessionExpiresAt by remember { mutableStateOf<String?>(null) }
+    var prekeyStatusText by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
     var isBusy by remember { mutableStateOf(false) }
 
@@ -154,6 +156,33 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             else -> AuthenticatedPanel(
                 deviceId = deviceId!!,
                 expiresAt = sessionExpiresAt!!,
+                prekeyStatus = prekeyStatusText,
+                isBusy = isBusy,
+                onUploadPrekeys = {
+                    isBusy = true
+                    status = null
+                    scope.launch {
+                        val uploader = PreKeyUploader(context)
+                        val outcome = uploader.uploadPreKeys()
+                        withContext(Dispatchers.Main) {
+                            isBusy = false
+                            when (outcome) {
+                                is PreKeyUploader.UploadOutcome.Success -> {
+                                    prekeyStatusText =
+                                        "Prekeys: ${outcome.total} unconsumed (uploaded ${outcome.stored})"
+                                    status = "Prekeys uploaded"
+                                }
+                                is PreKeyUploader.UploadOutcome.Failure -> {
+                                    status = "Prekey upload error: ${outcome.code}"
+                                }
+                                PreKeyUploader.UploadOutcome.NotAuthenticated -> {
+                                    sessionExpiresAt = null
+                                    status = "Session expired — authenticate again"
+                                }
+                            }
+                        }
+                    }
+                },
                 onLogout = {
                     isBusy = true
                     status = null
@@ -243,6 +272,9 @@ private fun AuthenticatePanel(
 private fun AuthenticatedPanel(
     deviceId: String,
     expiresAt: String,
+    prekeyStatus: String?,
+    isBusy: Boolean,
+    onUploadPrekeys: () -> Unit,
     onLogout: () -> Unit,
 ) {
     Text(
@@ -260,9 +292,17 @@ private fun AuthenticatedPanel(
         text = "Session expires: $expiresAt",
         style = MaterialTheme.typography.bodySmall,
     )
+    prekeyStatus?.let {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(text = it, style = MaterialTheme.typography.bodySmall)
+    }
     Spacer(modifier = Modifier.height(24.dp))
-    OutlinedButton(onClick = onLogout) {
-        Text("Log out (local)")
+    Button(onClick = onUploadPrekeys, enabled = !isBusy) {
+        Text(if (isBusy) "Working..." else "Upload prekeys")
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+    OutlinedButton(onClick = onLogout, enabled = !isBusy) {
+        Text("Log out")
     }
 }
 
