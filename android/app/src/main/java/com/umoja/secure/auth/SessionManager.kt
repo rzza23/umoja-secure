@@ -88,8 +88,19 @@ class SessionManager(private val context: Context) {
         return StoredSession(token, expiresAt, role)
     }
 
-    fun clearSession() {
+    /**
+     * Revoke the session on the backend (best-effort), then clear local state.
+     * If the backend is unreachable, local state is still cleared — the
+     * backend session will expire on its own.
+     */
+    suspend fun clearSession() = withContext(Dispatchers.IO) {
         val storage = SecureStorage(context)
+        val token = storage.get("session_token")
+        if (token != null) {
+            val http = HttpClient(HttpClient.DEV_BASE_URL)
+            val api = AuthApi(http)
+            api.logout(token)
+        }
         storage.remove("session_token")
         storage.remove("session_expires_at")
         storage.remove("session_role")

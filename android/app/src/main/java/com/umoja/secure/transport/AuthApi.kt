@@ -76,6 +76,19 @@ class AuthApi(private val http: HttpClient) {
         }
     }
 
+    /**
+     * Revoke the current session on the backend.
+     * Best-effort: network failures are swallowed (the caller has already
+     * cleared local state and the backend session will expire on its own).
+     */
+    fun logout(sessionToken: String) {
+        try {
+            http.postJson("/auth/logout", "{}", bearer = sessionToken)
+        } catch (_: Exception) {
+            // Best-effort
+        }
+    }
+
     private fun errorCodeFrom(result: HttpResult): String = try {
         JSONObject(result.body).optString("error", "unknown_error")
     } catch (_: Exception) {

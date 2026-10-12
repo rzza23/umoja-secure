@@ -155,10 +155,17 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 deviceId = deviceId!!,
                 expiresAt = sessionExpiresAt!!,
                 onLogout = {
-                    val manager = SessionManager(context)
-                    manager.clearSession()
-                    sessionExpiresAt = null
-                    status = "Logged out"
+                    isBusy = true
+                    status = null
+                    scope.launch {
+                        val manager = SessionManager(context)
+                        manager.clearSession()
+                        withContext(Dispatchers.Main) {
+                            isBusy = false
+                            sessionExpiresAt = null
+                            status = "Logged out"
+                        }
+                    }
                 },
             )
         }
