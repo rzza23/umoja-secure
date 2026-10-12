@@ -9,7 +9,11 @@ data class PreKeyUploadRequest(
     val signedPreKeyPublicB64: String,
     val signedPreKeySignatureB64: String,
     val registrationId: Int,
+    val kyberPreKeyId: Int,
+    val kyberPreKeyPublicB64: String,
+    val kyberPreKeySignatureB64: String,
     val oneTimePreKeys: List<OneTimePreKeyEntry>,
+    val oneTimeKyberPreKeys: List<OneTimePreKeyEntry>,
 )
 
 data class OneTimePreKeyEntry(
@@ -20,6 +24,8 @@ data class OneTimePreKeyEntry(
 data class PreKeyUploadResponse(
     val storedPrekeys: Int,
     val totalUnconsumed: Int,
+    val storedKyberPrekeys: Int,
+    val totalKyberUnconsumed: Int,
 )
 
 data class PreKeyStatusResponse(
@@ -51,13 +57,25 @@ class PreKeyApi(private val http: HttpClient) {
             })
         }
 
+        val oneTimeKyberArray = JSONArray()
+        request.oneTimeKyberPreKeys.forEach { otp ->
+            oneTimeKyberArray.put(JSONObject().apply {
+                put("id", otp.id)
+                put("public_key", otp.publicKeyB64)
+            })
+        }
+
         val body = JSONObject().apply {
             put("identity_key", request.identityKeyB64)
             put("signed_prekey_id", request.signedPreKeyId)
             put("signed_prekey_public", request.signedPreKeyPublicB64)
             put("signed_prekey_signature", request.signedPreKeySignatureB64)
             put("registration_id", request.registrationId)
+            put("kyber_prekey_id", request.kyberPreKeyId)
+            put("kyber_prekey_public", request.kyberPreKeyPublicB64)
+            put("kyber_prekey_signature", request.kyberPreKeySignatureB64)
             put("one_time_prekeys", oneTimeArray)
+            put("one_time_kyber_prekeys", oneTimeKyberArray)
         }.toString()
 
         val result = try {
@@ -75,6 +93,8 @@ class PreKeyApi(private val http: HttpClient) {
             PreKeyUploadResponse(
                 storedPrekeys = json.getInt("stored_prekeys"),
                 totalUnconsumed = json.getInt("total_unconsumed"),
+                storedKyberPrekeys = json.optInt("stored_kyber_prekeys", 0),
+                totalKyberUnconsumed = json.optInt("total_kyber_unconsumed", 0),
             )
         } catch (e: Exception) {
             throw PreKeyApiException("invalid_response", e)

@@ -50,10 +50,20 @@ class PreKeyUploader(private val context: Context) {
             val spkPublicB64 = encodeRaw(generated.signedPreKey.keyPair.publicKey.publicKeyBytes)
             val spkSignatureB64 = encodeRaw(generated.signedPreKey.signature)
 
+            val kyberPublicB64 = encodeRaw(generated.kyberPreKey.keyPair.publicKey.serialize())
+            val kyberSignatureB64 = encodeRaw(generated.kyberPreKey.signature)
+
             val otpEntries = generated.oneTimePreKeys.map { record ->
                 OneTimePreKeyEntry(
                     id = record.id,
                     publicKeyB64 = encodeRaw(record.keyPair.publicKey.publicKeyBytes),
+                )
+            }
+
+            val kyberOtpEntries = generated.oneTimeKyberPreKeys.map { record ->
+                OneTimePreKeyEntry(
+                    id = record.id,
+                    publicKeyB64 = encodeRaw(record.keyPair.publicKey.serialize()),
                 )
             }
 
@@ -63,7 +73,11 @@ class PreKeyUploader(private val context: Context) {
                 signedPreKeyPublicB64 = spkPublicB64,
                 signedPreKeySignatureB64 = spkSignatureB64,
                 registrationId = generated.registrationId,
+                kyberPreKeyId = generated.kyberPreKey.id,
+                kyberPreKeyPublicB64 = kyberPublicB64,
+                kyberPreKeySignatureB64 = kyberSignatureB64,
                 oneTimePreKeys = otpEntries,
+                oneTimeKyberPreKeys = kyberOtpEntries,
             )
 
             val http = HttpClient(HttpClient.DEV_BASE_URL)

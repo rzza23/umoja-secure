@@ -142,4 +142,49 @@ class SignalIdentityAndPreKeysTest {
         val reconstructed = ECPublicKey.fromPublicKeyBytes(rawIdentity)
         assertTrue(rawIdentity.contentEquals(reconstructed.publicKeyBytes))
     }
+
+    @Test
+    fun kyberPreKeyIsGeneratedAndSigned() {
+        val identity = identityStore.getOrGenerate()
+        val generated = preKeyStore.generateFresh(identity)
+
+        val kyber = generated.kyberPreKey
+        val kyberPubBytes = kyber.keyPair.publicKey.serialize()
+        // Kyber-1024 public key serializes to 1568 bytes
+        assertEquals("kyber-1024 serialized public key should be 1569 bytes", 1569, kyberPubBytes.size)
+
+        // The signature is produced by the identity key
+        val verified = identity.publicKey.publicKey.verifySignature(kyberPubBytes, kyber.signature)
+        assertTrue("kyber prekey signature must verify", verified)
+    }
+
+    @Test
+    fun oneTimeKyberPreKeysHaveExpectedShape() {
+        val identity = identityStore.getOrGenerate()
+        val generated = preKeyStore.generateFresh(identity)
+
+        assertEquals(testBatch, generated.oneTimeKyberPreKeys.size)
+        generated.oneTimeKyberPreKeys.forEach { record ->
+            val pubBytes = record.keyPair.publicKey.serialize()
+            assertEquals(1569, pubBytes.size)
+        }
+    }
+
+    @Test
+    fun kyberPreKeyPersistsAcrossReads() {
+        val identity = identityStore.getOrGenerate()
+        preKeyStore.generateFresh(identity)
+        val retrieved = preKeyStore.getKyberPreKey()
+        assertNotNull(retrieved)
+        val pubBytes = retrieved!!.keyPair.publicKey.serialize()
+        assertEquals(1569, pubBytes.size)
+    }
+
+    @Test
+    fun kyberIdIncrements() {
+        val identity = identityStore.getOrGenerate()
+        val first = preKeyStore.generateFresh(identity)
+        val second = preKeyStore.generateFresh(identity)
+        assertTrue(second.kyberPreKey.id > first.kyberPreKey.id)
+    }
 }

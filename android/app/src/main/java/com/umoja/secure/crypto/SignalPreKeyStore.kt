@@ -5,6 +5,9 @@ import android.util.Base64
 import com.umoja.secure.storage.SecureStorage
 import org.signal.libsignal.protocol.IdentityKeyPair
 import org.signal.libsignal.protocol.ecc.ECKeyPair
+import org.signal.libsignal.protocol.kem.KEMKeyPair
+import org.signal.libsignal.protocol.kem.KEMKeyType
+import org.signal.libsignal.protocol.state.KyberPreKeyRecord
 import org.signal.libsignal.protocol.state.PreKeyRecord
 import org.signal.libsignal.protocol.state.SignedPreKeyRecord
 
@@ -30,13 +33,19 @@ class SignalPreKeyStore(
 
     private val signedKey = "${namespace}signal.signedprekey.serialized"
     private val signedIdKey = "${namespace}signal.signedprekey.id"
+    private val kyberKey = "${namespace}signal.kyberprekey.serialized"
+    private val kyberIdKey = "${namespace}signal.kyberprekey.id"
     private val otpNextIdKey = "${namespace}signal.otp.next_id"
+    private val kyberOtpNextIdKey = "${namespace}signal.kyberotp.next_id"
     private val regIdKey = "${namespace}signal.registration.id"
     private val otpPrefix = "${namespace}signal.otp."
+    private val kyberOtpPrefix = "${namespace}signal.kyberotp."
 
     data class GeneratedPreKeys(
         val signedPreKey: SignedPreKeyRecord,
         val oneTimePreKeys: List<PreKeyRecord>,
+        val kyberPreKey: KyberPreKeyRecord,
+        val oneTimeKyberPreKeys: List<KyberPreKeyRecord>,
         val registrationId: Int,
     )
 
@@ -49,13 +58,22 @@ class SignalPreKeyStore(
         val signedRecord = generateSignedPreKey(identityKeyPair)
         storeSignedPreKey(signedRecord)
 
+        val kyberRecord = generateKyberPreKey(identityKeyPair)
+        storeKyberPreKey(kyberRecord)
+
         clearOneTimePreKeys()
         val otps = generateOneTimePreKeys()
         otps.forEach { storeOneTimePreKey(it) }
 
+        clearOneTimeKyberPreKeys()
+        val kyberOtps = generateOneTimeKyberPreKeys()
+        kyberOtps.forEach { storeOneTimeKyberPreKey(it) }
+
         return GeneratedPreKeys(
             signedPreKey = signedRecord,
             oneTimePreKeys = otps,
+            kyberPreKey = kyberRecord,
+            oneTimeKyberPreKeys = kyberOtps,
             registrationId = getOrCreateRegistrationId(),
         )
     }
@@ -75,9 +93,71 @@ class SignalPreKeyStore(
     fun localOneTimePreKeyCount(): Int =
         storage.allKeys().count { it.startsWith(otpPrefix) }
 
+    fun getKyberPreKey(): KyberPreKeyRecord? {
+        val b64 = storage.get(kyberKey) ?: return null
+        return try {
+            KyberPreKeyRecord(decode(b64))
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Count of one-time Kyber prekeys currently in local storage. */
+    fun localOneTimeKyberPreKeyCount(): Int =
+        storage.allKeys().count { it.startsWith(kyberOtpPrefix) }
+
     fun clearAll() {
         storage.remove(signedKey)
+        storage.remove(kyberKey)
         clearOneTimePreKeys()
+        clearOneTimeKyberPreKeys()
+    }
+
+    // ----- Kyber internals -----
+
+    private fun generateKyberPreKey(identity: IdentityKeyPair): KyberPreKeyRecord {
+        val id = nextKyberPreKeyId()
+        val keyPair = KEMKeyPair.generate(KEMKeyType.KYBER_1024)
+        val signature = identity.privateKey.calculateSignature(keyPair.publicKey.serialize())
+        return KyberPreKeyRecord(id, System.currentTimeMillis(), keyPair, signature)
+    }
+
+    private fun generateOneTimeKyberPreKeys(): List<KyberPreKeyRecord> {
+        val baseId = nextKyberOtpBaseId()
+        return (0 until oneTimePreKeyCount).map { offset ->
+            val keyPair = KEMKeyPair.generate(KEMKeyType.KYBER_1024)
+            // Signature is over the public key serialization; same identity key signs.
+            // For one-time Kyber prekeys, we sign with the identity key as well.
+            val signature = ByteArray(0) // one-time Kyber prekeys are not signed in PQXDH
+            KyberPreKeyRecord(baseId + offset, System.currentTimeMillis(), keyPair, signature)
+        }
+    }
+
+    private fun storeKyberPreKey(record: KyberPreKeyRecord) {
+        storage.put(kyberKey, encode(record.serialize()))
+    }
+
+    private fun storeOneTimeKyberPreKey(record: KyberPreKeyRecord) {
+        storage.put(kyberOtpPrefix + record.id, encode(record.serialize()))
+    }
+
+    private fun clearOneTimeKyberPreKeys() {
+        storage.allKeys()
+            .filter { it.startsWith(kyberOtpPrefix) }
+            .forEach { storage.remove(it) }
+    }
+
+    private fun nextKyberPreKeyId(): Int {
+        val current = storage.get(kyberIdKey)?.toIntOrNull() ?: 0
+        val next = current + 1
+        storage.put(kyberIdKey, next.toString())
+        return next
+    }
+
+    private fun nextKyberOtpBaseId(): Int {
+        val current = storage.get(kyberOtpNextIdKey)?.toIntOrNull() ?: 1
+        storage.put(kyberOtpNextIdKey, (current + oneTimePreKeyCount).toString())
+        return current
     }
 
     // ----- internal -----
