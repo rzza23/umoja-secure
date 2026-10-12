@@ -49,16 +49,28 @@ function b64(len: number): string {
   return randomBytes(len).toString('base64url');
 }
 
-function makeUpload(otpCount: number): Record<string, unknown> {
+function makeKyberPublic(): string {
+  // Kyber-1024 public key is 1568 bytes -> 2091 base64url chars (no padding).
+  return b64(1568);
+}
+
+function makeUpload(otpCount: number, kyberOtpCount = 0): Record<string, unknown> {
   return {
     identity_key: b64(32),
     signed_prekey_id: 1,
     signed_prekey_public: b64(32),
     signed_prekey_signature: b64(64),
     registration_id: 12345,
+    kyber_prekey_id: 7,
+    kyber_prekey_public: makeKyberPublic(),
+    kyber_prekey_signature: b64(64),
     one_time_prekeys: Array.from({ length: otpCount }, (_, i) => ({
       id: i + 1,
       public_key: b64(32),
+    })),
+    one_time_kyber_prekeys: Array.from({ length: kyberOtpCount }, (_, i) => ({
+      id: i + 1,
+      public_key: makeKyberPublic(),
     })),
   };
 }
@@ -96,12 +108,14 @@ describe('prekey directory', () => {
         method: 'POST',
         url: '/prekeys',
         headers: { authorization: `Bearer ${dev.token}` },
-        payload: makeUpload(5),
+        payload: makeUpload(5, 5),
       });
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expect(body.stored_prekeys).toBe(5);
       expect(body.total_unconsumed).toBe(5);
+      expect(body.stored_kyber_prekeys).toBe(5);
+      expect(body.total_kyber_unconsumed).toBe(5);
     });
 
     it('is idempotent on re-upload (same OTP IDs)', async () => {

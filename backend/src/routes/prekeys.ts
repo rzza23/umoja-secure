@@ -11,6 +11,11 @@ const PreKeyUploadBody = z.object({
   signed_prekey_public: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   signed_prekey_signature: z.string().regex(/^[A-Za-z0-9_-]{86}$/),
   registration_id: z.number().int().positive(),
+  kyber_prekey_id: z.number().int().positive(),
+  // Kyber-1024 public key: 1568 raw bytes -> 2091 base64url chars.
+  // Accept a generous range to handle version differences.
+  kyber_prekey_public: z.string().min(1000).max(3000),
+  kyber_prekey_signature: z.string().regex(/^[A-Za-z0-9_-]{86}$/),
   one_time_prekeys: z
     .array(
       z.object({
@@ -19,6 +24,15 @@ const PreKeyUploadBody = z.object({
       }),
     )
     .max(500),
+  one_time_kyber_prekeys: z
+    .array(
+      z.object({
+        id: z.number().int().positive(),
+        public_key: z.string().min(1000).max(3000),
+      }),
+    )
+    .max(500)
+    .default([]),
 });
 
 export const prekeyRoutes: FastifyPluginAsync = async (app) => {
