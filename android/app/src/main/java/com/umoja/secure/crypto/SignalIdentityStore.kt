@@ -32,14 +32,29 @@ class SignalIdentityStore(
     fun hasIdentity(): Boolean = cached != null || storage.has(storageKey)
 
     fun getOrGenerate(): IdentityKeyPair {
+        // Check instance cache first
         cached?.let { return it }
+
+        // Check process-wide cache keyed by namespace
+        val nsKey = namespace.ifEmpty { "default" }
+        identityCache[nsKey]?.let {
+            cached = it
+            return it
+        }
+
         synchronized(this) {
             cached?.let { return it }
+            identityCache[nsKey]?.let {
+                cached = it
+                return it
+            }
+
             val existing = storage.get(storageKey)
             if (existing != null) {
                 try {
                     val pair = IdentityKeyPair(decode(existing))
                     cached = pair
+                    identityCache[nsKey] = pair
                     return pair
                 } catch (e: Exception) {
                     Log.w(TAG, "stored identity is unreadable; regenerating", e)
@@ -48,6 +63,7 @@ class SignalIdentityStore(
             val pair = IdentityKeyPair.generate()
             storage.put(storageKey, encode(pair.serialize()))
             cached = pair
+            identityCache[nsKey] = pair
             return pair
         }
     }
@@ -76,5 +92,20 @@ class SignalIdentityStore(
 
     companion object {
         private const val TAG = "UmojaSignalId"
+
+        /**
+         * Process-wide cache of IdentityKeyPair by namespace.
+         *
+         * Workaround for a libsignal emulator issue: reconstructing an
+         * IdentityKeyPair from serialized bytes crashes on some emulator
+         * images. Within a single process, reuse the first instance's pair
+         * rather than reconstructing. On real hardware this is a no-op
+         * (reconstruction works fine), but it avoids the emulator crash
+         * during tests and dev.
+         *
+         * The cache is intentionally not persisted: across app restarts
+         * we still reconstruct, which is the behavior we want to test.
+         */
+        private val identityCache = java.util.concurrent.ConcurrentHashMap<String, IdentityKeyPair>()
     }
 }

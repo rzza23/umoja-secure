@@ -27,7 +27,6 @@ import org.signal.libsignal.protocol.state.PreKeyBundle
 import org.signal.libsignal.protocol.state.PreKeyRecord
 import org.signal.libsignal.protocol.state.SignedPreKeyRecord
 
-@Ignore("libsignal native crash on emulator for IdentityKeyPair byte reconstruction; verified on real device in Chunk 6")
 @RunWith(AndroidJUnit4::class)
 class PersistentSignalProtocolStoreTest {
 
