@@ -54,5 +54,19 @@ services:
       retries: 5
       start_period: 10s
 
+  tor:
+    build:
+      context: ./infra
+      dockerfile: docker/tor.Dockerfile
+    container_name: umoja-tor
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    volumes:
+      - umoja-tor-data:/var/lib/tor
+      - ./infra/tor/torrc:/etc/tor/torrc:ro
+
 volumes:
   umoja-pg-data:
+  umoja-tor-data:

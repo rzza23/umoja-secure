@@ -1,0 +1,15 @@
+# Umoja Secure — Tor onion service configuration.
+# Exposes the backend at http://<onion>.onion/ from the Docker network.
+# Clients reach it via SOCKS or their own embedded Tor.
+
+SocksPort 9050
+ControlPort 9051
+
+DataDirectory /var/lib/tor
+Log notice stdout
+Log notice file /var/log/tor/notices.log
+
+# Onion service: point port 80 on the onion at the backend container.
+HiddenServiceDir /var/lib/tor/umoja-backend/
+HiddenServiceVersion 3
+HiddenServicePort 80 backend:8080
