@@ -8,6 +8,7 @@ import { healthRoutes } from './routes/health.js';
 import { enrollmentRoutes } from './routes/enrollment.js';
 import { authRoutes } from './routes/auth.js';
 import { meRoutes } from './routes/me.js';
+import { prekeyRoutes } from './routes/prekeys.js';
 
 export async function buildApp() {
   const app = Fastify({
@@ -29,6 +30,7 @@ export async function buildApp() {
   await app.register(enrollmentRoutes);
   await app.register(authRoutes);
   await app.register(meRoutes);
+  await app.register(prekeyRoutes);
 
   return app;
 }
