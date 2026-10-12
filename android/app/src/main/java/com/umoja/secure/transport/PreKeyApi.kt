@@ -42,8 +42,13 @@ data class PeerPreKeyBundle(
     val signedPreKeyPublicB64: String,
     val signedPreKeySignatureB64: String,
     val registrationId: Int,
+    val kyberPreKeyId: Int,
+    val kyberPreKeyPublicB64: String,
+    val kyberPreKeySignatureB64: String,
     val oneTimePreKeyId: Int?,
     val oneTimePreKeyPublicB64: String?,
+    val oneTimeKyberPreKeyId: Int?,
+    val oneTimeKyberPreKeyPublicB64: String?,
 )
 
 class PreKeyApi(private val http: HttpClient) {
@@ -121,6 +126,39 @@ class PreKeyApi(private val http: HttpClient) {
                     else json.getInt("signed_prekey_id"),
                 updatedAt = if (json.isNull("updated_at")) null
                     else json.getString("updated_at"),
+            )
+        } catch (e: Exception) {
+            throw PreKeyApiException("invalid_response", e)
+        }
+    }
+
+    fun fetchBundle(deviceId: String, sessionToken: String): PeerPreKeyBundle {
+        val result = try {
+            http.get("/prekeys/$deviceId", bearer = sessionToken)
+        } catch (e: HttpException) {
+            throw PreKeyApiException("network_error", e)
+        }
+
+        if (result.code != 200) {
+            throw PreKeyApiException(errorCodeFrom(result), null, result.code)
+        }
+
+        return try {
+            val json = JSONObject(result.body)
+            PeerPreKeyBundle(
+                deviceId = json.getString("device_id"),
+                identityKeyB64 = json.getString("identity_key"),
+                signedPreKeyId = json.getInt("signed_prekey_id"),
+                signedPreKeyPublicB64 = json.getString("signed_prekey_public"),
+                signedPreKeySignatureB64 = json.getString("signed_prekey_signature"),
+                registrationId = json.getInt("registration_id"),
+                kyberPreKeyId = json.getInt("kyber_prekey_id"),
+                kyberPreKeyPublicB64 = json.getString("kyber_prekey_public"),
+                kyberPreKeySignatureB64 = json.getString("kyber_prekey_signature"),
+                oneTimePreKeyId = json.optJSONObject("one_time_prekey")?.getInt("id"),
+                oneTimePreKeyPublicB64 = json.optJSONObject("one_time_prekey")?.getString("public_key"),
+                oneTimeKyberPreKeyId = json.optJSONObject("one_time_kyber_prekey")?.getInt("id"),
+                oneTimeKyberPreKeyPublicB64 = json.optJSONObject("one_time_kyber_prekey")?.getString("public_key"),
             )
         } catch (e: Exception) {
             throw PreKeyApiException("invalid_response", e)

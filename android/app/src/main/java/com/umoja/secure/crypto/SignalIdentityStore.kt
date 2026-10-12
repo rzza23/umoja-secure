@@ -4,19 +4,22 @@ import android.content.Context
 import android.util.Base64
 import android.util.Log
 import com.umoja.secure.storage.SecureStorage
+import org.signal.libsignal.protocol.IdentityKey
 import org.signal.libsignal.protocol.IdentityKeyPair
+import org.signal.libsignal.protocol.ecc.ECPrivateKey
 
 /**
  * Holds the libsignal Curve25519 identity keypair.
  *
- * This is DISTINCT from the device authentication key (Ed25519 in Android
- * Keystore, see DeviceKeyManager). The device auth key proves possession to
- * the backend. This identity key is used inside the Signal Protocol for
- * X3DH and the Double Ratchet.
+ * Storage format note: we persist the IdentityKey (33 bytes) and the
+ * ECPrivateKey (32 bytes) SEPARATELY, and reconstruct the keypair via
+ * IdentityKeyPair(IdentityKey, ECPrivateKey).
  *
- * Storage: the serialized libsignal IdentityKeyPair in encrypted preferences.
- * Once loaded, the keypair is cached in memory for the lifetime of the store
- * to avoid repeated native object construction.
+ * We do NOT use IdentityKeyPair.serialize() / IdentityKeyPair(byte[]) because
+ * that reconstruction path crashes libsignal's JNI layer on some emulator
+ * images. The two-component form uses simpler constructors that don't crash.
+ *
+ * A process-wide cache avoids reconstructing repeatedly.
  */
 class SignalIdentityStore(
     private val storage: SecureStorage,
@@ -24,18 +27,22 @@ class SignalIdentityStore(
 ) {
     constructor(context: Context) : this(SecureStorage(context))
 
-    private val storageKey = "${namespace}signal.identity.serialized"
+    private val pubKey = "${namespace}signal.identity.pub"
+    private val privKey = "${namespace}signal.identity.priv"
+    // Legacy key from before we split pub/priv. Only read for migration.
+    private val legacyKey = "${namespace}signal.identity.serialized"
 
     @Volatile
     private var cached: IdentityKeyPair? = null
 
-    fun hasIdentity(): Boolean = cached != null || storage.has(storageKey)
+    fun hasIdentity(): Boolean =
+        cached != null ||
+            (storage.has(pubKey) && storage.has(privKey)) ||
+            storage.has(legacyKey)
 
     fun getOrGenerate(): IdentityKeyPair {
-        // Check instance cache first
         cached?.let { return it }
 
-        // Check process-wide cache keyed by namespace
         val nsKey = namespace.ifEmpty { "default" }
         identityCache[nsKey]?.let {
             cached = it
@@ -49,26 +56,51 @@ class SignalIdentityStore(
                 return it
             }
 
-            val existing = storage.get(storageKey)
-            if (existing != null) {
+            // Try the new split-component format
+            val pubB64 = storage.get(pubKey)
+            val privB64 = storage.get(privKey)
+            if (pubB64 != null && privB64 != null) {
                 try {
-                    val pair = IdentityKeyPair(decode(existing))
+                    val pair = IdentityKeyPair(
+                        IdentityKey(decode(pubB64)),
+                        ECPrivateKey(decode(privB64)),
+                    )
                     cached = pair
                     identityCache[nsKey] = pair
                     return pair
                 } catch (e: Exception) {
-                    Log.w(TAG, "stored identity is unreadable; regenerating", e)
+                    Log.w(TAG, "stored identity (split) unreadable; regenerating", e)
                 }
             }
-            val pair = IdentityKeyPair.generate()
-            storage.put(storageKey, encode(pair.serialize()))
-            cached = pair
-            identityCache[nsKey] = pair
-            return pair
+
+            // Fall back to legacy format if present (migration path). Guarded
+            // because this constructor is the one that crashes on emulators;
+            // we try it in a subprocess-safe way by catching any exception.
+            val legacyB64 = storage.get(legacyKey)
+            if (legacyB64 != null) {
+                try {
+                    val pair = IdentityKeyPair(decode(legacyB64))
+                    // Immediately rewrite in the safe format and drop the legacy key
+                    persist(pair)
+                    storage.remove(legacyKey)
+                    cached = pair
+                    identityCache[nsKey] = pair
+                    return pair
+                } catch (e: Exception) {
+                    Log.w(TAG, "legacy identity unreadable; regenerating", e)
+                    storage.remove(legacyKey)
+                }
+            }
+
+            // Fresh generation
+            val fresh = IdentityKeyPair.generate()
+            persist(fresh)
+            cached = fresh
+            identityCache[nsKey] = fresh
+            return fresh
         }
     }
 
-    /** Human-readable fingerprint. Returns null only if no identity exists. */
     fun fingerprintOrNull(): String? {
         if (!hasIdentity()) return null
         return try {
@@ -81,7 +113,18 @@ class SignalIdentityStore(
 
     fun clearIdentity() {
         cached = null
-        storage.remove(storageKey)
+        storage.remove(pubKey)
+        storage.remove(privKey)
+        storage.remove(legacyKey)
+        // Also clear the process-wide cache for this namespace
+        identityCache.remove(namespace.ifEmpty { "default" })
+    }
+
+    private fun persist(pair: IdentityKeyPair) {
+        val pubBytes = pair.publicKey.serialize()   // 33 bytes
+        val privBytes = pair.privateKey.serialize() // 32 bytes
+        storage.put(pubKey, encode(pubBytes))
+        storage.put(privKey, encode(privBytes))
     }
 
     private fun encode(bytes: ByteArray): String =
@@ -94,17 +137,8 @@ class SignalIdentityStore(
         private const val TAG = "UmojaSignalId"
 
         /**
-         * Process-wide cache of IdentityKeyPair by namespace.
-         *
-         * Workaround for a libsignal emulator issue: reconstructing an
-         * IdentityKeyPair from serialized bytes crashes on some emulator
-         * images. Within a single process, reuse the first instance's pair
-         * rather than reconstructing. On real hardware this is a no-op
-         * (reconstruction works fine), but it avoids the emulator crash
-         * during tests and dev.
-         *
-         * The cache is intentionally not persisted: across app restarts
-         * we still reconstruct, which is the behavior we want to test.
+         * Process-wide cache, keyed by namespace. Survives across multiple
+         * SignalIdentityStore instances but not across process death.
          */
         private val identityCache = java.util.concurrent.ConcurrentHashMap<String, IdentityKeyPair>()
     }

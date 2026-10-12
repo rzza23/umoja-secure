@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.umoja.secure.auth.PreKeyUploader
+import com.umoja.secure.messaging.MessagingService
 import com.umoja.secure.auth.SessionManager
 import com.umoja.secure.crypto.DeviceIdentity
 import com.umoja.secure.crypto.DeviceKeyManager
@@ -79,6 +80,9 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     var isBusy by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     var envelopesReceived by remember { mutableStateOf(0) }
+    var peerDeviceIdInput by remember { mutableStateOf("") }
+    var sentMessageInput by remember { mutableStateOf("hello from Umoja") }
+    var receivedMessagesText by remember { mutableStateOf<String?>(null) }
 
     val app = context.applicationContext as UmojaApplication
     val wsState by app.webSocketClient.state.collectAsState()
@@ -175,7 +179,56 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 prekeyStatus = prekeyStatusText,
                 wsState = wsState,
                 envelopesReceived = envelopesReceived,
+                peerDeviceId = peerDeviceIdInput,
+                onPeerDeviceIdChange = { peerDeviceIdInput = it },
+                messageInput = sentMessageInput,
+                onMessageInputChange = { sentMessageInput = it },
+                receivedMessages = receivedMessagesText,
                 isBusy = isBusy,
+                onSendMessage = {
+                    isBusy = true
+                    status = null
+                    scope.launch {
+                        val svc = MessagingService(context)
+                        val outcome = svc.sendMessage(peerDeviceIdInput.trim(), sentMessageInput)
+                        withContext(Dispatchers.Main) {
+                            isBusy = false
+                            status = when (outcome) {
+                                is MessagingService.SendOutcome.Success ->
+                                    "Sent: ${outcome.envelopeId.take(8)}... (prekey=${outcome.wasPreKey})"
+                                is MessagingService.SendOutcome.Failure ->
+                                    "Send error: ${outcome.code}"
+                            }
+                        }
+                    }
+                },
+                onCheckMessages = {
+                    isBusy = true
+                    status = null
+                    scope.launch {
+                        val svc = MessagingService(context)
+                        val outcome = svc.receiveMessages()
+                        withContext(Dispatchers.Main) {
+                            isBusy = false
+                            when (outcome) {
+                                is MessagingService.ReceiveOutcome.Success -> {
+                                    val list = outcome.messages
+                                    receivedMessagesText = if (list.isEmpty()) {
+                                        "No pending messages."
+                                    } else {
+                                        list.joinToString("\n") { m ->
+                                            "${m.senderDeviceId.take(8)}: ${m.plaintext}"
+                                        }
+                                    }
+                                    status = "Received ${list.size} message(s)"
+                                }
+                                is MessagingService.ReceiveOutcome.Failure -> {
+                                    status = "Receive error: ${outcome.code}"
+                                }
+                            }
+                        }
+                    }
+                },
                 onConnectWs = {
                     val storage = SecureStorage(context)
                     val token = storage.get("session_token")
@@ -314,7 +367,14 @@ private fun AuthenticatedPanel(
     prekeyStatus: String?,
     wsState: WebSocketClient.State,
     envelopesReceived: Int,
+    peerDeviceId: String,
+    onPeerDeviceIdChange: (String) -> Unit,
+    messageInput: String,
+    onMessageInputChange: (String) -> Unit,
+    receivedMessages: String?,
     isBusy: Boolean,
+    onSendMessage: () -> Unit,
+    onCheckMessages: () -> Unit,
     onConnectWs: () -> Unit,
     onDisconnectWs: () -> Unit,
     onUploadPrekeys: () -> Unit,
@@ -370,7 +430,49 @@ private fun AuthenticatedPanel(
     Button(onClick = onUploadPrekeys, enabled = !isBusy) {
         Text(if (isBusy) "Working..." else "Upload prekeys")
     }
+    Spacer(modifier = Modifier.height(24.dp))
+    Text("Messaging", style = MaterialTheme.typography.titleSmall)
     Spacer(modifier = Modifier.height(8.dp))
+
+    OutlinedTextField(
+        value = peerDeviceId,
+        onValueChange = onPeerDeviceIdChange,
+        label = { Text("Peer device ID") },
+        enabled = !isBusy,
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    OutlinedTextField(
+        value = messageInput,
+        onValueChange = onMessageInputChange,
+        label = { Text("Message to send") },
+        enabled = !isBusy,
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    Button(
+        onClick = onSendMessage,
+        enabled = !isBusy && peerDeviceId.isNotBlank() && messageInput.isNotBlank(),
+    ) {
+        Text(if (isBusy) "Working..." else "Send encrypted message")
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+    OutlinedButton(onClick = onCheckMessages, enabled = !isBusy) {
+        Text("Check messages")
+    }
+
+    receivedMessages?.let {
+        Spacer(modifier = Modifier.height(12.dp))
+        Text("Received:", style = MaterialTheme.typography.titleSmall)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(it, style = MaterialTheme.typography.bodySmall)
+    }
+
+    Spacer(modifier = Modifier.height(24.dp))
     OutlinedButton(onClick = onLogout, enabled = !isBusy) {
         Text("Log out")
     }

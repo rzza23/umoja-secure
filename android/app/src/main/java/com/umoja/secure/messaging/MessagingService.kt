@@ -1,0 +1,244 @@
+package com.umoja.secure.messaging
+
+import android.content.Context
+import android.util.Base64
+import android.util.Log
+import com.umoja.secure.crypto.PersistentSignalProtocolStore
+import com.umoja.secure.storage.SecureStorage
+import com.umoja.secure.transport.EnvelopeApi
+import com.umoja.secure.transport.EnvelopeApiException
+import com.umoja.secure.transport.HttpClient
+import com.umoja.secure.transport.PreKeyApi
+import com.umoja.secure.transport.PreKeyApiException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.signal.libsignal.protocol.IdentityKey
+import org.signal.libsignal.protocol.SessionBuilder
+import org.signal.libsignal.protocol.SessionCipher
+import org.signal.libsignal.protocol.SignalProtocolAddress
+import org.signal.libsignal.protocol.ecc.ECPublicKey
+import org.signal.libsignal.protocol.kem.KEMPublicKey
+import org.signal.libsignal.protocol.message.CiphertextMessage
+import org.signal.libsignal.protocol.message.PreKeySignalMessage
+import org.signal.libsignal.protocol.message.SignalMessage
+import org.signal.libsignal.protocol.state.PreKeyBundle
+
+/**
+ * Orchestrates the encrypted messaging flow:
+ *
+ * Send:
+ *   1. Fetch peer's prekey bundle from the backend.
+ *   2. Establish an X3DH session via SessionBuilder.
+ *   3. Encrypt the plaintext.
+ *   4. Submit the ciphertext as an envelope.
+ *
+ * Receive:
+ *   1. List pending envelopes.
+ *   2. Fetch each one's ciphertext body.
+ *   3. Decrypt via SessionCipher.
+ *   4. Acknowledge the envelope.
+ *
+ * The backend never sees plaintext.
+ */
+class MessagingService(private val context: Context) {
+
+    companion object {
+        private const val TAG = "UmojaMessaging"
+    }
+
+    sealed class SendOutcome {
+        data class Success(val envelopeId: String, val wasPreKey: Boolean) : SendOutcome()
+        data class Failure(val code: String) : SendOutcome()
+    }
+
+    data class ReceivedMessage(
+        val envelopeId: String,
+        val senderDeviceId: String,
+        val plaintext: String,
+    )
+
+    sealed class ReceiveOutcome {
+        data class Success(val messages: List<ReceivedMessage>) : ReceiveOutcome()
+        data class Failure(val code: String) : ReceiveOutcome()
+    }
+
+    /**
+     * Send an encrypted message to a peer device.
+     *
+     * The peer must have uploaded a valid prekey bundle to the backend
+     * (which they do on first launch after authentication).
+     */
+    suspend fun sendMessage(
+        peerDeviceId: String,
+        plaintext: String,
+    ): SendOutcome = withContext(Dispatchers.IO) {
+        val storage = SecureStorage(context)
+        val sessionToken = storage.get("session_token")
+            ?: return@withContext SendOutcome.Failure("not_authenticated")
+
+        val myDeviceId = storage.get("device_id")
+            ?: return@withContext SendOutcome.Failure("not_enrolled")
+
+        try {
+            val http = HttpClient(HttpClient.DEV_BASE_URL)
+            val prekeyApi = PreKeyApi(http)
+
+            // 1. Fetch peer's bundle
+            val bundleResponse = try {
+                prekeyApi.fetchBundle(peerDeviceId, sessionToken)
+            } catch (e: PreKeyApiException) {
+                Log.e(TAG, "fetchBundle failed: ${e.code}", e)
+                return@withContext SendOutcome.Failure("bundle_${e.code}")
+            }
+
+            // 2. Reconstruct a libsignal PreKeyBundle from the bytes
+            val bundle = bundleFromResponse(bundleResponse)
+
+            val peerAddress = SignalProtocolAddress(peerDeviceId, 1)
+
+            // 3. Establish session if needed
+            val store = PersistentSignalProtocolStore(context)
+            if (!store.containsSession(peerAddress)) {
+                SessionBuilder(store, peerAddress).process(bundle)
+            }
+
+            // 4. Encrypt
+            val cipher = SessionCipher(store, peerAddress)
+            val ciphertext = cipher.encrypt(plaintext.toByteArray(Charsets.UTF_8))
+            val ciphertextB64 = encode(ciphertext.serialize())
+
+            // 5. Submit envelope
+            val envelopeApi = EnvelopeApi(http)
+            val submitResponse = try {
+                envelopeApi.submit(
+                    recipientDeviceId = peerDeviceId,
+                    ciphertextB64 = ciphertextB64,
+                    sessionToken = sessionToken,
+                )
+            } catch (e: EnvelopeApiException) {
+                Log.e(TAG, "submit envelope failed: ${e.code}", e)
+                return@withContext SendOutcome.Failure("submit_${e.code}")
+            }
+
+            val wasPreKey = ciphertext.type == CiphertextMessage.PREKEY_TYPE
+            Log.i(TAG, "sent envelope ${submitResponse.envelopeId} (prekey=$wasPreKey) to $peerDeviceId")
+
+            SendOutcome.Success(submitResponse.envelopeId, wasPreKey)
+        } catch (e: Exception) {
+            Log.e(TAG, "sendMessage unexpected", e)
+            SendOutcome.Failure("unexpected_error")
+        }
+    }
+
+    /**
+     * Poll for and decrypt pending envelopes.
+     */
+    suspend fun receiveMessages(): ReceiveOutcome = withContext(Dispatchers.IO) {
+        val storage = SecureStorage(context)
+        val sessionToken = storage.get("session_token")
+            ?: return@withContext ReceiveOutcome.Failure("not_authenticated")
+
+        val http = HttpClient(HttpClient.DEV_BASE_URL)
+        val envelopeApi = EnvelopeApi(http)
+
+        try {
+            val pending = try {
+                envelopeApi.listPending(sessionToken)
+            } catch (e: EnvelopeApiException) {
+                Log.e(TAG, "listPending failed: ${e.code}", e)
+                return@withContext ReceiveOutcome.Failure("list_${e.code}")
+            }
+
+            val messages = mutableListOf<ReceivedMessage>()
+            val store = PersistentSignalProtocolStore(context)
+
+            for (item in pending) {
+                try {
+                    val body = envelopeApi.fetch(item.envelopeId, sessionToken)
+                    val ciphertextBytes = decode(body.ciphertext)
+
+                    val peerAddress = SignalProtocolAddress(item.senderDeviceId, 1)
+                    val cipher = SessionCipher(store, peerAddress)
+
+                    val plaintext = decrypt(cipher, ciphertextBytes)
+                    if (plaintext == null) {
+                        Log.w(TAG, "could not decrypt envelope ${item.envelopeId}")
+                        continue
+                    }
+
+                    envelopeApi.ack(item.envelopeId, sessionToken)
+
+                    messages.add(
+                        ReceivedMessage(
+                            envelopeId = item.envelopeId,
+                            senderDeviceId = item.senderDeviceId,
+                            plaintext = String(plaintext, Charsets.UTF_8),
+                        ),
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "failed to process envelope ${item.envelopeId}", e)
+                }
+            }
+
+            ReceiveOutcome.Success(messages)
+        } catch (e: Exception) {
+            Log.e(TAG, "receiveMessages unexpected", e)
+            ReceiveOutcome.Failure("unexpected_error")
+        }
+    }
+
+    // ============================================================
+    // Internal helpers
+    // ============================================================
+
+    private fun bundleFromResponse(r: com.umoja.secure.transport.PeerPreKeyBundle): PreKeyBundle {
+        val preKeyId = r.oneTimePreKeyId ?: PreKeyBundle.NULL_PRE_KEY_ID
+        val preKey = r.oneTimePreKeyPublicB64?.let {
+            ECPublicKey.fromPublicKeyBytes(decode(it))
+        } ?: ECPublicKey.fromPublicKeyBytes(decode(r.signedPreKeyPublicB64))
+
+        // libsignal's PreKeyBundle has a single Kyber slot. Signal Protocol
+        // uses it for the SIGNED Kyber prekey (verified by the signature).
+        // One-time Kyber prekeys are not exposed through PreKeyBundle in
+        // libsignal 0.86.x; we always use the signed Kyber prekey here.
+        val kyberId = r.kyberPreKeyId
+        val kyberBytes = r.kyberPreKeyPublicB64
+
+        return PreKeyBundle(
+            r.registrationId,
+            1, // deviceId: 1 in our model (per SignalProtocolAddress above)
+            preKeyId,
+            preKey,
+            r.signedPreKeyId,
+            ECPublicKey.fromPublicKeyBytes(decode(r.signedPreKeyPublicB64)),
+            decode(r.signedPreKeySignatureB64),
+            // Backend stores 32 raw bytes; build ECPublicKey then IdentityKey.
+            // IdentityKey(byte[]) would expect a 33-byte prefixed form and throw.
+            IdentityKey(ECPublicKey.fromPublicKeyBytes(decode(r.identityKeyB64))),
+            kyberId,
+            KEMPublicKey(decode(kyberBytes)),
+            decode(r.kyberPreKeySignatureB64),
+        )
+    }
+
+    private fun decrypt(cipher: SessionCipher, bytes: ByteArray): ByteArray? {
+        // Try SignalMessage (established session) first
+        try {
+            return cipher.decrypt(SignalMessage(bytes))
+        } catch (_: Exception) {
+            // Fall through to PreKeySignalMessage
+        }
+        try {
+            return cipher.decrypt(PreKeySignalMessage(bytes))
+        } catch (e: Exception) {
+            Log.w(TAG, "decrypt failed for both message types", e)
+            return null
+        }
+    }
+
+    private fun encode(bytes: ByteArray): String =
+        Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+
+    private fun decode(b64: String): ByteArray =
+        Base64.decode(b64, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+}
