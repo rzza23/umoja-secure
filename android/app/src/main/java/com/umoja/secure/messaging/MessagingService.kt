@@ -100,12 +100,12 @@ class MessagingService(private val context: Context) {
             // 3. Establish session if needed
             val store = PersistentSignalProtocolStore(context)
             val hadSession = store.containsSession(peerAddress)
-            Log.i(TAG, "sendMessage: containsSession=$hadSession for peer ${peerDeviceId.take(8)}")
+            Log.d(TAG, "sendMessage: containsSession=$hadSession for peer ${peerDeviceId.take(8)}")
             if (!hadSession) {
                 SessionBuilder(store, peerAddress).process(bundle)
-                Log.i(TAG, "sendMessage: established NEW session")
+                Log.d(TAG, "sendMessage: established NEW session")
             } else {
-                Log.i(TAG, "sendMessage: REUSING existing session")
+                Log.d(TAG, "sendMessage: REUSING existing session")
             }
 
             // 4. Encrypt
@@ -116,7 +116,7 @@ class MessagingService(private val context: Context) {
                 try {
                     val pkm = PreKeySignalMessage(ciphertext.serialize())
                     val pkId = if (pkm.preKeyId.isPresent) pkm.preKeyId.get() else -1
-                    Log.i(TAG, "sendMessage: outgoing PreKeySignalMessage " +
+                    Log.d(TAG, "sendMessage: outgoing PreKeySignalMessage " +
                         "preKeyId=$pkId signedPreKeyId=${pkm.signedPreKeyId}")
                 } catch (e: Exception) {
                     Log.w(TAG, "could not parse outgoing PreKeySignalMessage", e)
@@ -139,7 +139,7 @@ class MessagingService(private val context: Context) {
             }
 
             val wasPreKey = ciphertext.type == CiphertextMessage.PREKEY_TYPE
-            Log.i(TAG, "sent envelope ${submitResponse.envelopeId} (prekey=$wasPreKey) to $peerDeviceId")
+            Log.d(TAG, "sent envelope ${submitResponse.envelopeId} (prekey=$wasPreKey) to $peerDeviceId")
 
             SendOutcome.Success(submitResponse.envelopeId, wasPreKey)
         } catch (e: Exception) {
@@ -265,7 +265,7 @@ class MessagingService(private val context: Context) {
         val kyberId = r.kyberPreKeyId
         val kyberBytes = r.kyberPreKeyPublicB64
 
-        Log.i(
+        Log.d(
             TAG,
             "bundleFromResponse: peer=${r.deviceId.take(8)} regId=${r.registrationId} " +
                 "spkId=${r.signedPreKeyId} preKeyId=$preKeyId kyberId=$kyberId " +

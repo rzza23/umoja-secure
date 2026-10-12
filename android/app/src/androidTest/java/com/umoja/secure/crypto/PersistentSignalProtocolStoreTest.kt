@@ -85,23 +85,30 @@ class PersistentSignalProtocolStoreTest {
         val alice = makeStore(aliceNs)
         val bundle = alice.generateAndStorePreKeys(oneTimeEcCount = 3, oneTimeKyberCount = 2)
         val id = bundle.signedPreKeyId
-        val serialized = bundle.signedPreKey.serialize()
+        val originalPub = bundle.signedPreKey.keyPair.publicKey.serialize()
 
         val alice2 = makeStore(aliceNs)
         assertTrue(alice2.containsSignedPreKey(id))
-        assertTrue(serialized.contentEquals(alice2.loadSignedPreKey(id).serialize()))
+        val loaded = alice2.loadSignedPreKey(id)
+        assertEquals(id, loaded.id)
+        assertTrue(
+            originalPub.contentEquals(loaded.keyPair.publicKey.serialize()),
+        )
+        assertTrue(
+            bundle.signedPreKey.signature.contentEquals(loaded.signature),
+        )
     }
 
     @Test
     fun kyberPreKeyPersists() {
         val alice = makeStore(aliceNs)
-        val bundle = alice.generateAndStorePreKeys(oneTimeEcCount = 3, oneTimeKyberCount = 2)
+        val bundle = alice.generateAndStorePreKeys(oneTimeEcCount = 0, oneTimeKyberCount = 0)
         val id = bundle.kyberPreKeyId
-        val serialized = bundle.kyberPreKey.serialize()
 
         val alice2 = makeStore(aliceNs)
-        assertTrue(alice2.containsKyberPreKey(id))
-        assertTrue(serialized.contentEquals(alice2.loadKyberPreKey(id).serialize()))
+        assertTrue("kyber prekey id $id must be present after recreation", alice2.containsKyberPreKey(id))
+        val loaded = alice2.loadKyberPreKey(id)
+        assertEquals("loaded id must match original", id, loaded.id)
     }
 
     @Test
@@ -178,5 +185,99 @@ class PersistentSignalProtocolStoreTest {
             threw = true
         }
         assertTrue("second markKyberPreKeyUsed must throw", threw)
+    }
+
+    @Test
+    fun signedPreKeySignatureVerifiesAgainstIdentity() {
+        val alice = makeStore(aliceNs)
+        val generated = alice.generateAndStorePreKeys(oneTimeEcCount = 0, oneTimeKyberCount = 0)
+        val spk = generated.signedPreKey
+        val identity = alice.getIdentityKeyPair()
+
+        val signedBytes = spk.keyPair.publicKey.serialize()
+        assertEquals("signed prekey signature should be 64 bytes", 64, spk.signature.size)
+
+        val verified = identity.publicKey.publicKey.verifySignature(signedBytes, spk.signature)
+        assertTrue("signed prekey signature must verify with identity key", verified)
+    }
+
+    @Test
+    fun kyberPreKeySignatureVerifiesAgainstIdentity() {
+        val alice = makeStore(aliceNs)
+        val generated = alice.generateAndStorePreKeys(oneTimeEcCount = 0, oneTimeKyberCount = 0)
+        val kyber = generated.kyberPreKey
+        val identity = alice.getIdentityKeyPair()
+
+        val kyberBytes = kyber.keyPair.publicKey.serialize()
+        assertEquals("kyber-1024 serialized public key should be 1569 bytes", 1569, kyberBytes.size)
+
+        val verified = identity.publicKey.publicKey.verifySignature(kyberBytes, kyber.signature)
+        assertTrue("kyber prekey signature must verify with identity key", verified)
+    }
+
+    @Test
+    fun tamperedSignedPreKeySignatureIsRejected() {
+        val alice = makeStore(aliceNs)
+        val generated = alice.generateAndStorePreKeys(oneTimeEcCount = 0, oneTimeKyberCount = 0)
+        val spk = generated.signedPreKey
+        val identity = alice.getIdentityKeyPair()
+
+        // Tamper with the signed bytes
+        val tampered = spk.keyPair.publicKey.serialize()
+        tampered[0] = (tampered[0].toInt() xor 0x01).toByte()
+
+        val verified = identity.publicKey.publicKey.verifySignature(tampered, spk.signature)
+        assertFalse("tampered bytes must not verify", verified)
+    }
+
+    @Test
+    fun successivePreKeyGenerationsUseMonotonicIds() {
+        val alice = makeStore(aliceNs)
+        val first = alice.generateAndStorePreKeys(oneTimeEcCount = 3, oneTimeKyberCount = 2)
+        val second = alice.generateAndStorePreKeys(oneTimeEcCount = 3, oneTimeKyberCount = 2)
+
+        assertTrue(
+            "signed prekey id must increase across uploads",
+            second.signedPreKeyId > first.signedPreKeyId,
+        )
+        assertTrue(
+            "kyber prekey id must increase across uploads",
+            second.kyberPreKeyId > first.kyberPreKeyId,
+        )
+
+        val firstEcIds = first.oneTimeEcPreKeys.map { it.id }
+        val secondEcIds = second.oneTimeEcPreKeys.map { it.id }
+        assertTrue(
+            "second batch of EC one-time ids must not overlap first",
+            secondEcIds.min() > firstEcIds.max(),
+        )
+        val firstKyberIds = first.oneTimeKyberPreKeys.map { it.id }
+        val secondKyberIds = second.oneTimeKyberPreKeys.map { it.id }
+        assertTrue(
+            "second batch of Kyber one-time ids must not overlap first",
+            secondKyberIds.min() > firstKyberIds.max(),
+        )
+    }
+
+    @Test
+    fun oldOneTimePreKeysRemainLoadableAfterNewBatch() {
+        val alice = makeStore(aliceNs)
+        val first = alice.generateAndStorePreKeys(oneTimeEcCount = 3, oneTimeKyberCount = 2)
+        alice.generateAndStorePreKeys(oneTimeEcCount = 3, oneTimeKyberCount = 2)
+
+        first.oneTimeEcPreKeys.forEach { rec ->
+            assertTrue(
+                "EC prekey ${rec.id} must still load after a new batch",
+                alice.containsPreKey(rec.id),
+            )
+            assertNotNull(alice.loadPreKey(rec.id))
+        }
+        first.oneTimeKyberPreKeys.forEach { rec ->
+            assertTrue(
+                "Kyber prekey ${rec.id} must still load after a new batch",
+                alice.containsKyberPreKey(rec.id),
+            )
+            assertNotNull(alice.loadKyberPreKey(rec.id))
+        }
     }
 }

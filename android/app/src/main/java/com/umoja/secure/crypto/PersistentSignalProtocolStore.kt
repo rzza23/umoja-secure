@@ -114,7 +114,7 @@ class PersistentSignalProtocolStore(
     // ============================================================
 
     override fun loadPreKey(preKeyId: Int): PreKeyRecord {
-        Log.i(TAG, "loadPreKey(id=$preKeyId)")
+        Log.d(TAG, "loadPreKey(id=$preKeyId)")
         val stored = storage.get(preKeyKey(preKeyId))
             ?: throw InvalidKeyIdException("no prekey $preKeyId")
         return try {
@@ -140,7 +140,7 @@ class PersistentSignalProtocolStore(
     // ============================================================
 
     override fun loadSignedPreKey(signedPreKeyId: Int): SignedPreKeyRecord {
-        Log.i(TAG, "loadSignedPreKey(id=$signedPreKeyId)")
+        Log.d(TAG, "loadSignedPreKey(id=$signedPreKeyId)")
         val stored = storage.get(signedKey(signedPreKeyId))
             ?: throw InvalidKeyIdException("no signed prekey $signedPreKeyId")
         return try {
@@ -179,7 +179,7 @@ class PersistentSignalProtocolStore(
     // ============================================================
 
     override fun loadKyberPreKey(kyberPreKeyId: Int): KyberPreKeyRecord {
-        Log.i(TAG, "loadKyberPreKey(id=$kyberPreKeyId)")
+        Log.d(TAG, "loadKyberPreKey(id=$kyberPreKeyId)")
         val stored = storage.get(kyberKey(kyberPreKeyId))
             ?: throw InvalidKeyIdException("no kyber prekey $kyberPreKeyId")
         return try {
@@ -388,9 +388,12 @@ class PersistentSignalProtocolStore(
     }
 
     private fun nextCounter(key: String, advanceBy: Int = 1): Int {
-        val current = storage.get(key)?.toIntOrNull() ?: 1
-        val next = current + advanceBy
-        storage.put(key, next.toString())
+        // Counters are namespaced so tests and multiple store instances do not
+        // share counter state. Two stores with different namespaces generate
+        // independent ID sequences.
+        val fullKey = "$namespace$key"
+        val current = storage.get(fullKey)?.toIntOrNull() ?: 1
+        storage.put(fullKey, (current + advanceBy).toString())
         return current
     }
 
