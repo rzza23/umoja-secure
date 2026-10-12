@@ -19,6 +19,10 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import java.net.Proxy
+import java.net.InetSocketAddress
+import java.net.InetAddress
+import okhttp3.Dns
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -63,12 +67,38 @@ class WebSocketClient(
         object Revoked : State()
     }
 
-    private val httpClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
-        .pingInterval(0, TimeUnit.SECONDS) // server drives heartbeats
-        .build()
+    private val httpClient: OkHttpClient = buildClient()
+
+    private fun buildClient(): OkHttpClient {
+        val builder = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .pingInterval(0, TimeUnit.SECONDS) // server drives heartbeats
+
+        if (TransportConfig.useTor) {
+            builder.proxy(
+                Proxy(
+                    Proxy.Type.SOCKS,
+                    InetSocketAddress(
+                        TransportConfig.SOCKS_HOST,
+                        TransportConfig.SOCKS_PORT,
+                    ),
+                ),
+            )
+            builder.dns(object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> {
+                    return if (hostname.endsWith(".onion")) {
+                        listOf(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)))
+                    } else {
+                        Dns.SYSTEM.lookup(hostname)
+                    }
+                }
+            })
+        }
+
+        return builder.build()
+    }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -140,7 +170,7 @@ class WebSocketClient(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            Log.w(TAG, "socket failure: ${t.message}")
+            Log.w(TAG, "socket failure: ${t.javaClass.simpleName}: ${t.message}", t)
             handleFailure()
         }
     }

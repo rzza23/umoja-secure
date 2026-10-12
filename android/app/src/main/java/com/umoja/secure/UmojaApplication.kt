@@ -1,6 +1,7 @@
 package com.umoja.secure
 
 import android.app.Application
+import com.umoja.secure.transport.TransportConfig
 import com.umoja.secure.transport.WebSocketClient
 
 /**
@@ -17,7 +18,7 @@ class UmojaApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         webSocketClient = WebSocketClient(
-            url = WS_URL,
+            url = TransportConfig.wsUrl,
             appContext = applicationContext,
         )
     }
@@ -25,10 +26,5 @@ class UmojaApplication : Application() {
     override fun onTerminate() {
         webSocketClient.shutdown()
         super.onTerminate()
-    }
-
-    companion object {
-        // Dev-only. In production this is a Tor onion service.
-        const val WS_URL = "ws://127.0.0.1:8080/ws"
     }
 }
