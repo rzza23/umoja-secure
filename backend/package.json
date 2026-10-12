@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
     "migrate": "tsx --env-file=.env scripts/migrate.ts",
-    "sbom": "cyclonedx-npm --output-file sbom.json"
+    "sbom": "cyclonedx-npm --output-file sbom.json",
+    "verify-audit": "tsx --env-file=.env scripts/verify-audit.ts"
   },
   "dependencies": {
     "@fastify/cors": "10.0.1",
