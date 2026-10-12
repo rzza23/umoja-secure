@@ -10,6 +10,7 @@ import { authRoutes } from './routes/auth.js';
 import { meRoutes } from './routes/me.js';
 import { prekeyRoutes } from './routes/prekeys.js';
 import { envelopeRoutes } from './routes/envelopes.js';
+import { wsRoutes } from './ws/server.js';
 
 export async function buildApp() {
   const app = Fastify({
@@ -33,6 +34,7 @@ export async function buildApp() {
   await app.register(meRoutes);
   await app.register(prekeyRoutes);
   await app.register(envelopeRoutes);
+  await app.register(wsRoutes);
 
   return app;
 }

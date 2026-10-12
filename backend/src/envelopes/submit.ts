@@ -1,4 +1,5 @@
 import { withTransaction } from '../db/client.js';
+import { tryPushEnvelope } from '../ws/delivery.js';
 
 export class EnvelopeError extends Error {
   constructor(
@@ -36,7 +37,7 @@ export async function submitEnvelope(input: SubmitInput): Promise<SubmitResult> 
   const ttl = input.ttl_seconds ?? DEFAULT_TTL_SECONDS;
   const expiresAt = new Date(Date.now() + ttl * 1000);
 
-  return withTransaction(async (tx) => {
+  const result = await withTransaction(async (tx) => {
     const sender = await tx.query(
       'SELECT status FROM devices WHERE device_id = $1',
       [input.sender_device_id],
@@ -52,8 +53,6 @@ export async function submitEnvelope(input: SubmitInput): Promise<SubmitResult> 
     if (recipient.rowCount !== 1 || recipient.rows[0].status !== 'active') {
       throw new EnvelopeError('recipient_unavailable', 404);
     }
-
-    // TODO TASK-P1-007: enforce contact authorization before insert.
 
     const res = await tx.query(
       `INSERT INTO envelopes
@@ -74,4 +73,13 @@ export async function submitEnvelope(input: SubmitInput): Promise<SubmitResult> 
       expires_at: (res.rows[0].expires_at as Date).toISOString(),
     };
   });
+
+  // Push attempt happens AFTER the transaction commits
+  try {
+    await tryPushEnvelope(result.envelope_id);
+  } catch {
+    // Push failure is fine — envelope stays queued for polling
+  }
+
+  return result;
 }

@@ -11,6 +11,8 @@ const EnvSchema = z.object({
   SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(43200),
   CHALLENGE_TTL_SECONDS: z.coerce.number().int().positive().default(60),
   WS_REVALIDATE_SECONDS: z.coerce.number().int().positive().default(300),
+  WS_HEARTBEAT_SECONDS: z.coerce.number().int().positive().default(30),
+  WS_AUTH_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(10),
   RATE_LIMIT_AUTH_PER_MIN: z.coerce.number().int().positive().default(30),
   RATE_LIMIT_CHALLENGE_PER_MIN: z.coerce.number().int().positive().default(60),
   AUDIT_HASH_KEY: z
