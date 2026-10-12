@@ -29,7 +29,7 @@ class HttpClient(baseUrl: String) {
 
         private val JSON = "application/json; charset=utf-8".toMediaType()
 
-        private const val CONNECT_TIMEOUT_SECONDS = 30L
+        private const val CONNECT_TIMEOUT_SECONDS = 90L
         private const val READ_TIMEOUT_SECONDS = 60L
         private const val WRITE_TIMEOUT_SECONDS = 60L
 
