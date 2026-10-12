@@ -17,5 +17,42 @@ services:
       timeout: 5s
       retries: 10
 
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: umoja-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      HOST: 0.0.0.0
+      LOG_LEVEL: info
+      DATABASE_URL: postgres://umoja:umoja@postgres:5432/umoja
+      SESSION_TTL_SECONDS: '43200'
+      CHALLENGE_TTL_SECONDS: '60'
+      WS_REVALIDATE_SECONDS: '300'
+      WS_HEARTBEAT_SECONDS: '30'
+      WS_AUTH_TIMEOUT_SECONDS: '10'
+      RATE_LIMIT_AUTH_PER_MIN: '30'
+      RATE_LIMIT_CHALLENGE_PER_MIN: '60'
+      AUDIT_HASH_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+      SERVER_ID: umoja-backend-1
+    ports:
+      - '127.0.0.1:8080:8080'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - 'fetch("http://localhost:8080/health").then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
 volumes:
   umoja-pg-data:

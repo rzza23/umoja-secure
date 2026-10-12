@@ -1,0 +1,16 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+*.log
+coverage
+.vscode
+.idea
+.git
+.gitignore
+test
+vitest.config.ts
+README.md
+sbom.json
+package.json.bak
