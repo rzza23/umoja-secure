@@ -75,3 +75,31 @@ Tests:
 
 Every commit message references a task ID. Every task follows the workflow in
 `UMOJA-SECURE-BUILD-MASTER.md` §7.
+
+## License
+
+Umoja Secure is licensed under the GNU Affero General Public License,
+version 3.0 (AGPLv3). See `LICENSE` for the full text.
+
+### Source code
+
+Users of the software have the right to obtain the Corresponding Source
+under AGPLv3. The source repository is:
+
+    https://github.com/rzza23/umoja-secure
+
+For private-network deployments, administrators should either provide users
+with access to a mirror of this repository on the same network, or update
+the app's About screen to point at the internal source location. The URL
+shown in the app is configurable at
+`android/app/src/main/res/values/strings.xml` (`about_source_url`).
+
+### Third-party components
+
+See `NOTICE` for attribution of third-party components used in this project,
+including their licenses. A complete inventory is generated with each build
+in the SBOM (`backend/sbom.json`).
+
+### Contributing
+
+See `CONTRIBUTING.md`. All contributions require a DCO sign-off.

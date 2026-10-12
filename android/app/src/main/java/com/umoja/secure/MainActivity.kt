@@ -12,12 +12,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -73,6 +75,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     var prekeyStatusText by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
     var isBusy by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
 
     var tokenInput by remember { mutableStateOf("") }
     var labelInput by remember { mutableStateOf("Android device") }
@@ -203,6 +206,15 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             Spacer(modifier = Modifier.height(16.dp))
             Text(text = it, style = MaterialTheme.typography.bodySmall)
         }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        TextButton(onClick = { showAbout = true }) {
+            Text("About")
+        }
+    }
+
+    if (showAbout) {
+        AboutDialog(onClose = { showAbout = false })
     }
 }
 
@@ -304,6 +316,33 @@ private fun AuthenticatedPanel(
     OutlinedButton(onClick = onLogout, enabled = !isBusy) {
         Text("Log out")
     }
+}
+
+@Composable
+private fun AboutDialog(onClose: () -> Unit) {
+    val sourceUrl = stringResource(R.string.about_source_url)
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(stringResource(R.string.about_title)) },
+        text = {
+            Column {
+                Text("Umoja Secure")
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    stringResource(R.string.about_license_summary),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Source code:", style = MaterialTheme.typography.bodySmall)
+                Text(sourceUrl, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onClose) {
+                Text("Close")
+            }
+        },
+    )
 }
 
 private suspend fun enrollDevice(
