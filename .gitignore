@@ -15,3 +15,12 @@ sbom.json
 .gradle/
 build/
 android/local.properties
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/captures/
+android/*.iml
+android/app/*.iml
+android/.idea/
+android/.kotlin/
