@@ -72,6 +72,9 @@ class SecureStorage(
         prefs.edit().clear().apply()
     }
 
+    /** Returns the set of all keys currently stored. Values are encrypted. */
+    fun allKeys(): Set<String> = prefs.all.keys.toSet()
+
     fun has(key: String): Boolean = prefs.contains(key)
 
     private fun getOrCreateAesKey(): SecretKey {
