@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
 class HttpClient(baseUrl: String) {
 
     companion object {
-        const val DEV_BASE_URL = "http://10.0.2.2:8080"
+        const val DEV_BASE_URL = "http://127.0.0.1:8080"
         private val JSON = "application/json; charset=utf-8".toMediaType()
         private const val CONNECT_TIMEOUT_SECONDS = 15L
         private const val READ_TIMEOUT_SECONDS = 30L

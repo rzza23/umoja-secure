@@ -29,6 +29,6 @@ class UmojaApplication : Application() {
 
     companion object {
         // Dev-only. In production this is a Tor onion service.
-        const val WS_URL = "ws://10.0.2.2:8080/ws"
+        const val WS_URL = "ws://127.0.0.1:8080/ws"
     }
 }

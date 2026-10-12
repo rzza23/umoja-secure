@@ -87,10 +87,18 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     val app = context.applicationContext as UmojaApplication
     val wsState by app.webSocketClient.state.collectAsState()
 
-    // Observe incoming envelopes. Day 20 will decrypt and route them.
+    // Observe incoming envelopes and decrypt them as they arrive.
     LaunchedEffect(Unit) {
-        app.webSocketClient.envelopes.collect {
+        app.webSocketClient.envelopes.collect { frame ->
             envelopesReceived += 1
+            val svc = MessagingService(context)
+            val msg = svc.decryptWebSocketFrame(frame)
+            if (msg != null) {
+                val prefix = if (receivedMessagesText.isNullOrEmpty()) "" else "\n"
+                receivedMessagesText = (receivedMessagesText ?: "") +
+                    prefix + "${msg.senderDeviceId.take(8)}: ${msg.plaintext}"
+                status = "Decrypted incoming message"
+            }
         }
     }
 

@@ -3,6 +3,7 @@ package com.umoja.secure.messaging
 import android.content.Context
 import android.util.Base64
 import android.util.Log
+import org.json.JSONObject
 import com.umoja.secure.crypto.PersistentSignalProtocolStore
 import com.umoja.secure.storage.SecureStorage
 import com.umoja.secure.transport.EnvelopeApi
@@ -98,13 +99,30 @@ class MessagingService(private val context: Context) {
 
             // 3. Establish session if needed
             val store = PersistentSignalProtocolStore(context)
-            if (!store.containsSession(peerAddress)) {
+            val hadSession = store.containsSession(peerAddress)
+            Log.i(TAG, "sendMessage: containsSession=$hadSession for peer ${peerDeviceId.take(8)}")
+            if (!hadSession) {
                 SessionBuilder(store, peerAddress).process(bundle)
+                Log.i(TAG, "sendMessage: established NEW session")
+            } else {
+                Log.i(TAG, "sendMessage: REUSING existing session")
             }
 
             // 4. Encrypt
             val cipher = SessionCipher(store, peerAddress)
             val ciphertext = cipher.encrypt(plaintext.toByteArray(Charsets.UTF_8))
+
+            if (ciphertext.type == CiphertextMessage.PREKEY_TYPE) {
+                try {
+                    val pkm = PreKeySignalMessage(ciphertext.serialize())
+                    val pkId = if (pkm.preKeyId.isPresent) pkm.preKeyId.get() else -1
+                    Log.i(TAG, "sendMessage: outgoing PreKeySignalMessage " +
+                        "preKeyId=$pkId signedPreKeyId=${pkm.signedPreKeyId}")
+                } catch (e: Exception) {
+                    Log.w(TAG, "could not parse outgoing PreKeySignalMessage", e)
+                }
+            }
+
             val ciphertextB64 = encode(ciphertext.serialize())
 
             // 5. Submit envelope
@@ -187,6 +205,49 @@ class MessagingService(private val context: Context) {
         }
     }
 
+    /**
+     * Decrypt an envelope delivered over WebSocket.
+     * The frame contains: type, envelope_id, sender_device_id,
+     * envelope_type, ciphertext (base64url), created_at.
+     * Acks the envelope via HTTP on successful decrypt.
+     */
+    suspend fun decryptWebSocketFrame(frame: JSONObject): ReceivedMessage? =
+        withContext(Dispatchers.IO) {
+            try {
+                val envelopeId = frame.getString("envelope_id")
+                val senderDeviceId = frame.getString("sender_device_id")
+                val ciphertextB64 = frame.getString("ciphertext")
+
+                val store = PersistentSignalProtocolStore(context)
+                val peerAddress = SignalProtocolAddress(senderDeviceId, 1)
+                val cipher = SessionCipher(store, peerAddress)
+
+                val bytes = decode(ciphertextB64)
+                val plaintext = decrypt(cipher, bytes) ?: return@withContext null
+
+                // Ack via HTTP so the backend marks retrieved
+                val storage = SecureStorage(context)
+                val token = storage.get("session_token")
+                if (token != null) {
+                    try {
+                        val http = HttpClient(HttpClient.DEV_BASE_URL)
+                        EnvelopeApi(http).ack(envelopeId, token)
+                    } catch (_: Exception) {
+                        // best-effort; envelope will be re-delivered on next poll
+                    }
+                }
+
+                ReceivedMessage(
+                    envelopeId = envelopeId,
+                    senderDeviceId = senderDeviceId,
+                    plaintext = String(plaintext, Charsets.UTF_8),
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "decryptWebSocketFrame failed", e)
+                null
+            }
+        }
+
     // ============================================================
     // Internal helpers
     // ============================================================
@@ -203,6 +264,17 @@ class MessagingService(private val context: Context) {
         // libsignal 0.86.x; we always use the signed Kyber prekey here.
         val kyberId = r.kyberPreKeyId
         val kyberBytes = r.kyberPreKeyPublicB64
+
+        Log.i(
+            TAG,
+            "bundleFromResponse: peer=${r.deviceId.take(8)} regId=${r.registrationId} " +
+                "spkId=${r.signedPreKeyId} preKeyId=$preKeyId kyberId=$kyberId " +
+                "ikLen=${decode(r.identityKeyB64).size} " +
+                "spkPubLen=${decode(r.signedPreKeyPublicB64).size} " +
+                "spkSigLen=${decode(r.signedPreKeySignatureB64).size} " +
+                "kyberPubLen=${decode(kyberBytes).size} " +
+                "kyberSigLen=${decode(r.kyberPreKeySignatureB64).size}",
+        )
 
         return PreKeyBundle(
             r.registrationId,

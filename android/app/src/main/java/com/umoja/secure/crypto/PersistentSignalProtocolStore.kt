@@ -50,6 +50,10 @@ class PersistentSignalProtocolStore(
 
     companion object {
         private const val TAG = "UmojaSignalStore"
+        private const val COUNTER_SIGNED_SPK = "store.counter.signed_spk"
+        private const val COUNTER_SIGNED_KYBER = "store.counter.signed_kyber"
+        private const val COUNTER_OTP_EC = "store.counter.otp_ec"
+        private const val COUNTER_OTP_KYBER = "store.counter.otp_kyber"
     }
 
     // ============================================================
@@ -110,6 +114,7 @@ class PersistentSignalProtocolStore(
     // ============================================================
 
     override fun loadPreKey(preKeyId: Int): PreKeyRecord {
+        Log.i(TAG, "loadPreKey(id=$preKeyId)")
         val stored = storage.get(preKeyKey(preKeyId))
             ?: throw InvalidKeyIdException("no prekey $preKeyId")
         return try {
@@ -135,6 +140,7 @@ class PersistentSignalProtocolStore(
     // ============================================================
 
     override fun loadSignedPreKey(signedPreKeyId: Int): SignedPreKeyRecord {
+        Log.i(TAG, "loadSignedPreKey(id=$signedPreKeyId)")
         val stored = storage.get(signedKey(signedPreKeyId))
             ?: throw InvalidKeyIdException("no signed prekey $signedPreKeyId")
         return try {
@@ -173,6 +179,7 @@ class PersistentSignalProtocolStore(
     // ============================================================
 
     override fun loadKyberPreKey(kyberPreKeyId: Int): KyberPreKeyRecord {
+        Log.i(TAG, "loadKyberPreKey(id=$kyberPreKeyId)")
         val stored = storage.get(kyberKey(kyberPreKeyId))
             ?: throw InvalidKeyIdException("no kyber prekey $kyberPreKeyId")
         return try {
@@ -327,35 +334,44 @@ class PersistentSignalProtocolStore(
     ): GeneratedBundle {
         val identity = getIdentityKeyPair()
 
+        // Monotonic IDs so successive uploads do not collide with IDs already
+        // stored on the backend. The backend uses ON CONFLICT DO NOTHING for
+        // one-time prekeys, so reusing IDs would leave orphan public keys that
+        // do not match any private key on this device.
+        val spkId = nextCounter(COUNTER_SIGNED_SPK)
+        val kyberId = nextCounter(COUNTER_SIGNED_KYBER)
+
         // Signed prekey
-        val spkId = 1
         val spkKeyPair = org.signal.libsignal.protocol.ecc.ECKeyPair.generate()
         val spkSignature = identity.privateKey.calculateSignature(spkKeyPair.publicKey.serialize())
         val spk = SignedPreKeyRecord(spkId, System.currentTimeMillis(), spkKeyPair, spkSignature)
         storeSignedPreKey(spkId, spk)
 
         // Kyber prekey
-        val kyberId = 1
         val kyberKeyPair = KEMKeyPair.generate(KEMKeyType.KYBER_1024)
         val kyberSignature = identity.privateKey.calculateSignature(kyberKeyPair.publicKey.serialize())
         val kyber = KyberPreKeyRecord(kyberId, System.currentTimeMillis(), kyberKeyPair, kyberSignature)
         storeKyberPreKey(kyberId, kyber)
 
         // One-time EC prekeys
+        val ecBase = nextCounter(COUNTER_OTP_EC, advanceBy = oneTimeEcCount)
         val otpEc = mutableListOf<PreKeyRecord>()
-        for (i in 1..oneTimeEcCount) {
+        for (offset in 0 until oneTimeEcCount) {
+            val id = ecBase + offset
             val kp = org.signal.libsignal.protocol.ecc.ECKeyPair.generate()
-            val rec = PreKeyRecord(i, kp)
-            storePreKey(i, rec)
+            val rec = PreKeyRecord(id, kp)
+            storePreKey(id, rec)
             otpEc.add(rec)
         }
 
         // One-time Kyber prekeys
+        val kyberBase = nextCounter(COUNTER_OTP_KYBER, advanceBy = oneTimeKyberCount)
         val otpKyber = mutableListOf<KyberPreKeyRecord>()
-        for (i in 2..(oneTimeKyberCount + 1)) {
+        for (offset in 0 until oneTimeKyberCount) {
+            val id = kyberBase + offset
             val kp = KEMKeyPair.generate(KEMKeyType.KYBER_1024)
-            val rec = KyberPreKeyRecord(i, System.currentTimeMillis(), kp, ByteArray(0))
-            storeKyberPreKey(i, rec)
+            val rec = KyberPreKeyRecord(id, System.currentTimeMillis(), kp, ByteArray(0))
+            storeKyberPreKey(id, rec)
             otpKyber.add(rec)
         }
 
@@ -369,6 +385,13 @@ class PersistentSignalProtocolStore(
             oneTimeEcPreKeys = otpEc,
             oneTimeKyberPreKeys = otpKyber,
         )
+    }
+
+    private fun nextCounter(key: String, advanceBy: Int = 1): Int {
+        val current = storage.get(key)?.toIntOrNull() ?: 1
+        val next = current + advanceBy
+        storage.put(key, next.toString())
+        return current
     }
 
     data class GeneratedBundle(
