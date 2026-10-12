@@ -1,40 +1,7 @@
-import Fastify from 'fastify';
-import helmet from '@fastify/helmet';
-import cors from '@fastify/cors';
-import rateLimit from '@fastify/rate-limit';
-
 import { env } from './config/env.js';
 import { logger } from './observability/logging.js';
 import { pool, shutdownDb } from './db/client.js';
-import { healthRoutes } from './routes/health.js';
-
-async function buildApp() {
-  const app = Fastify({
-    loggerInstance: logger,
-    trustProxy: false,
-    bodyLimit: 1024 * 1024,
-    disableRequestLogging: false,
-  });
-
-  await app.register(helmet, {
-    contentSecurityPolicy: false,
-  });
-
-  await app.register(cors, {
-    origin: false,
-  });
-
-  await app.register(rateLimit, {
-    max: 100,
-    timeWindow: '1 minute',
-    keyGenerator: (req) =>
-      (req.headers['x-device-id'] as string | undefined) ?? req.ip,
-  });
-
-  await app.register(healthRoutes);
-
-  return app;
-}
+import { buildApp } from './app.js';
 
 async function start() {
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
