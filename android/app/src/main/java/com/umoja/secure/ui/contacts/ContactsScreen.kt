@@ -28,8 +28,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.umoja.secure.storage.SecureStorage
-import com.umoja.secure.transport.ContactApi
-import com.umoja.secure.transport.ContactApiException
+import com.umoja.secure.transport.ContactEntry
+import com.umoja.secure.transport.ContactsApi
+import com.umoja.secure.transport.ContactsApiException
 import com.umoja.secure.transport.HttpClient
 import com.umoja.secure.ui.theme.Success
 import kotlinx.coroutines.Dispatchers
@@ -43,7 +44,7 @@ fun ContactsScreen(
     val context = LocalContext.current
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var contacts by remember { mutableStateOf<List<ContactApi.Contact>>(emptyList()) }
+    var contacts by remember { mutableStateOf<List<ContactEntry>>(emptyList()) }
 
     LaunchedEffect(Unit) {
         val token = SecureStorage(context).get("session_token")
@@ -53,10 +54,10 @@ fun ContactsScreen(
             return@LaunchedEffect
         }
         try {
-            val api = ContactApi(HttpClient(HttpClient.DEV_BASE_URL))
-            val list = withContext(Dispatchers.IO) { api.listMyContacts(token) }
+            val api = ContactsApi(HttpClient(HttpClient.DEV_BASE_URL))
+            val list = withContext(Dispatchers.IO) { api.list(token) }
             contacts = list
-        } catch (e: ContactApiException) {
+        } catch (e: ContactsApiException) {
             error = e.code
         } finally {
             loading = false
@@ -91,7 +92,7 @@ fun ContactsScreen(
             }
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(contacts) { c ->
-                    ContactCard(c, onClick = { onOpenChat(c.deviceId, c.label) })
+                    ContactCard(c, onClick = { onOpenChat(c.peerDeviceId, c.peerLabel) })
                 }
                 item { Spacer(Modifier.height(24.dp)) }
             }
@@ -100,17 +101,17 @@ fun ContactsScreen(
 }
 
 @Composable
-private fun ContactCard(c: ContactApi.Contact, onClick: () -> Unit) {
+private fun ContactCard(c: ContactEntry, onClick: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surface,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text(c.label, style = MaterialTheme.typography.titleMedium)
+            Text(c.peerLabel, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
             Text(
-                c.deviceId,
+                c.peerDeviceId,
                 style = MaterialTheme.typography.bodyMedium,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
