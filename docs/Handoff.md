@@ -1,6 +1,4 @@
-cd ~/umoja-secure && python3 << 'PYEOF'
-path = "docs/Handoff.md"
-content = """# Umoja Secure — Handoff
+# Umoja Secure — Handoff
 
 Last updated: 2026-10-13
 Purpose: Enable a new AI agent or developer session to pick up the project
@@ -75,38 +73,6 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts via ContactsApi.kt
 - Transport mode toggle: TransportConfig.useTor (currently false)
 
-### Git tags (chronological)
-
-- v0.1-docs-frozen
-- v0.3-backend-skeleton
-- v0.4-devices-migration
-- v0.5-enrollment
-- v0.6-auth
-- v0.7-prekeys
-- v0.8-envelopes
-- v0.9-websocket
-- v0.10-admin
-- v0.11-docker
-- v0.12-redaction-audit
-- v0.13-android-scaffold
-- v0.14-app-shape
-- v0.15-device-identity
-- v0.16-enrollment-flow
-- v0.17-authentication
-- v0.18-prekeys
-- v0.19-compliance
-- v0.20-libsignal-deps
-- v0.21-libsignal-smoke
-- v0.22-websocket
-- v0.23-signal-prekeys
-- v0.24-x3dh-inprocess
-- v0.25-kyber-backend
-- v0.26-kyber-client
-- v0.27-persistent-store
-- v0.28-reactive-chat
-- v0.29-contact-complete
-- v0.30-contacts-complete
-
 ---
 
 ## 3. What was just done (this session)
@@ -124,8 +90,8 @@ Contact authorization enforcement — complete end to end.
 - Client: transport/ContactsApi.kt (canonical), ContactsScreen.kt wired
   to GET /me/contacts
 - Deleted orphaned ContactApi.kt (called nonexistent /contacts)
-- Lint: fixed == to ===, unused req param; added ESLINT_USE_FLAT_CONFIG=false
-  to lint script
+- Lint: fixed == to ===, unused req param; added
+  ESLINT_USE_FLAT_CONFIG=false to lint script
 
 Transport config cleanly separated.
 
@@ -186,3 +152,65 @@ in backend/) instead of Docker during active backend iteration.
 ## 6. Development environment
 
 ### Repo layout
+
+    umoja-secure/
+      backend/              Fastify + PostgreSQL
+      android/              Kotlin + Compose app
+      docs/                 ADRs, specs, this Handoff
+      infra/                docker, tor
+      UMOJA-SECURE-BUILD-MASTER.md
+      docker-compose.yml
+      README.md
+
+### Start of session
+
+    # Docker Desktop must be running.
+    cd ~/umoja-secure
+    docker compose up -d
+
+    # Emulator (one or two).
+    $HOME/Library/Android/sdk/emulator/emulator -avd Pixel_9 &
+    $HOME/Library/Android/sdk/emulator/emulator -avd Pixel_9_API35_B -memory 1535 &
+
+    # Reverse ports so the emulator can reach the Mac.
+    $HOME/Library/Android/sdk/platform-tools/adb -s emulator-5554 reverse tcp:8080 tcp:8080
+    $HOME/Library/Android/sdk/platform-tools/adb -s emulator-5554 reverse tcp:9050 tcp:9050
+
+### Backend iteration
+
+    cd ~/umoja-secure/backend
+    npm run dev              # dev mode, auto-reloads
+    npm test
+    npm run typecheck
+    npm run lint
+    npm run migrate
+
+After backend changes that need to ship to Docker:
+
+    cd ~/umoja-secure
+    docker compose up -d --build backend
+
+### Android iteration
+
+    cd ~/umoja-secure/android
+    ./gradlew installDebug
+    ./gradlew connectedAndroidTest
+
+### Logcat
+
+    $HOME/Library/Android/sdk/platform-tools/adb -s emulator-5554 logcat -c
+    # tap in the app
+    $HOME/Library/Android/sdk/platform-tools/adb -s emulator-5554 logcat -d | grep -iE "UmojaHttp|UmojaEnroll|okhttp|contacts|cleartext" | tail -40
+
+---
+
+## 7. Conventions
+
+- One task per session. Do not mix unrelated work.
+- Commit every session. Tag after each meaningful milestone.
+- Update this Handoff at the end of every session — bump the date, add
+  the new tag, rewrite Section 3, re-order Section 5.
+- For file writes, prefer Python heredocs over cat > file << EOF.
+  Long bash heredocs fragment during paste and leave half-written files.
+- When debugging, log the exception before swallowing it. Silent catch
+  blocks have cost hours on this project.
