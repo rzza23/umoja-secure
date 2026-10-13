@@ -6,6 +6,8 @@ import android.util.Log
 import org.json.JSONObject
 import com.umoja.secure.crypto.PersistentSignalProtocolStore
 import com.umoja.secure.storage.SecureStorage
+import com.umoja.secure.storage.local.MessageStatus
+import com.umoja.secure.storage.local.MessageStore
 import com.umoja.secure.transport.EnvelopeApi
 import com.umoja.secure.transport.EnvelopeApiException
 import com.umoja.secure.transport.HttpClient
@@ -141,6 +143,17 @@ class MessagingService(private val context: Context) {
             val wasPreKey = ciphertext.type == CiphertextMessage.PREKEY_TYPE
             Log.d(TAG, "sent envelope ${submitResponse.envelopeId} (prekey=$wasPreKey) to $peerDeviceId")
 
+            try {
+                MessageStore(context).insertOutgoing(
+                    peerDeviceId = peerDeviceId,
+                    plaintext = plaintext,
+                    envelopeId = submitResponse.envelopeId,
+                    status = MessageStatus.SENT,
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "failed to persist outgoing message", e)
+            }
+
             SendOutcome.Success(submitResponse.envelopeId, wasPreKey)
         } catch (e: Exception) {
             Log.e(TAG, "sendMessage unexpected", e)
@@ -186,11 +199,25 @@ class MessagingService(private val context: Context) {
 
                     envelopeApi.ack(item.envelopeId, sessionToken)
 
+                    val text = String(plaintext, Charsets.UTF_8)
+                    try {
+                        val store = MessageStore(context)
+                        if (!store.hasEnvelope(item.envelopeId)) {
+                            store.insertIncoming(
+                                peerDeviceId = item.senderDeviceId,
+                                plaintext = text,
+                                envelopeId = item.envelopeId,
+                            )
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "failed to persist polled message", e)
+                    }
+
                     messages.add(
                         ReceivedMessage(
                             envelopeId = item.envelopeId,
                             senderDeviceId = item.senderDeviceId,
-                            plaintext = String(plaintext, Charsets.UTF_8),
+                            plaintext = text,
                         ),
                     )
                 } catch (e: Exception) {
@@ -237,10 +264,24 @@ class MessagingService(private val context: Context) {
                     }
                 }
 
+                val text = String(plaintext, Charsets.UTF_8)
+                try {
+                    val store = MessageStore(context)
+                    if (!store.hasEnvelope(envelopeId)) {
+                        store.insertIncoming(
+                            peerDeviceId = senderDeviceId,
+                            plaintext = text,
+                            envelopeId = envelopeId,
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "failed to persist incoming message", e)
+                }
+
                 ReceivedMessage(
                     envelopeId = envelopeId,
                     senderDeviceId = senderDeviceId,
-                    plaintext = String(plaintext, Charsets.UTF_8),
+                    plaintext = text,
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "decryptWebSocketFrame failed", e)
