@@ -1,5 +1,6 @@
 package com.umoja.secure.ui.chat
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +49,10 @@ fun ChatScreen(
     onBack: () -> Unit,
     viewModel: ChatViewModel,
 ) {
+    // System back (gesture / hardware) should close the chat instead of
+    // popping the whole activity.
+    BackHandler(enabled = true) { onBack() }
+
     var input by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
     var sending by remember { mutableStateOf(false) }
