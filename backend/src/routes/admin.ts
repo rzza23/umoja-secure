@@ -5,7 +5,7 @@ import {
   ContactError,
   authorizeContact,
   revokeContact,
-  listContactsForOrg,
+  listAllContacts,
 } from '../authorization/contacts.js';
 import {
   createEnrollmentToken,
@@ -181,7 +181,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/admin/contacts', { preHandler: requireAdmin }, async (req, reply) => {
     const actor = actorOf(req);
-    const contacts = await listContactsForOrg(actor.org_id);
+    const contacts = await listAllContacts(actor.org_id);
     return reply.send({ contacts });
   });
 

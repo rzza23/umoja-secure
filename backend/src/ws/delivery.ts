@@ -1,4 +1,5 @@
 import { pool } from '../db/client.js';
+import { isContactAuthorizedPool } from '../authorization/contacts.js';
 import { logger } from '../observability/logging.js';
 import { registry } from './registry.js';
 
@@ -19,6 +20,21 @@ export async function tryPushEnvelope(envelope_id: string): Promise<boolean> {
   if (row.status !== 'queued') return false;
 
   const recipient_id = row.recipient_device_id as string;
+  const sender_id = row.sender_device_id as string;
+
+  // Defense in depth: re-check contact authorization before delivering
+  // over WebSocket. The envelope was authorized at submit time; this
+  // catches revocations that happened while the envelope was queued.
+  const authorized = await isContactAuthorizedPool(sender_id, recipient_id);
+  if (!authorized) {
+    await pool.query(
+      `UPDATE envelopes SET status = 'expired', dead_reason = 'contact_revoked'
+       WHERE envelope_id = $1 AND status = 'queued'`,
+      [envelope_id],
+    );
+    return false;
+  }
+
   if (!registry.isConnected(recipient_id)) return false;
 
   const sent = registry.sendToDevice(recipient_id, {

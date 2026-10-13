@@ -57,11 +57,12 @@ export async function submitEnvelope(input: SubmitInput): Promise<SubmitResult> 
 
     if (input.sender_device_id !== input.recipient_device_id) {
       const authorized = await isContactAuthorized(
+        tx,
         input.sender_device_id,
         input.recipient_device_id,
       );
       if (!authorized) {
-        throw new EnvelopeError('not_authorized_contact', 403);
+        throw new EnvelopeError('contact_not_authorized', 403);
       }
     }
 

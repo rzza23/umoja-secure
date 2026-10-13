@@ -18,7 +18,7 @@ interface AuthFrame {
 export const wsRoutes: FastifyPluginAsync = async (app) => {
   await app.register(websocket);
 
-  app.get('/ws', { websocket: true }, (socket: WebSocket, req: FastifyRequest) => {
+  app.get('/ws', { websocket: true }, (socket: WebSocket, _req: FastifyRequest) => {
     let conn: Connection | null = null;
     let authed = false;
     let revalidateTimer: NodeJS.Timeout | null = null;

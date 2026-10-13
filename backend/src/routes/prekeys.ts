@@ -78,8 +78,6 @@ export const prekeyRoutes: FastifyPluginAsync = async (app) => {
       const params = z.object({ device_id: z.string().uuid() }).safeParse(req.params);
       if (!params.success) return reply.code(400).send({ error: 'invalid_request' });
 
-      // TODO TASK-P1-007: add contact authorization check before serving peer bundle
-
       const bundle = await fetchPreKeyBundle(
         req.device.device_id,
         params.data.device_id,

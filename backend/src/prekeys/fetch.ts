@@ -19,17 +19,18 @@ export async function fetchPreKeyBundle(
   requester_device_id: string,
   target_device_id: string,
 ): Promise<PreKeyBundleResponse | null> {
-  // A device fetching its own bundle (for client-side status display) is
-  // allowed. Otherwise, contact authorization is required.
-  if (requester_device_id !== target_device_id) {
-    const authorized = await isContactAuthorized(
-      requester_device_id,
-      target_device_id,
-    );
-    if (!authorized) return null;
-  }
-
   return withTransaction(async (tx) => {
+    // A device fetching its own bundle (for client-side status display) is
+    // allowed. Otherwise, contact authorization is required.
+    if (requester_device_id !== target_device_id) {
+      const authorized = await isContactAuthorized(
+        tx,
+        requester_device_id,
+        target_device_id,
+      );
+      if (!authorized) return null;
+    }
+
     const dev = await tx.query(
       `SELECT status FROM devices WHERE device_id = $1`,
       [target_device_id],
@@ -50,7 +51,7 @@ export async function fetchPreKeyBundle(
     }
     const bundle = bundleRes.rows[0];
 
-    if (bundle.kyber_prekey_id == null) {
+    if (bundle.kyber_prekey_id === null) {
       // Device has not uploaded Kyber prekeys yet; can't build a PQXDH bundle.
       return null;
     }

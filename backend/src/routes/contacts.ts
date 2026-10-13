@@ -12,11 +12,14 @@ import { listContactsForDevice } from '../authorization/contacts.js';
 export const contactsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/contacts', { preHandler: requireSession() }, async (req, reply) => {
     if (!req.device) return reply.code(401).send({ error: 'unauthorized' });
-    const contacts = await listContactsForDevice(req.device.device_id);
+    const contacts = await listContactsForDevice(
+      req.device.org_id,
+      req.device.device_id,
+    );
     return reply.send({
       contacts: contacts.map((c) => ({
-        device_id: c.contact_device_id,
-        label: c.contact_label,
+        peer_device_id: c.peer_device_id,
+        peer_label: c.peer_label,
         verification_level: c.verification_level,
         authorized_at: c.authorized_at,
       })),
