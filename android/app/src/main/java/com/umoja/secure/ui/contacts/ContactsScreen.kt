@@ -1,5 +1,6 @@
 package com.umoja.secure.ui.contacts
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,7 +36,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 @Composable
-fun ContactsScreen(modifier: Modifier = Modifier) {
+fun ContactsScreen(
+    onOpenChat: (peerDeviceId: String, peerLabel: String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -86,7 +90,9 @@ fun ContactsScreen(modifier: Modifier = Modifier) {
                 )
             }
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(contacts) { c -> ContactCard(c) }
+                items(contacts) { c ->
+                    ContactCard(c, onClick = { onOpenChat(c.deviceId, c.label) })
+                }
                 item { Spacer(Modifier.height(24.dp)) }
             }
         }
@@ -94,11 +100,11 @@ fun ContactsScreen(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ContactCard(c: ContactApi.Contact) {
+private fun ContactCard(c: ContactApi.Contact, onClick: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
     ) {
         Column(Modifier.padding(16.dp)) {
             Text(c.label, style = MaterialTheme.typography.titleMedium)

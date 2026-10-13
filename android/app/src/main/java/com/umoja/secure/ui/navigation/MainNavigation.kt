@@ -18,6 +18,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import com.umoja.secure.ui.chat.ChatScreen
+import com.umoja.secure.ui.chat.ChatViewModel
 import com.umoja.secure.ui.contacts.ContactsScreen
 import com.umoja.secure.ui.conversations.ConversationsScreen
 import com.umoja.secure.ui.settings.SettingsScreen
@@ -28,6 +31,8 @@ enum class Tab(val label: String, val icon: ImageVector) {
     Settings("Settings", Icons.Filled.Settings),
 }
 
+private data class OpenChat(val peerDeviceId: String, val peerLabel: String)
+
 @Composable
 fun MainNavigation(
     onLogout: () -> Unit,
@@ -35,6 +40,22 @@ fun MainNavigation(
     onOpenDiagnostics: () -> Unit,
 ) {
     var selected by remember { mutableStateOf(Tab.Conversations) }
+    var openChat by remember { mutableStateOf<OpenChat?>(null) }
+
+    val context = LocalContext.current
+    val chatViewModel = remember { ChatViewModel(context) }
+
+    // If a chat is open, show it full-screen instead of the tabbed shell.
+    val activeChat = openChat
+    if (activeChat != null) {
+        ChatScreen(
+            peerDeviceId = activeChat.peerDeviceId,
+            peerLabel = activeChat.peerLabel,
+            onBack = { openChat = null },
+            viewModel = chatViewModel,
+        )
+        return
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -53,8 +74,14 @@ fun MainNavigation(
     ) { innerPadding ->
         val contentModifier = Modifier.padding(innerPadding)
         when (selected) {
-            Tab.Conversations -> ConversationsScreen(contentModifier)
-            Tab.Contacts -> ContactsScreen(contentModifier)
+            Tab.Conversations -> ConversationsScreen(
+                onOpenChat = { id, label -> openChat = OpenChat(id, label) },
+                modifier = contentModifier,
+            )
+            Tab.Contacts -> ContactsScreen(
+                onOpenChat = { id, label -> openChat = OpenChat(id, label) },
+                modifier = contentModifier,
+            )
             Tab.Settings -> SettingsScreen(
                 onLogout = onLogout,
                 onOpenAdmin = onOpenAdmin,
