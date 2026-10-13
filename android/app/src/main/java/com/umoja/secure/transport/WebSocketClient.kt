@@ -71,7 +71,7 @@ class WebSocketClient(
 
     private fun buildClient(): OkHttpClient {
         val builder = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(90, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .pingInterval(0, TimeUnit.SECONDS) // server drives heartbeats
