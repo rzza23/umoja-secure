@@ -44,6 +44,7 @@ import com.umoja.secure.transport.EnrollmentException
 import com.umoja.secure.transport.EnrollmentRequest
 import com.umoja.secure.transport.HttpClient
 import com.umoja.secure.transport.WebSocketClient
+import com.umoja.secure.ui.admin.AdminScreen
 import com.umoja.secure.ui.theme.UmojaSecureTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -55,8 +56,16 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             UmojaSecureTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    HomeScreen(modifier = Modifier.padding(innerPadding))
+                var showAdmin by remember { mutableStateOf(false) }
+                if (showAdmin) {
+                    AdminScreen(onBack = { showAdmin = false })
+                } else {
+                    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                        HomeScreen(
+                            onOpenAdmin = { showAdmin = true },
+                            modifier = Modifier.padding(innerPadding),
+                        )
+                    }
                 }
             }
         }
@@ -69,7 +78,10 @@ private sealed class EnrollUiOutcome {
 }
 
 @Composable
-fun HomeScreen(modifier: Modifier = Modifier) {
+fun HomeScreen(
+    onOpenAdmin: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -105,10 +117,20 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     var tokenInput by remember { mutableStateOf("") }
     var labelInput by remember { mutableStateOf("Android device") }
 
+    var role by remember { mutableStateOf<String?>(null) }
+
     LaunchedEffect(Unit) {
         val storage = SecureStorage(context)
         deviceId = storage.get("device_id")
         sessionExpiresAt = storage.get("session_expires_at")
+        role = storage.get("session_role") ?: storage.get("role")
+    }
+
+    // Re-read role whenever the session changes. Makes the admin button
+    // appear immediately after an admin authenticates.
+    LaunchedEffect(sessionExpiresAt) {
+        val storage = SecureStorage(context)
+        role = storage.get("session_role")
     }
 
     Column(
@@ -184,6 +206,8 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             else -> AuthenticatedPanel(
                 deviceId = deviceId!!,
                 expiresAt = sessionExpiresAt!!,
+                role = role,
+                onOpenAdmin = onOpenAdmin,
                 prekeyStatus = prekeyStatusText,
                 wsState = wsState,
                 envelopesReceived = envelopesReceived,
@@ -372,6 +396,8 @@ private fun AuthenticatePanel(
 private fun AuthenticatedPanel(
     deviceId: String,
     expiresAt: String,
+    role: String?,
+    onOpenAdmin: () -> Unit,
     prekeyStatus: String?,
     wsState: WebSocketClient.State,
     envelopesReceived: Int,
@@ -393,6 +419,12 @@ private fun AuthenticatedPanel(
         style = MaterialTheme.typography.titleMedium,
         color = MaterialTheme.colorScheme.primary,
     )
+    if (role == "admin" || role == "owner") {
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(onClick = onOpenAdmin, enabled = !isBusy) {
+            Text("Open admin panel")
+        }
+    }
     Spacer(modifier = Modifier.height(8.dp))
     Text(
         text = "Device ID: $deviceId",
