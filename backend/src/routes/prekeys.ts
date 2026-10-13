@@ -80,7 +80,10 @@ export const prekeyRoutes: FastifyPluginAsync = async (app) => {
 
       // TODO TASK-P1-007: add contact authorization check before serving peer bundle
 
-      const bundle = await fetchPreKeyBundle(params.data.device_id);
+      const bundle = await fetchPreKeyBundle(
+        req.device.device_id,
+        params.data.device_id,
+      );
       if (!bundle) return reply.code(404).send({ error: 'not_found' });
       return reply.send(bundle);
     },

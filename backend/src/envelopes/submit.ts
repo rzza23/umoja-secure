@@ -1,5 +1,6 @@
 import { withTransaction } from '../db/client.js';
 import { tryPushEnvelope } from '../ws/delivery.js';
+import { isContactAuthorized } from '../authorization/contacts.js';
 
 export class EnvelopeError extends Error {
   constructor(
@@ -52,6 +53,16 @@ export async function submitEnvelope(input: SubmitInput): Promise<SubmitResult> 
     );
     if (recipient.rowCount !== 1 || recipient.rows[0].status !== 'active') {
       throw new EnvelopeError('recipient_unavailable', 404);
+    }
+
+    if (input.sender_device_id !== input.recipient_device_id) {
+      const authorized = await isContactAuthorized(
+        input.sender_device_id,
+        input.recipient_device_id,
+      );
+      if (!authorized) {
+        throw new EnvelopeError('not_authorized_contact', 403);
+      }
     }
 
     const res = await tx.query(

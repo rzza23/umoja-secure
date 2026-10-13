@@ -1,4 +1,5 @@
 import { withTransaction } from '../db/client.js';
+import { isContactAuthorized } from '../authorization/contacts.js';
 
 export interface PreKeyBundleResponse {
   device_id: string;
@@ -15,8 +16,19 @@ export interface PreKeyBundleResponse {
 }
 
 export async function fetchPreKeyBundle(
+  requester_device_id: string,
   target_device_id: string,
 ): Promise<PreKeyBundleResponse | null> {
+  // A device fetching its own bundle (for client-side status display) is
+  // allowed. Otherwise, contact authorization is required.
+  if (requester_device_id !== target_device_id) {
+    const authorized = await isContactAuthorized(
+      requester_device_id,
+      target_device_id,
+    );
+    if (!authorized) return null;
+  }
+
   return withTransaction(async (tx) => {
     const dev = await tx.query(
       `SELECT status FROM devices WHERE device_id = $1`,

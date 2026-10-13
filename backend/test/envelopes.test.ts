@@ -4,6 +4,7 @@ import * as ed from '@noble/ed25519';
 import { buildApp } from '../src/app.js';
 import { pool } from '../src/db/client.js';
 import { canonicalizeChallenge, type Challenge } from '../src/auth/canonical.js';
+import { authorizePair } from './helpers/authorize.js';
 
 const TEST_ORG_ID = '00000000-0000-0000-0000-000000000066';
 
@@ -14,6 +15,8 @@ interface TestDevice {
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 
+const activeDevices: string[] = [];
+
 async function createAuthedDevice(): Promise<TestDevice> {
   const private_key = randomBytes(32);
   const public_key = await ed.getPublicKeyAsync(private_key);
@@ -23,6 +26,13 @@ async function createAuthedDevice(): Promise<TestDevice> {
      VALUES ($1, $2, $3, $4, $5)`,
     [device_id, TEST_ORG_ID, Buffer.from(public_key), 'env-test', 'user'],
   );
+
+  // Auto-authorize this device against every other device in this test file.
+  // Envelope tests always intend the two devices to be contacts.
+  for (const other of activeDevices) {
+    await authorizePair(TEST_ORG_ID, device_id, other);
+  }
+  activeDevices.push(device_id);
   const chRes = await app.inject({
     method: 'POST',
     url: '/auth/challenge',
@@ -65,7 +75,9 @@ describe('envelope queue', () => {
       'DELETE FROM prekey_bundles WHERE device_id IN (SELECT device_id FROM devices WHERE org_id = $1)',
       [TEST_ORG_ID],
     );
+    await pool.query('DELETE FROM contacts WHERE org_id = $1', [TEST_ORG_ID]);
     await pool.query('DELETE FROM devices WHERE org_id = $1', [TEST_ORG_ID]);
+    activeDevices.length = 0;
     await app.close();
     await pool.end();
   });

@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { buildApp } from '../src/app.js';
 import { pool } from '../src/db/client.js';
 import { canonicalizeChallenge, type Challenge } from '../src/auth/canonical.js';
+import { authorizePair } from './helpers/authorize.js';
 import {
   notifyDeviceRevoked,
   startRevocationListener,
@@ -23,6 +24,8 @@ interface TestDevice {
 let app: Awaited<ReturnType<typeof buildApp>>;
 let port: number;
 
+const activeDevices: string[] = [];
+
 async function createAuthedDevice(): Promise<TestDevice> {
   const private_key = randomBytes(32);
   const public_key = await ed.getPublicKeyAsync(private_key);
@@ -32,6 +35,10 @@ async function createAuthedDevice(): Promise<TestDevice> {
      VALUES ($1, $2, $3, $4, $5)`,
     [device_id, TEST_ORG_ID, Buffer.from(public_key), 'ws-test', 'user'],
   );
+  for (const other of activeDevices) {
+    await authorizePair(TEST_ORG_ID, device_id, other);
+  }
+  activeDevices.push(device_id);
   const chRes = await app.inject({
     method: 'POST',
     url: '/auth/challenge',
@@ -124,7 +131,9 @@ describe('WebSocket envelope push', () => {
       'DELETE FROM prekey_bundles WHERE device_id IN (SELECT device_id FROM devices WHERE org_id = $1)',
       [TEST_ORG_ID],
     );
+    await pool.query('DELETE FROM contacts WHERE org_id = $1', [TEST_ORG_ID]);
     await pool.query('DELETE FROM devices WHERE org_id = $1', [TEST_ORG_ID]);
+    activeDevices.length = 0;
     await stopRevocationListener();
     await app.close();
     await pool.end();

@@ -2,6 +2,12 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { requireSession } from '../auth/middleware.js';
 import {
+  ContactError,
+  authorizeContact,
+  revokeContact,
+  listContactsForOrg,
+} from '../authorization/contacts.js';
+import {
   createEnrollmentToken,
   listEnrollmentTokens,
   revokeEnrollmentToken,
@@ -21,6 +27,16 @@ const CreateTokenBody = z.object({
 });
 
 const ReasonBody = z.object({ reason: z.string().min(1).max(256) });
+const CreateContactBody = z.object({
+  owner_device_id: z.string().uuid(),
+  contact_device_id: z.string().uuid(),
+  verification_level: z.enum(['directory', 'qr']).default('directory'),
+});
+
+const ContactPairParams = z.object({
+  owner: z.string().uuid(),
+  contact: z.string().uuid(),
+});
 const IdParams = z.object({ id: z.string().uuid() });
 
 export const adminRoutes: FastifyPluginAsync = async (app) => {
@@ -156,6 +172,59 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         const e = err as { statusCode?: number };
         if (e.statusCode === 404) return reply.code(404).send({ error: 'not_found' });
         if (e.statusCode === 409) return reply.code(409).send({ error: 'invalid_state' });
+        throw err;
+      }
+    },
+  );
+
+  // ---------- Contacts ----------
+
+  app.get('/admin/contacts', { preHandler: requireAdmin }, async (req, reply) => {
+    const actor = actorOf(req);
+    const contacts = await listContactsForOrg(actor.org_id);
+    return reply.send({ contacts });
+  });
+
+  app.post('/admin/contacts', { preHandler: requireAdmin }, async (req, reply) => {
+    const parse = CreateContactBody.safeParse(req.body);
+    if (!parse.success) return reply.code(400).send({ error: 'invalid_request' });
+    try {
+      await authorizeContact(
+        actorOf(req),
+        parse.data.owner_device_id,
+        parse.data.contact_device_id,
+        parse.data.verification_level,
+      );
+      return reply.code(204).send();
+    } catch (err) {
+      if (err instanceof ContactError) {
+        return reply.code(err.statusCode).send({ error: err.code });
+      }
+      throw err;
+    }
+  });
+
+  app.post(
+    '/admin/contacts/:owner/:contact/revoke',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      const params = ContactPairParams.safeParse(req.params);
+      const body = ReasonBody.safeParse(req.body);
+      if (!params.success || !body.success) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      try {
+        await revokeContact(
+          actorOf(req),
+          params.data.owner,
+          params.data.contact,
+          body.data.reason,
+        );
+        return reply.code(204).send();
+      } catch (err) {
+        if (err instanceof ContactError) {
+          return reply.code(err.statusCode).send({ error: err.code });
+        }
         throw err;
       }
     },

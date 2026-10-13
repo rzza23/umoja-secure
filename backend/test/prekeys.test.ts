@@ -4,6 +4,7 @@ import * as ed from '@noble/ed25519';
 import { buildApp } from '../src/app.js';
 import { pool } from '../src/db/client.js';
 import { canonicalizeChallenge, type Challenge } from '../src/auth/canonical.js';
+import { authorizePair } from './helpers/authorize.js';
 
 const TEST_ORG_ID = '00000000-0000-0000-0000-000000000077';
 
@@ -11,6 +12,8 @@ interface TestDevice {
   device_id: string;
   token: string;
 }
+
+const activeDevices: string[] = [];
 
 async function createAuthedDevice(): Promise<TestDevice> {
   const private_key = randomBytes(32);
@@ -21,6 +24,10 @@ async function createAuthedDevice(): Promise<TestDevice> {
      VALUES ($1, $2, $3, $4, $5)`,
     [device_id, TEST_ORG_ID, Buffer.from(public_key), 'prekey-test', 'user'],
   );
+  for (const other of activeDevices) {
+    await authorizePair(TEST_ORG_ID, device_id, other);
+  }
+  activeDevices.push(device_id);
 
   const app = await buildApp();
   await app.ready();
@@ -87,7 +94,9 @@ describe('prekey directory', () => {
     await pool.query('DELETE FROM one_time_prekeys WHERE device_id IN (SELECT device_id FROM devices WHERE org_id = $1)', [TEST_ORG_ID]);
     await pool.query('DELETE FROM prekey_bundles WHERE device_id IN (SELECT device_id FROM devices WHERE org_id = $1)', [TEST_ORG_ID]);
     await pool.query('DELETE FROM enrollment_tokens WHERE org_id = $1', [TEST_ORG_ID]);
+    await pool.query('DELETE FROM contacts WHERE org_id = $1', [TEST_ORG_ID]);
     await pool.query('DELETE FROM devices WHERE org_id = $1', [TEST_ORG_ID]);
+    activeDevices.length = 0;
     await app.close();
     await pool.end();
   });
