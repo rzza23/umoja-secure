@@ -14,6 +14,9 @@ import com.umoja.secure.transport.HttpClient
 import com.umoja.secure.transport.PreKeyApi
 import com.umoja.secure.transport.PreKeyApiException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import org.signal.libsignal.protocol.IdentityKey
 import org.signal.libsignal.protocol.SessionBuilder
@@ -47,6 +50,18 @@ class MessagingService(private val context: Context) {
 
     companion object {
         private const val TAG = "UmojaMessaging"
+
+        /**
+         * Process-wide counter incremented whenever a message is persisted
+         * (outgoing or incoming). Compose screens collect this to trigger
+         * a re-query of the local message store.
+         */
+        private val _messagesVersion = MutableStateFlow(0L)
+        val messagesVersion: StateFlow<Long> = _messagesVersion.asStateFlow()
+
+        fun notifyMessagesChanged() {
+            _messagesVersion.value = _messagesVersion.value + 1
+        }
     }
 
     sealed class SendOutcome {
@@ -150,6 +165,7 @@ class MessagingService(private val context: Context) {
                     envelopeId = submitResponse.envelopeId,
                     status = MessageStatus.SENT,
                 )
+                notifyMessagesChanged()
             } catch (e: Exception) {
                 Log.w(TAG, "failed to persist outgoing message", e)
             }
@@ -208,6 +224,7 @@ class MessagingService(private val context: Context) {
                                 plaintext = text,
                                 envelopeId = item.envelopeId,
                             )
+                            notifyMessagesChanged()
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "failed to persist polled message", e)
@@ -273,6 +290,7 @@ class MessagingService(private val context: Context) {
                             plaintext = text,
                             envelopeId = envelopeId,
                         )
+                        notifyMessagesChanged()
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "failed to persist incoming message", e)

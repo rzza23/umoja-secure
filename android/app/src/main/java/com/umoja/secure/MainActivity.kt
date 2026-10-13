@@ -40,6 +40,7 @@ import com.umoja.secure.transport.HttpClient
 import com.umoja.secure.ui.admin.AdminScreen
 import com.umoja.secure.ui.diagnostics.DiagnosticsScreen
 import com.umoja.secure.ui.navigation.MainNavigation
+import com.umoja.secure.ui.navigation.Tab
 import com.umoja.secure.ui.theme.UmojaSecureTheme
 import com.umoja.secure.crypto.DeviceIdentity
 import com.umoja.secure.crypto.DeviceKeyManager
@@ -75,6 +76,7 @@ fun AppRoot() {
     var sessionExpiresAt by remember { mutableStateOf<String?>(null) }
     var role by remember { mutableStateOf<String?>(null) }
     var screen by remember { mutableStateOf<AppScreen>(AppScreen.Enrollment) }
+    var selectedTab by remember { mutableStateOf(Tab.Conversations) }
     var envelopesReceived by remember { mutableStateOf(0) }
 
     val wsState by app.webSocketClient.state.collectAsState()
@@ -140,13 +142,21 @@ fun AppRoot() {
                 screen = AppScreen.Enrollment
             },
             onOpenAdmin = if (role == "admin" || role == "owner") {
-                { screen = AppScreen.Admin }
+                {
+                    selectedTab = Tab.Settings
+                    screen = AppScreen.Admin
+                }
             } else null,
             onOpenDiagnostics = { screen = AppScreen.Diagnostics },
+            selectedTab = selectedTab,
+            onSelectTab = { selectedTab = it },
         )
 
         AppScreen.Admin -> AdminScreen(
-            onBack = { screen = AppScreen.Authenticated },
+            onBack = {
+                android.util.Log.d("UmojaNavigation", "Admin Back callback invoked")
+                screen = AppScreen.Authenticated
+            },
         )
 
         AppScreen.Diagnostics -> DiagnosticsScreen(

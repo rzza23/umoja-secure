@@ -38,8 +38,9 @@ fun MainNavigation(
     onLogout: () -> Unit,
     onOpenAdmin: (() -> Unit)?,
     onOpenDiagnostics: () -> Unit,
+    selectedTab: Tab,
+    onSelectTab: (Tab) -> Unit,
 ) {
-    var selected by remember { mutableStateOf(Tab.Conversations) }
     var openChat by remember { mutableStateOf<OpenChat?>(null) }
 
     val context = LocalContext.current
@@ -63,8 +64,8 @@ fun MainNavigation(
             NavigationBar {
                 Tab.entries.forEach { tab ->
                     NavigationBarItem(
-                        selected = selected == tab,
-                        onClick = { selected = tab },
+                        selected = selectedTab == tab,
+                        onClick = { onSelectTab(tab) },
                         icon = { Icon(tab.icon, contentDescription = tab.label) },
                         label = { Text(tab.label) },
                     )
@@ -73,7 +74,7 @@ fun MainNavigation(
         },
     ) { innerPadding ->
         val contentModifier = Modifier.padding(innerPadding)
-        when (selected) {
+        when (selectedTab) {
             Tab.Conversations -> ConversationsScreen(
                 onOpenChat = { id, label -> openChat = OpenChat(id, label) },
                 modifier = contentModifier,

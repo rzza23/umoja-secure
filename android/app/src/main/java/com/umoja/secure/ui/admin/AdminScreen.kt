@@ -1,5 +1,6 @@
 package com.umoja.secure.ui.admin
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +46,9 @@ fun AdminScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    // Make the system back button behave like the on-screen Back button.
+    BackHandler { onBack() }
+
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
@@ -85,7 +89,10 @@ fun AdminScreen(
 
     Column(modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("Back") }
+            TextButton(onClick = {
+                android.util.Log.d("UmojaNavigation", "Admin Back button tapped")
+                onBack()
+            }) { Text("Back") }
             Spacer(Modifier.width(8.dp))
             Text("Admin", style = MaterialTheme.typography.headlineSmall)
         }

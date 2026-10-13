@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.umoja.secure.messaging.MessagingService
 import com.umoja.secure.storage.local.Message
 import com.umoja.secure.storage.local.MessageDirection
 import java.text.SimpleDateFormat
@@ -54,15 +56,23 @@ fun ChatScreen(
     BackHandler(enabled = true) { onBack() }
 
     var input by remember { mutableStateOf("") }
-    var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
     var sending by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
 
     val listState = rememberLazyListState()
 
-    LaunchedEffect(peerDeviceId, messages.size) {
-        viewModel.loadMessages(peerDeviceId)
-        messages = viewModel.currentMessages
+    // Reactive: messages come from the view model's StateFlow.
+    val messages by viewModel.messages.collectAsState()
+
+    // Reactive: re-query whenever any message is persisted anywhere.
+    val messagesVersion by MessagingService.messagesVersion.collectAsState()
+
+    LaunchedEffect(peerDeviceId) {
+        viewModel.observe(peerDeviceId)
+    }
+
+    LaunchedEffect(messagesVersion) {
+        viewModel.refresh()
     }
 
     LaunchedEffect(messages.size) {
@@ -147,7 +157,6 @@ fun ChatScreen(
                             viewModel.send(peerDeviceId, text) { result ->
                                 sending = false
                                 if (result != null) status = "Error: $result"
-                                messages = viewModel.currentMessages
                             }
                         }
                     }),
@@ -164,7 +173,6 @@ fun ChatScreen(
                             viewModel.send(peerDeviceId, text) { result ->
                                 sending = false
                                 if (result != null) status = "Error: $result"
-                                messages = viewModel.currentMessages
                             }
                         }
                     },
