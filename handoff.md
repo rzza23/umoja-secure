@@ -342,8 +342,8 @@ authorized." Future improvement.
 
 ## 5. Immediate next steps (recommended order)
 
-**1. Commit 5 — ADR-PROVISIONING-001 §7 amendment.** Amend the ADR to
-record:
+**1. ADR-PROVISIONING-001 §7 amendment — DONE** (commit `4abcf53`).
+Recorded:
 
 - Flag 2 / KI-014: exception (b). The four reference docs postdate the
   ADR and were authored from the same attestations, so file-level
