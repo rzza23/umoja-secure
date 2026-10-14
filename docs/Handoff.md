@@ -63,7 +63,7 @@ Endpoints:
 
 ### Android client (working E2EE messenger on emulators, over Tor)
 
-- Kotlin + Jetpack Compose, minSdk 30, targetSdk 36
+- Kotlin + Jetpack Compose, minSdk 30, targetSdk 35 (per Build Master §3; the app currently builds against 36 and will be reconciled in a spec update pass)
 - Package: com.umoja.secure
 - Ed25519 device identity in Android Keystore (TEE-backed on real devices,
   BouncyCastle software fallback on emulator)
