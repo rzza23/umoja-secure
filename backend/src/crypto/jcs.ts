@@ -119,9 +119,10 @@ function serialize(value: unknown): string {
   const keys = Object.keys(obj).sort(utf16Compare);
 
   let out = '{';
-  for (let i = 0; i < keys.length; i++) {
-    if (i > 0) out += ',';
-    const key = keys[i];
+  let first = true;
+  for (const key of keys) {
+    if (!first) out += ',';
+    first = false;
     out += JSON.stringify(key);
     out += ':';
     out += serialize(obj[key]);
