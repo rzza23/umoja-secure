@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-14 (Session A — schema done both sides, sign/verify next; KI-010 blocks)
+Last updated: 2026-10-14 (Session A — sign/verify done both sides; KI-010 resolved by option B)
 Purpose: Enable a new AI agent or developer session to pick up the project
 without re-reading the entire chat history.
 
@@ -41,7 +41,7 @@ Authoritative documents (all exist on disk):
 
 - Node.js 24.x, Fastify 5.12.5, PostgreSQL 16
 - Docker-deployable (docker compose up -d --build from repo root)
-- **153 tests passing** (85 pre-existing + 45 JCS + 23 schema)
+- **175 tests passing** (85 pre-existing + 45 JCS + 23 schema + 22 sign/verify)
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -78,7 +78,7 @@ Endpoints:
 - Real-time 1:1 encrypted messaging between two emulators
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs)
-- **86 tests passing** (48 pre-existing + 4 number formatter + 11 JCS + 23 schema)
+- **98 tests passing** (48 pre-existing + 4 number formatter + 11 JCS + 23 schema + 12 sign/verify)
 
 ### Tor (dev)
 
@@ -211,6 +211,48 @@ unchanged: 45/45 tests still pass, cross-check still PASS 38/38.
 **Test counts:** 153 backend (85 pre-existing + 45 JCS + 23 schema),
 86 Android (48 pre-existing + 4 number formatter + 11 JCS + 23 schema).
 
+**Matrix sign/verify — done, both sides.** Protocol per §3.8 exact:
+JCS(wrapper) → SHA-256 of canonical UTF-8 bytes → Ed25519 over the
+32-byte digest → base64url no-pad. The prehash is load-bearing and
+tested.
+
+- `backend/src/crypto/matrix-sign.ts` — `matrixDigest`, `signMatrix`,
+  `verifyMatrix`. Node built-in crypto (KI-010 option B).
+- `backend/src/crypto/matrix-sign.test.ts` — 22 tests, all passing.
+- `android/.../crypto/MatrixSigner.kt` — `object MatrixSigner` with
+  `matrixDigest`, `sign`, `verify`, `publicKeyFromRaw`,
+  `privateKeyFromSeed`. BouncyCastle 1.79 (already a declared dep).
+- `android/.../crypto/MatrixSignerTest.kt` — 12 tests, all passing.
+
+**Cross-language agreement proven:**
+- 6/6 vector signatures byte-identical between TS generator, TS signer,
+  and Kotlin signer.
+- HKDF-derived test key produces the same public key on Node and
+  BouncyCastle (`hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M`), so the
+  same private key signs identically on both sides.
+- Prehash-is-load-bearing test passes on both: a signature over raw
+  canonical bytes (skipping SHA-256) does NOT verify.
+
+**KI-010 resolved by option B.** Node built-in `crypto` on the TS side;
+BouncyCastle on Kotlin. `@noble/ed25519` stays scoped to
+`auth/verify.ts` (challenge-response protocol). Two Ed25519 paths in
+the backend serving two protocols — clean separation, no shared
+dependency surface. See KI-010 for the alternative consolidation path
+if a future session wants to unify.
+
+**Caveats carried:**
+- Kotlin number formatter, canonicalizer, cross-check, and matrix signer
+  use Java platform types in a few places, producing benign Kotlin
+  compiler warnings (`String?` vs `String`, nullable `File?`). Tests
+  pass. Not Session A scope to clean up.
+- `@noble/ed25519` approval status is still undocumented. Not blocking
+  since it's not on the matrix path, but the auth path still relies on
+  it. Worth a §6 review when auth is next touched.
+
+**Updated test counts:** 175 backend (85 pre-existing + 45 JCS + 23
+schema + 22 sign/verify), 98 Android (48 pre-existing + 4 number
+formatter + 11 JCS + 23 schema + 12 sign/verify).
+
 ---
 
 ## 4. Known issues
@@ -265,24 +307,27 @@ Optional cleanup, not Session A: `canonicalJson` is duplicated between
 Every `vitest run` triggers `test/global-setup.ts` → Postgres connection.
 Fix: Docker up, or a conditional in `global-setup.ts`.
 
-### KI-010: `@noble/ed25519` not on Build Master §3 approved list — NOW BLOCKING
-Used in `backend/src/auth/verify.ts`. Build Master §6 requires human
-approval for every dependency, including transitive.
+### KI-010 (RESOLVED by option B): `@noble/ed25519` not on approved list
+Used in `backend/src/auth/verify.ts` for challenge-response verification.
+Build Master §6 requires human approval for every dependency.
 
-**This is now the blocker for Session A's remaining work (sign/verify
-per §3.8).** Three options:
-- **A** — Approve `@noble/ed25519`; use it for both auth and matrix
-  signing. Minimal change if it's already a legitimate dep.
-- **B** — Use Node built-in `crypto` for matrix signing, keep
-  `@noble/ed25519` scoped to auth. Two Ed25519 paths in the backend.
-- **C** — Consolidate on Node built-in, migrate `auth/verify.ts` off
-  `@noble/ed25519`. Larger change, touches auth code, needs its own
-  test pass.
+**Resolved by choosing option B for the matrix path:**
+- Matrix sign/verify on the TS side uses Node built-in `crypto`
+  (`backend/src/crypto/matrix-sign.ts`).
+- Matrix sign/verify on the Kotlin side uses BouncyCastle 1.79,
+  already a declared dep (`MatrixSigner.kt`).
+- `@noble/ed25519` stays scoped to `auth/verify.ts`.
 
-The vector generator already uses Node built-in — that's the
-generator's choice, not a decision about the production path.
+**Consequence:** two Ed25519 code paths in the backend, serving
+two distinct protocols (challenge-response vs matrix signing).
+This is intentional — different protocols, different signing
+rules, no shared code surface to accidentally couple.
 
-**Approval required before any matrix sign/verify code lands.**
+**Not resolved:** whether `@noble/ed25519` was ever formally
+approved for the auth path. It's outside Session A scope, but
+it's a §6 audit item when auth is next touched. If unapproved,
+option C (consolidate on Node built-in for auth too) is the
+likely remedy.
 
 ### KI-011 (RESOLVED): Kotlin canonicalizer corpus test parser
 Resolved by adding test-scope `org.json:json:20240303`. Option A chosen
@@ -309,26 +354,36 @@ currently PASS. See Section 3.
 
 ## 5. Immediate next steps (recommended order)
 
-**1. Sign/verify per §3.8.** JCS(wrapper) → SHA-256 → Ed25519 over the
-   32-byte digest → base64url no-pad. Both sides.
+**1. Signing cross-check harness.** Extend `scripts/jcs-cross-check.sh`
+   to cover signing: TS signs each wrapper vector, Kotlin verifies; and
+   vice versa. The individual suites already prove agreement on the
+   stored vectors — this makes the agreement continuously enforced on
+   every run, not just at development time.
 
-   **BLOCKED by KI-010.** The matrix signing path needs an Ed25519
-   library decision:
-   - TS side: `@noble/ed25519` (already used in `auth/verify.ts` but not
-     confirmed on Build Master §3's approved list) OR Node built-in
-     `crypto`.
-   - Kotlin side: BouncyCastle (already present) or
-     `java.security.Signature("Ed25519")`.
-   - Options: (A) `@noble/ed25519` both/all, contingent on approval;
-     (B) Node built-in on TS, BouncyCastle on Kotlin, `@noble/ed25519`
-     stays scoped to auth; (C) consolidate on Node built-in and migrate
-     `auth/verify.ts` off `@noble/ed25519`.
+   Inputs: the 6 W-series wrappers from
+   `canonical-matrix-test-vectors.json`. Expected: every signature
+   produced by either side verifies on the other.
 
-   The vector generator (`backend/scripts/generate-matrix-vectors.ts`)
-   already uses Node built-in `crypto`. That is the generator's choice,
-   not a decision about the production path.
+**2. QR ceremony (TASK-P1-025).** Device displays QR with three public
+   keys (device auth, messaging identity, wipe-confirmation); admin
+   scans; assigns clearance and permitted contacts; admin app produces
+   the unsigned matrix plus its JCS-canonical hash.
 
-   **Do not start sign/verify until the library is chosen.**
+**3. Offline signing handoff (TASK-P1-033 boundary).** Admin app
+   displays hash + matrix; offline signer re-canonicalizes, confirms
+   hash, displays matrix for human confirmation, signs via
+   `MatrixSigner` (loaded private key from Keystore), returns signature
+   over QR. Admin app attaches the signature and pushes the signed
+   matrix. **The admin app never holds the provisioning private key.**
+
+**4. Client verification and storage (TASK-P1-026 remainder).** Device
+   receives signed matrix; re-canonicalizes wrapper; verifies Ed25519
+   against pinned provisioning public key; enforces
+   `highest_seen_version` (post-enrollment) or inclusive floor
+   (replacement device); populates contacts from
+   `permitted_contacts[]`; stores `highest_seen_version` locally.
+
+**5. Enrollment token `bound_public_key` schema addition.** Per AUTH-SPEC-001 §10.2.
 
    Suggested shape:
    - `backend/src/crypto/jcs-dump.ts` — reads JSON from stdin, writes
@@ -507,7 +562,7 @@ Rebuild after flipping — read at HttpClient construction time.
 - **Two implementations passing their own tests is not interop proof.**
   See KI-012. Cross-check is required.
 - Test count is the quickest pulse check. Current:
-  **153 backend tests**, **86 Android tests**.
+  **175 backend tests**, **98 Android tests**.
 
 ---
 
