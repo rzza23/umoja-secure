@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-14 (Session 0 complete)
+Last updated: 2026-10-14 (Session A — pre-work complete, matrix code not yet started)
 Purpose: Enable a new AI agent or developer session to pick up the project
 without re-reading the entire chat history.
 
@@ -25,7 +25,7 @@ Additional requirements:
 - Calls deferred to Phase 3 (WebRTC + TURN on clearnet)
 - Backend never has plaintext, private keys, or Double Ratchet state
 
-Authoritative documents (all now exist on disk — see §3):
+Authoritative documents (all exist on disk):
 - UMOJA-SECURE-BUILD-MASTER.md (v1.4.2, frozen)
 - docs/US-ADD-001.md, docs/US-MASTER-001.md
 - docs/reference/AUTH-SPEC-001.md, docs/reference/THREAT-MODEL-001.md
@@ -96,54 +96,74 @@ Endpoints:
 
 ---
 
-## 3. What was just done (Session 0)
+## 3. What was just done
 
-Authored the canonical requirements documents. They did not previously
-exist on disk.
+### Session 0 (2026-10-14) — canonical docs authored
 
-**Why this happened.** A machine-wide search confirmed that, of the
-canonical set listed in Build Master §2, only `docs/US-TASK-P1-001.md`
-existed. The other four were referenced everywhere but never written.
-Build Master §0 says the requirements layer wins over the execution layer,
-but the requirements layer was partly aspirational. Session 0 closed that
-gap.
+Authored four requirements-layer documents that did not exist on disk:
 
-**What was authored (2026-10-14):**
+- `docs/architecture/ADR-PROVISIONING-001.md` — commit `91b5c47`, tag
+  `v0.30-adr-provisioning`
+- `docs/reference/THREAT-MODEL-001.md` — commit `692c672`
+- `docs/reference/AUTH-SPEC-001.md` — commit `059fa5e`
+- `docs/US-ADD-001.md` — commit `e505394`
+- `docs/US-MASTER-001.md` — commit `43dbe83`
+- `docs/reference/canonical-matrix-test-vectors.json` — scaffold only,
+  `generated: false`
 
-- `docs/architecture/ADR-PROVISIONING-001.md` — provisioning trust
-  boundaries and authorization matrix. Answers six threat-model
-  questions. Commit `91b5c47`, tag `v0.30-adr-provisioning`.
-- `docs/reference/THREAT-MODEL-001.md` — adversary classes, STRIDE table
-  for provisioning, specific threat resolutions. Commit `692c672`.
-- `docs/reference/AUTH-SPEC-001.md` — device identity, session lifecycle,
-  revocation guarantees, enrollment token authorization. Commit
-  `059fa5e`.
-- `docs/US-ADD-001.md` — approved decisions and parameters. Highest
-  authority per Build Master §0. Commit `e505394`.
-- `docs/US-MASTER-001.md` — governing architecture, threat model summary,
-  phase boundaries. Commit `43dbe83`.
-- `docs/reference/canonical-matrix-test-vectors.json` — **scaffold only.**
-  Vectors authored, outputs null. `generated: false`. This is deliberate
-  and load-bearing: see §4.
+Commit `55ebd13` (handoff) was the tip of Session 0. Tag `v0.31-session-0`.
 
-**Provenance honesty.** These documents were authored, not discovered.
-Each carries a §1 Provenance section saying so. THREAT-MODEL-001 §1 and
-AUTH-SPEC-001 §1 record that they are the project owner's statement of
-the model, formalized — not the output of an external security review.
-The ADR's §7 records that the four files were expected from an earlier
-session but did not exist, and that Q1/Q2/Q4 were cleared by explicit
-owner attestation.
+### Session A pre-work (2026-10-14) — conformance sweep + corpus vendoring
 
-**What this closes.** The ADR §7 residual item — file-level verification
-of Q1/Q4 — is now closed against the newly authored docs:
-- Q1 → THREAT-MODEL-001 §6.1
-- Q2 → AUTH-SPEC-001 §10
-- Q4 → THREAT-MODEL-001 §8
+**Conformance sweep — clean.** Four greps ran against `backend/src` and
+`android/.../secure`. Drift report verdict: no blocking drift. Findings:
 
-**What this does NOT close.** The authored documents were written *after*
-the code they describe was already largely built. Nothing in Session 0
-revisited existing backend or client code for conformance. A conformance
-sweep against the newly authored specs is a Session A pre-task — see §5.
+1. **Existing Ed25519 signing is challenge signing only.** `SessionManager.kt:57`
+   and `WebSocketClient.kt:231` sign `canonicalBytes` (challenge) via
+   `DeviceKeyManager.sign()`. Backend verifies with `@noble/ed25519`. This
+   is a distinct protocol from matrix signing and is internally consistent.
+   **Rule: do not copy challenge signing into matrix signing.** Build
+   Master §3.8 requires SHA-256 prehash for matrices; the challenge
+   protocol does not prehash.
+2. **Two existing canonicalization systems, neither claiming JCS.**
+   `backend/src/auth/canonical.ts` + Kotlin `CanonicalChallenge.kt` (challenge
+   protocol, paired); `canonicalJson` in `audit/log.ts` + `audit/verify.ts`
+   (audit hash chain, duplicated between two files). Neither collides with
+   the forthcoming JCS canonicalizer. **Risk: three encoders will coexist.
+   Name the new one distinctly and comment each.**
+3. **Key-name conflation: empty.** No hits. Clean.
+4. **Client-side revocation: no enforcement.** All hits are reactive UI or
+   WebSocket close-code handling. Server-authoritative per AUTH-SPEC-001
+   §9. Clean.
+
+**Open item from the sweep:** `@noble/ed25519` is in the backend but is not
+on Build Master §3's approved list. Build Master §6 requires human approval
+for any new dependency. **Resolve before writing matrix verification on the
+backend.** It will almost certainly be the library used to verify matrix
+signatures. If approved in an earlier session and just not recorded, say so.
+
+**JCS decision — from-scratch, both sides.** No library. Rationale in ADR
+terms: the Kotlin side must be from-scratch regardless (no trusted RFC 8785
+lib for Android), so the TS side is too — then both are validated against
+the same external ground truth, not one against the other. No dependency
+means no Build Master §6 approval cycle.
+
+**Conformance corpus vendored.** Two sources:
+
+- `docs/reference/rfc8785-number-samples.json` — 24 number-serialization
+  samples from RFC 8785 Appendix B. IEEE 754 hex preserved; expected
+  serialization verbatim. Covers zero/minus-zero, the `1e+21` boundary,
+  round-to-even. NaN and Infinity excluded (not valid JSON).
+- `docs/reference/jcs-conformance/` — the cyberphone corpus
+  (https://github.com/cyberphone/json-canonicalization, Apache 2.0), 6
+  input/output pairs covering Unicode, French accents, weird key ordering,
+  arrays, structures, and scalar values. Byte-exact as upstream; outputs
+  have no trailing newline. `README.md` records provenance and the
+  no-edit contract.
+
+**Committed as `docs: vendor JCS conformance corpus — RFC 8785 App. B
+samples + cyberphone testdata`** (this commit may be immediately before
+the handoff commit you are reading).
 
 ---
 
@@ -151,8 +171,7 @@ sweep against the newly authored specs is a Session A pre-task — see §5.
 
 ### KI-001 (FIXED): OkHttp cannot reach .onion through SOCKS
 
-Fixed in `v0.29-tor-transport` with the Socks5Bridge. See §3 of the
-previous handoff, preserved in git history.
+Fixed in `v0.29-tor-transport` with the Socks5Bridge.
 
 ### KI-002: Backend Docker image goes stale during iteration
 
@@ -173,84 +192,124 @@ Fix: shut down emulator cleanly (`...` menu → Power off) so state is
 saved; omit `-no-snapshot-load` next start. Or accept re-enrollment as a
 dev cost.
 
-### KI-004: Canonical-matrix test vectors are a scaffold, not data
+### KI-004: Canonical-matrix test vectors are still a scaffold
 
 `docs/reference/canonical-matrix-test-vectors.json` has `generated: false`.
-The inputs are authored; the outputs (canonical bytes, SHA-256 digest,
-Ed25519 signature) are `null`. The file's own `stop_condition` field says
-it is not authoritative until `generated: true`.
+Inputs are authored; outputs (canonical bytes, SHA-256 digest, Ed25519
+signature) are `null`. The file's own `stop_condition` field says it is
+not authoritative until `generated: true`.
 
-**Consequence:** no signing code may commit until the generator runs. This
-is a Build Master §3.8 precondition, not a preference. Session A's first
-task after the conformance sweep is to run the generator.
-
-The file also references RFC 8785's published test data, marked
-`TO_BE_IMPORTED_IN_SESSION_A`. Those vectors are external ground truth
-for canonicalizer correctness and must be imported verbatim, not
-hand-authored.
+**Consequence:** no matrix signing code may commit until the generator
+runs. Session A's next step is to write the TS JCS canonicalizer, validate
+it against the vendored corpus, then run it on the wrapper inputs to
+populate the output fields.
 
 ### KI-005: Requirements layer was authored after the code
 
-The four canonical documents were written on 2026-10-14, after most of
-Phase 1's messaging code already existed. The code predates its own spec.
-This does not make the code wrong, but it means no systematic conformance
-check has been done. Treat Session A's pre-task (§5 item 0) as required,
-not optional.
+The four canonical documents were written 2026-10-14, after most of Phase 1's
+messaging code already existed. The code predates its own spec. Session A's
+conformance sweep (see §3) checked the highest-risk surfaces and found no
+blocking drift, but the sweep was narrow — four greps. A broader conformance
+pass is possible later if the codebase churns significantly.
 
 ### KI-006: USER-ONBOARDING.md still missing
 
 `docs/reference/USER-ONBOARDING.md` is referenced by Build Master §2 and
-§3.4 (cryptographic-erasure disclaimer) but does not exist. Not a Session
-A blocker. Flag for a follow-up Session 0b if it starts blocking work.
+§3.4 but does not exist. Not a blocker. Flag for a follow-up.
+
+### KI-007: Kotlin number serialization will need real work
+
+The TypeScript JCS canonicalizer gets ECMAScript number formatting for free
+via `JSON.stringify(Number)`. **Kotlin does not.** Java's `Double.toString()`
+differs from ECMAScript in boundary cases — most visibly at the `1e21`
+threshold and in exponential-notation formatting (`1e+21` vs `1.0E21`).
+
+The Kotlin canonicalizer must implement ES6's number-to-string rules
+explicitly. This is a *reformatting* problem (Java already produces shortest
+round-tripping doubles via its internal algorithm), not a Ryū/Grisu
+implementation problem. Expect 60–100 lines of Kotlin, validated against
+`docs/reference/rfc8785-number-samples.json`.
+
+**This is the single most likely line to silently diverge between the two
+implementations.** The RFC 8785 Appendix B samples exist specifically to
+catch it.
+
+### KI-008: Three canonicalizers will coexist
+
+After Session A, the codebase has three distinct canonical encoders:
+
+| Encoder | Serves | Prehash? |
+|---|---|---|
+| `canonicalizeChallenge` (TS) / `CanonicalChallenge.encode` (KT) | challenge-response signing | no |
+| `canonicalJson` (TS, duplicated) | audit hash chain | no |
+| (new) JCS canonicalizer (TS + KT) | matrix signing | **yes** (SHA-256) |
+
+Do not "unify" them. They serve different protocols with different signing
+rules. Name the new one distinctly (`jcsCanonicalize` or similar) and add a
+one-line comment in each pointing to the protocol it serves.
+
+Optional cleanup, not Session A: `canonicalJson` is duplicated between
+`backend/src/audit/log.ts` and `backend/src/audit/verify.ts`. If one drifts,
+the audit chain silently breaks. Factor into a shared helper in a later
+session.
 
 ---
 
 ## 5. Immediate next steps (recommended order)
 
-**0. Conformance sweep (Session A pre-task).** Before writing any new
-   code, verify that existing backend and client code matches the newly
-   authored specs. Specific greps:
-   - Any Ed25519 signing path that signs canonical bytes directly
-     instead of the SHA-256 digest (Build Master §3.8 — the §3.6
-     correction in v1.4.2 makes this the specified protocol).
-   - Any place `pub_device_auth_key` and `pub_messaging_identity_key`
-     are stored in the same column or conflated.
-   - Any client-side revocation enforcement in the delivery path
-     (should be none — enforcement is server-authoritative per
-     AUTH-SPEC-001 §9).
-   - Any JCS-like canonicalization that predates the wrapper convention.
-   Report drift; do not silently fix. If drift is found in security-
-   relevant code, STOP and escalate.
+**1. Write the TypeScript JCS canonicalizer (from scratch).** Location
+   suggestion: `backend/src/crypto/jcs.ts`. Exports a single
+   `jcsCanonicalize(value: unknown): Buffer` or `string`.
 
-**1. Session A — TASK-P1-025 + TASK-P1-026.** Admin provisioning tool
-   and authorization matrix. Plan is in ADR-PROVISIONING-001 §6, eleven
-   lines. The first line is the §8 file-verification step, already done.
-   After the conformance sweep, the sequence is:
-   - Generate test vectors (flip `generated: true` in
-     canonical-matrix-test-vectors.json) — **before any signing code**.
-   - Land the matrix schema (TS type + Kotlin data class).
-   - Implement JCS canonicalization on both sides; verify byte-identical
-     output for every vector.
-   - Implement sign/verify per §3.8.
-   - QR ceremony, offline signing handoff (TASK-P1-033 boundary), client
-     verification and storage, `bound_public_key` schema addition,
-     tests.
+   **Then, immediately, before anything else:** run it against
+   `docs/reference/rfc8785-number-samples.json` (24 samples) and
+   `docs/reference/jcs-conformance/input/` + `output/` (6 pairs). A single
+   divergence is a failure — do not "fix" the vector, fix the canonicalizer.
 
-**2. Emergency lock (TASK-P1-021a).**
+   Design notes for the implementation:
+   - `JSON.stringify(number)` on the TS side already produces ES6-compliant
+     output. Do not reimplement number formatting; use `JSON.stringify`.
+   - Sort object keys by UTF-16 code unit order (`Array.prototype.sort()`
+     default) — this is not the same as locale-aware sort.
+   - Reject inputs containing `undefined`, `function`, or `Symbol` values.
+   - Reject duplicate keys where detectable (JSON.parse with a reviver
+     cannot see duplicates; consider a preprocessing check if the input is
+     a string, or document the limitation for parsed objects).
+   - Output UTF-8. No BOM. No trailing newline.
 
-**3. Duress wipe (TASK-P1-021b).**
+**2. Write the Kotlin JCS canonicalizer (from scratch).** Location
+   suggestion: `android/.../crypto/JcsCanonicalizer.kt`. Same tests, same
+   corpus, byte-identical output.
 
-**4. Signing-key custody (TASK-P1-029) and offline signer (TASK-P1-033).**
-   Both depend on Session A's matrix schema landing first.
+   The tricky part is KI-007 (number serialization). Start by writing the
+   number formatter against the 24 RFC samples in isolation, before
+   integrating with the rest of the canonicalizer.
 
-**5. Organization recovery key (TASK-P1-035).**
+**3. Populate the matrix test vectors.** Run the TS canonicalizer on each
+   `input_wrapper` in `canonical-matrix-test-vectors.json`. Fill the
+   `null` output fields. Sign with the test-only key derived per the file's
+   `test_only_key_derivation` block. Flip `generated: true`.
 
-**6. Hardware-backed Ed25519 verification on real Pixel/GrapheneOS
-   (TASK-P1-034).** Depends on physical hardware. Cannot be started in
-   emulator.
+**4. Matrix schema.** Single source of truth — TS type in `backend/src/`,
+   Kotlin data class in `android/.../crypto/`. Fields per
+   `docs/architecture/ADR-PROVISIONING-001.md` §4.
 
-**7. Hardening.** SBOM, Android redaction audit, penetration test,
-   independent review.
+**5. Sign/verify per §3.8.** JCS(wrapper) → SHA-256 → Ed25519 over digest
+   → base64url no-pad. Both sides.
+
+**6. QR ceremony, offline signing handoff, client verification, storage,
+   `bound_public_key` schema addition, tests.** See ADR §6.
+
+**After Session A, in order:**
+
+7. Emergency lock (TASK-P1-021a).
+8. Duress wipe (TASK-P1-021b).
+9. Signing-key custody (TASK-P1-029), offline signer (TASK-P1-033),
+   recovery key (TASK-P1-035).
+10. Hardware-backed Ed25519 verification (TASK-P1-034). Requires physical
+    hardware.
+11. Hardening: SBOM, Android redaction audit, penetration test, independent
+    review.
 
 ---
 
@@ -264,8 +323,15 @@ A blocker. Flag for a follow-up Session 0b if it starts blocking work.
       docs/                 ADRs, specs, this Handoff
         architecture/       ADR-PROVISIONING-001.md
         ops/                TOR-ONION.md
-        reference/          AUTH-SPEC-001.md, THREAT-MODEL-001.md,
-                            canonical-matrix-test-vectors.json
+        reference/
+          AUTH-SPEC-001.md
+          THREAT-MODEL-001.md
+          canonical-matrix-test-vectors.json   (scaffold, generated:false)
+          rfc8785-number-samples.json          (24 samples)
+          jcs-conformance/                     (cyberphone corpus, 6 pairs)
+            input/
+            output/
+            README.md
       infra/                docker, tor
       UMOJA-SECURE-BUILD-MASTER.md
       docker-compose.yml
@@ -336,96 +402,92 @@ Rebuild after flipping — the flag is read at HttpClient construction time.
 ## 7. Conventions
 
 - One task per session. Do not mix unrelated work.
-- Commit every session. Tag after each meaningful milestone.
-- Update this Handoff at the end of every session — bump the date, add
-  the new tag, rewrite Section 3, re-order Section 5.
-- For file writes, prefer Python heredocs over `cat > file << EOF`.
-  Long bash heredocs fragment during paste and leave half-written files.
-  **Correction (Session 0):** when the file content is itself long,
-  prefer a text editor (`open -e <path>` on macOS, or `nano`) over a
-  terminal heredoc. Terminal heredocs work for short files; they fragment
-  for anything over ~150 lines.
+- **Every commit block ends with `git push origin main`.** If a tag is
+  created, follow with `git push origin --tags`.
+- Update this Handoff at the end of every session — bump the date, add the
+  new tag, rewrite Section 3, re-order Section 5.
+- For file writes, prefer a text editor (`open -e <path>` on macOS, or
+  `nano`) over a terminal heredoc for anything over ~150 lines. Terminal
+  heredocs fragment during paste.
 - Placeholder markers like `<paste content here>` are never to be typed
   literally. If a file ends up suspiciously short, that's the tell.
 - When debugging, log the exception before swallowing it. Silent catch
   blocks have cost hours on this project.
 - For libsignal, don't hold native handles across scope boundaries in
-  tests. Serialize to bytes if state must outlive the store that created
-  it.
+  tests. Serialize to bytes if state must outlive the store that created it.
 - Test count and file count are the quickest pulse check. Current:
   85 backend tests, 48 Android tests.
 
 ---
 
-## 8. References for the provisioning session
-
-The next session picks up TASK-P1-025 + TASK-P1-026 (Session A). Read
-these before writing any code — they now all exist on disk.
+## 8. References for the matrix implementation session
 
 ### Authoritative design
 
-- `docs/architecture/ADR-PROVISIONING-001.md` — the Session A plan.
-  §2 answers the six threat-model questions. §3 is the signing protocol.
-  §4 is the matrix schema. §5 is the test plan. §6 is the eleven-line
-  implementation plan.
+- `docs/architecture/ADR-PROVISIONING-001.md` — §2 (threat-model answers),
+  §3 (signing protocol), §4 (matrix schema), §5 (test plan), §6 (11-line
+  plan).
 - `docs/reference/THREAT-MODEL-001.md` §5 (STRIDE), §6 (specific
   resolutions), §7 (trust boundaries), §8 (revocation enforcement).
-- `docs/reference/AUTH-SPEC-001.md` §5 (identity generation), §6
-  (sessions), §9 (revocation), §10 (enrollment tokens — schema and
-  consumption protocol).
-- `docs/US-ADD-001.md` §7 (cryptographic parameters — JCS, SHA-256,
-  Ed25519, versioning).
-- `UMOJA-SECURE-BUILD-MASTER.md` §3.6, §3.7, §3.8 — the frozen source
-  of truth for rotation, anti-rollback, and canonicalization.
+- `docs/reference/AUTH-SPEC-001.md` §5 (identity), §6 (sessions), §9
+  (revocation), §10 (enrollment tokens).
+- `docs/US-ADD-001.md` §7 (JCS, SHA-256, Ed25519, versioning).
+- `UMOJA-SECURE-BUILD-MASTER.md` §3.6, §3.7, §3.8.
+
+### Conformance data
+
+- `docs/reference/rfc8785-number-samples.json` — 24 samples, RFC 8785 App. B.
+- `docs/reference/jcs-conformance/` — 6 input/output pairs from cyberphone.
+- `docs/reference/canonical-matrix-test-vectors.json` — the Umoja wrapper
+  vectors. Currently a scaffold; `generated: false`.
 
 ### Current code shape (minimum viable reading set)
 
 Backend:
-- `backend/src/routes/admin.ts` — admin route surface, role middleware
+- `backend/src/routes/admin.ts` — admin route surface
 - `backend/src/routes/enrollment.ts` — enrollment token consumption
 - `backend/src/admin/enrollmentTokens.ts` — token issue/revoke
 - `backend/src/admin/devices.ts` — device list, revoke, suspend, resume
 - `backend/src/enrollment/consume.ts` — token-consumption path
-  (referenced by AUTH-SPEC-001 §10.3)
+  (AUTH-SPEC-001 §10.3)
 - `backend/src/authorization/contacts.ts` — bidirectional contact model
 - `backend/src/auth/sessions.ts` — opaque session lookup + revocation
+- `backend/src/auth/canonical.ts` — **existing** challenge canonicalizer.
+  Do not modify; the new JCS canonicalizer is a separate file.
+- `backend/src/auth/verify.ts` — challenge signature verification
+  (`@noble/ed25519`)
 
 Android:
 - `android/app/src/main/java/com/umoja/secure/transport/AdminApi.kt`
 - `android/app/src/main/java/com/umoja/secure/transport/ContactsApi.kt`
 - `android/app/src/main/java/com/umoja/secure/transport/Socks5Bridge.kt`
 - `android/app/src/main/java/com/umoja/secure/crypto/DeviceKeyManager.kt`
-  — **Ed25519 device authentication key** in Android Keystore. Signs
-  challenges. NOT the libsignal identity key.
+  — Ed25519 device auth key. **Not** the libsignal identity key.
+- `android/app/src/main/java/com/umoja/secure/crypto/DeviceIdentity.kt`
+  — SPKI ↔ raw Ed25519 key conversion
 - `android/app/src/main/java/com/umoja/secure/crypto/SignalIdentityStore.kt`
-  — **Curve25519 libsignal identity key**. NOT the device auth key.
-  Provisioning touches both: the device auth key for enrollment and
-  challenge-response; the Signal identity key for the matrix's
-  `pub_messaging_identity_key` field.
+  — Curve25519 libsignal identity key
+- `android/app/src/main/java/com/umoja/secure/auth/CanonicalChallenge.kt`
+  — **existing** challenge canonicalizer. Do not modify.
 - `android/app/src/main/java/com/umoja/secure/auth/SessionManager.kt`
 - `android/app/src/main/java/com/umoja/secure/ui/admin/AdminScreen.kt`
-  (will grow significantly for provisioning)
 
 ### Verify paths before reading
 
-    find ~/umoja-secure/backend/src -name "*.ts" | grep -E "admin|enroll|contact|session" | sort
-    find ~/umoja-secure/android/app/src/main/java/com/umoja/secure -name "*.kt" | grep -E "Admin|Contact|DeviceKey|SignalIdentity|Session" | sort
+    find ~/umoja-secure/backend/src -name "*.ts" | grep -E "admin|enroll|contact|session|crypto|canonical" | sort
+    find ~/umoja-secure/android/app/src/main/java/com/umoja/secure -name "*.kt" | grep -E "Admin|Contact|Device|Signal|Session|Canonical|Jcs" | sort
 
 ### Note: TASK-P1-027 numbering collision
 
 Commit `ad89b76` is labeled "TASK-P1-027: docker deployment". The current
-task registry maps TASK-P1-027 to "SBOM generation and dependency review
-gate". The registry is authoritative; the commit label predates a
-renumbering. When reading git history, treat TASK-P1-027 in the registry
-as the current meaning. Do not "fix" the old commit label.
+registry maps TASK-P1-027 to "SBOM generation and dependency review gate".
+The registry is authoritative. Do not "fix" the old commit label.
 
 ### Note: provenance of the canonical documents
 
 The four canonical documents (`US-ADD-001`, `US-MASTER-001`,
-`AUTH-SPEC-001`, `THREAT-MODEL-001`) were authored on 2026-10-14. They
-did not exist before. Each carries its own §1 Provenance section
-recording this. If a future session wonders why they read as freshly
-written prose rather than ratified committee output — that's why.
+`AUTH-SPEC-001`, `THREAT-MODEL-001`) were authored on 2026-10-14. They did
+not exist before. Each carries its own §1 Provenance section recording this.
 
 If a security-relevant question arises that none of them answers, do not
 guess. STOP and escalate, per Build Master §0.
