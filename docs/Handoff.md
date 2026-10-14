@@ -359,4 +359,12 @@ Android:
 - `android/app/src/main/java/com/umoja/secure/ui/admin/AdminScreen.kt` —
   admin UI (will grow significantly for provisioning)
 
+### Note: TASK-P1-027 numbering collision
+
+Commit `ad89b76` is labeled "TASK-P1-027: docker deployment". The current
+task registry maps TASK-P1-027 to "SBOM generation and dependency review
+gate". The registry is authoritative; the commit label predates a
+renumbering. When reading git history, treat TASK-P1-027 in the registry as
+the current meaning.
+
 Verify paths before reading:
