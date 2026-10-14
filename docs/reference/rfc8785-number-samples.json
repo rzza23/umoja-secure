@@ -1,0 +1,47 @@
+{
+  "document": "rfc8785-number-samples",
+  "version": "1.0",
+  "date_imported": "2026-10-14",
+  "source": "RFC 8785, Appendix B, Table 1",
+  "source_url": "https://www.rfc-editor.org/rfc/rfc8785.txt",
+  "source_lines": "581-668",
+  "purpose": "Number-serialization conformance vectors for JCS canonicalizers. Number formatting is the edge where independent implementations silently diverge; these samples exercise the boundary cases.",
+  "conversion_method": "Each row's IEEE 754 64-bit hex is preserved verbatim. The ECMAScript double is reconstructed from the 8 bytes big-endian. The expected serialization is the RFC's 'JSON Representation' column, verbatim. Rows whose JSON Representation is empty (NaN, Infinity) are recorded under excluded_non_json and are not testable as JSON.",
+  "notes": [
+    "(1) For maximum compliance with ECMAScript JSON, integers SHOULD be in [-9007199254740991, 9007199254740991]. Does not affect JCS.",
+    "(2) Values like 2**68 are treated as extended-precision doubles; JCS does not special-case them.",
+    "(3) Out-of-range values (NaN, Infinity) are not permitted in JSON.",
+    "(4) 1424953923781206.25 truncates and rounds to even."
+  ],
+  "samples": [
+    { "ieee754_hex": "0000000000000000", "expected_serialization": "0",                       "comment": "Zero" },
+    { "ieee754_hex": "8000000000000000", "expected_serialization": "0",                       "comment": "Minus zero" },
+    { "ieee754_hex": "0000000000000001", "expected_serialization": "5e-324",                  "comment": "Min pos number" },
+    { "ieee754_hex": "8000000000000001", "expected_serialization": "-5e-324",                 "comment": "Min neg number" },
+    { "ieee754_hex": "7fefffffffffffff", "expected_serialization": "1.7976931348623157e+308", "comment": "Max pos number" },
+    { "ieee754_hex": "ffefffffffffffff", "expected_serialization": "-1.7976931348623157e+308","comment": "Max neg number" },
+    { "ieee754_hex": "4340000000000000", "expected_serialization": "9007199254740992",        "comment": "Max pos int (1)" },
+    { "ieee754_hex": "c340000000000000", "expected_serialization": "-9007199254740992",       "comment": "Max neg int (1)" },
+    { "ieee754_hex": "4430000000000000", "expected_serialization": "295147905179352830000",   "comment": "~2**68 (2)" },
+    { "ieee754_hex": "44b52d02c7e14af5", "expected_serialization": "9.999999999999997e+22",   "comment": "" },
+    { "ieee754_hex": "44b52d02c7e14af6", "expected_serialization": "1e+23",                   "comment": "" },
+    { "ieee754_hex": "44b52d02c7e14af7", "expected_serialization": "1.0000000000000001e+23",  "comment": "" },
+    { "ieee754_hex": "444b1ae4d6e2ef4e", "expected_serialization": "999999999999999700000",   "comment": "" },
+    { "ieee754_hex": "444b1ae4d6e2ef4f", "expected_serialization": "999999999999999900000",   "comment": "" },
+    { "ieee754_hex": "444b1ae4d6e2ef50", "expected_serialization": "1e+21",                   "comment": "" },
+    { "ieee754_hex": "3eb0c6f7a0b5ed8c", "expected_serialization": "9.999999999999997e-7",    "comment": "" },
+    { "ieee754_hex": "3eb0c6f7a0b5ed8d", "expected_serialization": "0.000001",                "comment": "" },
+    { "ieee754_hex": "41b3de4355555553", "expected_serialization": "333333333.3333332",       "comment": "" },
+    { "ieee754_hex": "41b3de4355555554", "expected_serialization": "333333333.33333325",      "comment": "" },
+    { "ieee754_hex": "41b3de4355555555", "expected_serialization": "333333333.3333333",       "comment": "" },
+    { "ieee754_hex": "41b3de4355555556", "expected_serialization": "333333333.3333334",       "comment": "" },
+    { "ieee754_hex": "41b3de4355555557", "expected_serialization": "333333333.33333343",      "comment": "" },
+    { "ieee754_hex": "becbf647612f3696", "expected_serialization": "-0.0000033333333333333333","comment": "" },
+    { "ieee754_hex": "43143ff3c1cb0959", "expected_serialization": "1424953923781206.2",      "comment": "Round to even (4)" }
+  ],
+  "excluded_non_json": [
+    { "ieee754_hex": "7fffffffffffffff", "comment": "NaN — not permitted in JSON" },
+    { "ieee754_hex": "7ff0000000000000", "comment": "Infinity — not permitted in JSON" }
+  ],
+  "acceptance_criteria": "Both the TypeScript and the Kotlin JCS canonicalizers MUST serialize every sample in 'samples' to the exact string in expected_serialization. A single divergence is a failure."
+}
