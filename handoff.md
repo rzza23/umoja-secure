@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-14 (Session A — JCS cross-verified, vectors populated, matrix schema next)
+Last updated: 2026-10-14 (Session A — schema done both sides, sign/verify next; KI-010 blocks)
 Purpose: Enable a new AI agent or developer session to pick up the project
 without re-reading the entire chat history.
 
@@ -41,7 +41,7 @@ Authoritative documents (all exist on disk):
 
 - Node.js 24.x, Fastify 5.12.5, PostgreSQL 16
 - Docker-deployable (docker compose up -d --build from repo root)
-- **130 tests passing** (85 pre-existing + 45 JCS conformance)
+- **153 tests passing** (85 pre-existing + 45 JCS + 23 schema)
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -78,7 +78,7 @@ Endpoints:
 - Real-time 1:1 encrypted messaging between two emulators
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs)
-- **63 tests passing** (48 pre-existing + 4 number formatter + 11 JCS)
+- **86 tests passing** (48 pre-existing + 4 number formatter + 11 JCS + 23 schema)
 
 ### Tor (dev)
 
@@ -179,6 +179,38 @@ same bytes."
   `generated_at` timestamp is not — re-running produces the same
   signatures and a different timestamp.
 
+**Authorization matrix schema — done, pending commit.** Both sides have
+validators for the signed wrapper `{domain,matrix}` and the eight-field
+matrix per ADR §4.
+
+- `backend/src/crypto/matrix-schema.ts` — `AuthorizationMatrix`,
+  `SignedMatrix`, `validateMatrix`, `validateSignedMatrix`. Key material
+  as base64url strings (matches wire format; bytes decoded only at point
+  of use). Validates: version is a positive integer, all three pubkeys
+  are exactly 43 base64url chars decoding to 32 bytes, `issued_at` is
+  ISO 8601 UTC with trailing Z, `permitted_contacts` is a string array,
+  `domain` is exactly `umoja.authorization-matrix.v1`.
+- `android/.../crypto/AuthorizationMatrix.kt` — `data class
+  AuthorizationMatrix`, `data class SignedMatrix`, plus
+  `toJsonMap`/`fromJsonMap` for interop with `jcsCanonicalizeString`.
+  Same validation rules as TS.
+- `backend/src/crypto/matrix-schema.test.ts` — 23 tests.
+- `android/.../crypto/AuthorizationMatrixTest.kt` — 23 tests.
+
+**Coverage parity.** Same cases on both sides except one: the TS suite
+tests `validateMatrix("string")` (rejection), but that input is
+language-impossible in Kotlin — `fromJsonMap(Map<String, Any?>)` cannot
+accept a `String` at the type level. Documented so a future agent
+doesn't "fix" the missing case.
+
+**Incidental refactor.** `backend/src/crypto/jcs.ts` was changed from
+`for (let i = 0; i < keys.length; i++)` to `for (const key of keys)` to
+resolve a `noUncheckedIndexedAccess` typecheck error. Behavior
+unchanged: 45/45 tests still pass, cross-check still PASS 38/38.
+
+**Test counts:** 153 backend (85 pre-existing + 45 JCS + 23 schema),
+86 Android (48 pre-existing + 4 number formatter + 11 JCS + 23 schema).
+
 ---
 
 ## 4. Known issues
@@ -233,9 +265,24 @@ Optional cleanup, not Session A: `canonicalJson` is duplicated between
 Every `vitest run` triggers `test/global-setup.ts` → Postgres connection.
 Fix: Docker up, or a conditional in `global-setup.ts`.
 
-### KI-010: `@noble/ed25519` not on Build Master §3 approved list
-Used in `backend/src/auth/verify.ts`. **Resolve approval before writing
-matrix verification.**
+### KI-010: `@noble/ed25519` not on Build Master §3 approved list — NOW BLOCKING
+Used in `backend/src/auth/verify.ts`. Build Master §6 requires human
+approval for every dependency, including transitive.
+
+**This is now the blocker for Session A's remaining work (sign/verify
+per §3.8).** Three options:
+- **A** — Approve `@noble/ed25519`; use it for both auth and matrix
+  signing. Minimal change if it's already a legitimate dep.
+- **B** — Use Node built-in `crypto` for matrix signing, keep
+  `@noble/ed25519` scoped to auth. Two Ed25519 paths in the backend.
+- **C** — Consolidate on Node built-in, migrate `auth/verify.ts` off
+  `@noble/ed25519`. Larger change, touches auth code, needs its own
+  test pass.
+
+The vector generator already uses Node built-in — that's the
+generator's choice, not a decision about the production path.
+
+**Approval required before any matrix sign/verify code lands.**
 
 ### KI-011 (RESOLVED): Kotlin canonicalizer corpus test parser
 Resolved by adding test-scope `org.json:json:20240303`. Option A chosen
@@ -262,16 +309,26 @@ currently PASS. See Section 3.
 
 ## 5. Immediate next steps (recommended order)
 
-**1. Matrix schema.** Single TS type + single Kotlin data class. Fields
-   per `docs/architecture/ADR-PROVISIONING-001.md` §4. Separate
-   `pub_device_auth_key` and `pub_messaging_identity_key`.
+**1. Sign/verify per §3.8.** JCS(wrapper) → SHA-256 → Ed25519 over the
+   32-byte digest → base64url no-pad. Both sides.
 
-   **Decision needed before drafting:** exact field set (ADR §4 lists
-   version, device_id, pub_device_auth_key, pub_messaging_identity_key,
-   pub_wipe_confirmation_key, clearance, permitted_contacts, issued_at)
-   and whether key material is base64url strings (matches the wire format
-   and the generated test vectors) or raw bytes (avoids boundary
-   encoding, but Kotlin byte arrays complicate equality and JSON).
+   **BLOCKED by KI-010.** The matrix signing path needs an Ed25519
+   library decision:
+   - TS side: `@noble/ed25519` (already used in `auth/verify.ts` but not
+     confirmed on Build Master §3's approved list) OR Node built-in
+     `crypto`.
+   - Kotlin side: BouncyCastle (already present) or
+     `java.security.Signature("Ed25519")`.
+   - Options: (A) `@noble/ed25519` both/all, contingent on approval;
+     (B) Node built-in on TS, BouncyCastle on Kotlin, `@noble/ed25519`
+     stays scoped to auth; (C) consolidate on Node built-in and migrate
+     `auth/verify.ts` off `@noble/ed25519`.
+
+   The vector generator (`backend/scripts/generate-matrix-vectors.ts`)
+   already uses Node built-in `crypto`. That is the generator's choice,
+   not a decision about the production path.
+
+   **Do not start sign/verify until the library is chosen.**
 
    Suggested shape:
    - `backend/src/crypto/jcs-dump.ts` — reads JSON from stdin, writes
@@ -450,7 +507,7 @@ Rebuild after flipping — read at HttpClient construction time.
 - **Two implementations passing their own tests is not interop proof.**
   See KI-012. Cross-check is required.
 - Test count is the quickest pulse check. Current:
-  **130 backend tests**, **63 Android tests**.
+  **153 backend tests**, **86 Android tests**.
 
 ---
 
