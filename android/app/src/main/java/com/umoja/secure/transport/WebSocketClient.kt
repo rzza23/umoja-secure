@@ -77,24 +77,15 @@ class WebSocketClient(
             .pingInterval(0, TimeUnit.SECONDS) // server drives heartbeats
 
         if (TransportConfig.useTor) {
+            val bridgePort = Socks5Bridge.start()
             builder.proxy(
                 Proxy(
-                    Proxy.Type.SOCKS,
-                    InetSocketAddress(
-                        TransportConfig.SOCKS_HOST,
-                        TransportConfig.SOCKS_PORT,
-                    ),
+                    Proxy.Type.HTTP,
+                    InetSocketAddress("127.0.0.1", bridgePort),
                 ),
             )
-            builder.dns(object : Dns {
-                override fun lookup(hostname: String): List<InetAddress> {
-                    return if (hostname.endsWith(".onion")) {
-                        listOf(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)))
-                    } else {
-                        Dns.SYSTEM.lookup(hostname)
-                    }
-                }
-            })
+            builder.connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.MILLISECONDS))
+            Log.i(TAG, "Tor mode: routing WS via HTTP bridge 127.0.0.1:$bridgePort")
         }
 
         return builder.build()
@@ -119,6 +110,9 @@ class WebSocketClient(
         shouldReconnect = true
         reconnectAttempt = 0
         reconnectJob?.cancel()
+        // Close any prior socket so connect() is idempotent.
+        webSocket?.close(1000, "replaced")
+        webSocket = null
         openSocket()
     }
 

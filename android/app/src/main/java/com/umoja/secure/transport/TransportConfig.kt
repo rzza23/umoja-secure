@@ -21,7 +21,7 @@ object TransportConfig {
     /** Flip to true to route everything through Tor via the host's SOCKS. */
     // Tor mode is enabled deliberately; see TOR-ONION doc.
     // Set false for clearnet dev via adb reverse tcp:8080.
-    var useTor: Boolean = false
+    var useTor: Boolean = true
 
     private const val CLEARNET_HTTP = "http://127.0.0.1:8080"
     private const val CLEARNET_WS = "ws://127.0.0.1:8080/ws"

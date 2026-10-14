@@ -1,13 +1,11 @@
 package com.umoja.secure.transport
 
 import android.util.Log
-import okhttp3.Dns
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
-import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.util.concurrent.TimeUnit
@@ -15,10 +13,14 @@ import java.util.concurrent.TimeUnit
 /**
  * HTTP client wrapper for talking to the Umoja backend.
  *
- * When TransportConfig.useTor is true, all requests go through a SOCKS5
- * proxy (the host's Tor in dev, embedded tor-android in production) and
- * use the .onion address. Requests to .onion hostnames skip real DNS
- * (Tor resolves them at the SOCKS layer).
+ * Tor mode: instead of asking OkHttp to use SOCKS directly (which
+ * resolves hostnames locally and breaks .onion), we start a local
+ * HTTP-to-SOCKS5 bridge and point OkHttp at it with Proxy.Type.HTTP.
+ * The bridge sees the request in absolute-URI form, extracts the
+ * hostname, and dials SOCKS5 with ATYP=0x03 so Tor handles the .onion
+ * resolution.
+ *
+ * Clearnet mode: no proxy, plain HTTP to 127.0.0.1:8080 via adb reverse.
  */
 class HttpClient(baseUrl: String) {
 
@@ -30,11 +32,8 @@ class HttpClient(baseUrl: String) {
         private val JSON = "application/json; charset=utf-8".toMediaType()
 
         private const val CONNECT_TIMEOUT_SECONDS = 90L
-        private const val READ_TIMEOUT_SECONDS = 60L
-        private const val WRITE_TIMEOUT_SECONDS = 60L
-
-        private val DUMMY_ONION_IP: List<InetAddress> =
-            listOf(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)))
+        private const val READ_TIMEOUT_SECONDS = 90L
+        private const val WRITE_TIMEOUT_SECONDS = 90L
     }
 
     private val baseUrl: String = baseUrl.trimEnd('/')
@@ -47,24 +46,17 @@ class HttpClient(baseUrl: String) {
             .writeTimeout(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
         if (TransportConfig.useTor) {
+            val bridgePort = Socks5Bridge.start()
             builder.proxy(
                 Proxy(
-                    Proxy.Type.SOCKS,
-                    InetSocketAddress(
-                        TransportConfig.SOCKS_HOST,
-                        TransportConfig.SOCKS_PORT,
-                    ),
+                    Proxy.Type.HTTP,
+                    InetSocketAddress("127.0.0.1", bridgePort),
                 ),
             )
-            builder.dns(object : Dns {
-                override fun lookup(hostname: String): List<InetAddress> {
-                    return if (hostname.endsWith(".onion")) {
-                        DUMMY_ONION_IP
-                    } else {
-                        Dns.SYSTEM.lookup(hostname)
-                    }
-                }
-            })
+            // Each request should get a fresh SOCKS session. Pooling
+            // doesn't help behind Tor anyway (latency dominates).
+            builder.connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.MILLISECONDS))
+            Log.i(TAG, "Tor mode: routing via HTTP bridge 127.0.0.1:$bridgePort")
         }
 
         return builder.build()
