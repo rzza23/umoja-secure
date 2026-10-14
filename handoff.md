@@ -1,8 +1,10 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-14 (Session A — sign/verify done both sides; KI-010 resolved by option B)
-Purpose: Enable a new AI agent or developer session to pick up the project
-without re-reading the entire chat history.
+Last updated: 2026-10-14 (Session A — TASK-P1-025 admin provisioning
+UI landed; ADR §7 amendment pending; handoff accuracy corrected)
+
+Purpose: Enable a new AI agent or developer session to pick up the
+project without re-reading the entire chat history.
 
 ---
 
@@ -27,11 +29,13 @@ Additional requirements:
 
 Authoritative documents (all exist on disk):
 - UMOJA-SECURE-BUILD-MASTER.md (v1.4.2, frozen)
-- docs/US-ADD-001.md, docs/US-MASTER-001.md
+- docs/US-ADD-001.md (v0.2)
+- docs/US-MASTER-001.md
 - docs/reference/AUTH-SPEC-001.md, docs/reference/THREAT-MODEL-001.md
 - docs/US-TASK-P1-001.md (task registry, v0.4)
 - docs/architecture/ADR-PROVISIONING-001.md
 - docs/ops/TOR-ONION.md
+- docs/security/DEPENDENCY-EXCEPTIONS.md (new, this session)
 
 ---
 
@@ -41,7 +45,8 @@ Authoritative documents (all exist on disk):
 
 - Node.js 24.x, Fastify 5.12.5, PostgreSQL 16
 - Docker-deployable (docker compose up -d --build from repo root)
-- **175 tests passing** (85 pre-existing + 45 JCS + 23 schema + 22 sign/verify)
+- **175 tests passing** (13 test files; verified 2026-10-14 via
+  `npm test`).
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -69,16 +74,23 @@ Endpoints:
 - targetSdk: **35 is the spec value** (US-ADD-001 §5). Build uses 36.
   Reconciliation pending — do not "fix" the build until then.
 - Package: com.umoja.secure
-- Ed25519 device identity in Android Keystore (TEE-backed on real devices,
-  BouncyCastle software fallback on emulator)
-- libsignal 0.86.5 (client) + 0.81.1 (native AAR) integrated; PQXDH works
+- Ed25519 device identity in Android Keystore (TEE-backed on real
+  devices, BouncyCastle software fallback on emulator)
+- libsignal 0.86.5 (client) + 0.81.1 (native AAR) integrated; PQXDH
+  works
 - Persistent SignalProtocolStore (all 6 libsignal interfaces)
 - Encrypted local storage (AES-GCM key in Keystore)
 - Tor transport working end to end
 - Real-time 1:1 encrypted messaging between two emulators
 - Contacts screen wired to GET /me/contacts
-- Admin screen (device list, enrollment tokens, contact pairs)
-- **98 tests passing** (48 pre-existing + 4 number formatter + 11 JCS + 23 schema + 12 sign/verify)
+- Admin screen (device list, enrollment tokens, contact pairs, and
+  as of Session A, the TASK-P1-025 provisioning flow)
+- **JVM unit tests: 77** (verified from XML this session)
+- **androidTest: 0 files** (verified this session)
+
+Note: a prior handoff claimed 98 Android tests. That was wrong. The
+actual prior count was ~1 (ExampleUnitTest only); the crypto work
+brought it to 77. See §4 KI-013.
 
 ### Tor (dev)
 
@@ -87,7 +99,7 @@ Endpoints:
   `adb reverse tcp:9050 tcp:9050`
 - transport/Socks5Bridge.kt — HTTP→SOCKS5 bridge inside the app. Solves
   Java's local-DNS-for-SOCKS bug that broke .onion.
-- Onion: `vsf2kj6uapla74qea4wp4vwbahyqzftq3aywsjd3hknlcvgbtzn6xjad.onion`
+- Onion: `vsf2kjuapla74qea4wp4vwbahyqzftq3aywsjd3hknlcvgbtzn6xjad.onion`
   (fresh: `docker compose exec tor cat /var/lib/tor/umoja-backend/hostname`)
 
 ---
@@ -96,193 +108,157 @@ Endpoints:
 
 ### Session 0 — canonical docs authored
 
-Four requirements-layer documents were authored because they did not
-exist on disk (commits `91b5c47`, `692c672`, `059fa5e`, `e505394`,
-`43dbe83`, `55ebd13`; tags `v0.30-adr-provisioning`, `v0.31-session-0`).
+Four requirements-layer documents authored (US-ADD-001, US-MASTER-001,
+AUTH-SPEC-001, THREAT-MODEL-001). Commits `91b5c47`, `692c672`,
+`059fa5e`, `e505394`, `43dbe83`, `55ebd13`. Tags `v0.30-adr-provisioning`,
+`v0.31-session-0`. See ADR-PROVISIONING-001 §7 for provenance.
 
-### Session A — JCS canonicalization, both sides (current)
+### Session A — JCS, matrix schema, sign/verify, P1-025 provisioning UI
 
-**Conformance sweep — clean.** Four greps against `backend/src` and
-`android/.../secure`. No blocking drift. Findings recorded in the previous
-handoff; two still open:
+**JCS canonicalization — done both sides.**
 
-- `@noble/ed25519` not on Build Master §3 approved list (**KI-010**).
-- Three canonicalizers coexist; do not unify (**KI-008**).
-
-**Corpus vendored** (commit `fcf6bbd`): RFC 8785 App. B number samples
-(24) + cyberphone JCS corpus (6 pairs, Apache 2.0).
-
-**TypeScript canonicalizer — done** (commit `c06aaa8`).
-
-- `backend/src/crypto/jcs.ts` — exports `jcsCanonicalize` and
-  `jcsCanonicalizeString`.
-- `backend/src/crypto/jcs.test.ts` — 45 passing:
-  24 RFC samples + 6 cyberphone pairs + 10 negative + 5 spot checks.
-
-**Kotlin number formatter — done** (commit `ff15357`).
-
-- `android/.../crypto/JcsNumberFormatter.kt` — ES6
-  `Number.prototype.toString()` in `internal object`.
-- `android/.../crypto/JcsNumberFormatterTest.kt` — 4 passing:
-  all 24 RFC samples as hex literals + NaN/Infinity rejection.
-- Resolved **KI-007**.
-
-**Kotlin canonicalizer — done** (commit landed just before this handoff).
-
-- `android/.../crypto/JcsCanonicalizer.kt` — `fun jcsCanonicalize(Any?):
-  ByteArray` and `fun jcsCanonicalizeString(Any?): String`. Input model
-  is pure Kotlin (`null`, `Boolean`, `Number`, `String`, `List<*>`,
-  `Map<String, *>`). Callers with `org.json` types convert first.
-- `android/.../crypto/JcsCanonicalizerTest.kt` — 11 passing:
-  6/6 cyberphone pairs byte-exact + behavior spot checks
-  (key sort, array order, `-0` collapse, `1e+21` formatting, string
-  escaping, rejections).
-- `android/app/build.gradle.kts` — adds test-scope
-  `org.json:json:20240303`. **Not a runtime dependency.** Approved
-  under KI-011 option A.
-
-**JCS is now implemented on both sides and independently validated
-against the same external corpus.** 45 TS tests + 15 Kotlin tests,
-byte-identical across every shared input.
+- TS: `backend/src/crypto/jcs.ts` + 45 tests (commit `c06aaa8`).
+- Kotlin number formatter: `JcsNumberFormatter.kt` + 4 tests
+  (commit `ff15357`). Resolved KI-007.
+- Kotlin canonicalizer: `JcsCanonicalizer.kt` + 11 tests.
+- Test-scope `org.json:json:20240303` added; not a runtime dep
+  (KI-011 option A).
 
 **Cross-check harness — done** (commit `41f52b0`). Closes KI-012.
 
-- `backend/src/crypto/jcs-dump.ts` — TS producer, writes
-  `{id}\t{base64(canonical)}` lines to stdout.
-- `android/.../crypto/JcsCrossCheckTest.kt` — Kotlin producer, writes the
-  same shape to `android/app/build/jcs-cross-check/kotlin.tsv`.
-- `scripts/jcs-cross-check.sh` — runs both, diffs, exits nonzero on any
-  divergence.
-
-**Result: PASS — 38 inputs, byte-identical output from both
-implementations.** (6 cyberphone pairs + 8 Umoja wrapper vectors + 24 RFC
-number samples.) This is the proof that "two implementations passing
-their own tests" was upgraded to "two implementations that produce the
-same bytes."
+- `backend/src/crypto/jcs-dump.ts`, `JcsCrossCheckTest.kt`,
+  `scripts/jcs-cross-check.sh`.
+- **PASS: 38 inputs, byte-identical.**
 
 **Matrix test vectors — populated** (commit `e6eed9b`). Closes KI-004.
 
-- `backend/scripts/generate-matrix-vectors.ts` — fills the six
-  `expected_*` fields for each W-series vector. Test-only Ed25519 key
-  derived deterministically from a fixed seed per the file's
-  `test_only_key_derivation` block. Uses **Node built-in crypto** —
-  `@noble/ed25519` (KI-010) is not involved and remains open for the
-  production signing path.
-- `docs/reference/canonical-matrix-test-vectors.json` now has
-  `generated: true`, `generated_at: 2026-10-14T16:08:28.081Z`, all six
-  W-series vectors filled, one distinct test public key:
+- `canonical-matrix-test-vectors.json` now `generated: true`, all six
+  W-series vectors filled, test public key
   `hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M`.
-- Each signature is immediately verified before writing.
-- Cross-check still passes with the populated file (38 inputs, identical).
-- Run: `cd backend && npm run generate-matrix-vectors`.
-- Determinism caveat: the crypto outputs are deterministic, but the
-  `generated_at` timestamp is not — re-running produces the same
-  signatures and a different timestamp.
+- Regenerate: `cd backend && npm run generate-matrix-vectors`.
 
-**Authorization matrix schema — done, pending commit.** Both sides have
-validators for the signed wrapper `{domain,matrix}` and the eight-field
-matrix per ADR §4.
+**Authorization matrix schema — done both sides.**
 
-- `backend/src/crypto/matrix-schema.ts` — `AuthorizationMatrix`,
-  `SignedMatrix`, `validateMatrix`, `validateSignedMatrix`. Key material
-  as base64url strings (matches wire format; bytes decoded only at point
-  of use). Validates: version is a positive integer, all three pubkeys
-  are exactly 43 base64url chars decoding to 32 bytes, `issued_at` is
-  ISO 8601 UTC with trailing Z, `permitted_contacts` is a string array,
-  `domain` is exactly `umoja.authorization-matrix.v1`.
-- `android/.../crypto/AuthorizationMatrix.kt` — `data class
-  AuthorizationMatrix`, `data class SignedMatrix`, plus
-  `toJsonMap`/`fromJsonMap` for interop with `jcsCanonicalizeString`.
-  Same validation rules as TS.
-- `backend/src/crypto/matrix-schema.test.ts` — 23 tests.
-- `android/.../crypto/AuthorizationMatrixTest.kt` — 23 tests.
+- `backend/src/crypto/matrix-schema.ts` + 23 tests.
+- `android/.../crypto/AuthorizationMatrix.kt` + 23 tests.
+- One coverage gap by language constraint: TS tests
+  `validateMatrix("string")`; Kotlin's `fromJsonMap(Map<String,Any?>)`
+  cannot accept a String at the type level. Documented, not a bug.
 
-**Coverage parity.** Same cases on both sides except one: the TS suite
-tests `validateMatrix("string")` (rejection), but that input is
-language-impossible in Kotlin — `fromJsonMap(Map<String, Any?>)` cannot
-accept a `String` at the type level. Documented so a future agent
-doesn't "fix" the missing case.
+**Matrix sign/verify — done both sides.**
 
-**Incidental refactor.** `backend/src/crypto/jcs.ts` was changed from
-`for (let i = 0; i < keys.length; i++)` to `for (const key of keys)` to
-resolve a `noUncheckedIndexedAccess` typecheck error. Behavior
-unchanged: 45/45 tests still pass, cross-check still PASS 38/38.
+- `backend/src/crypto/matrix-sign.ts` + 22 tests (Node built-in crypto).
+- `android/.../crypto/MatrixSigner.kt` + 12 tests (BouncyCastle 1.79).
+- Protocol per §3.8: JCS(wrapper) → SHA-256 → Ed25519 over 32-byte
+  digest → base64url no-pad.
+- Cross-language agreement proven on all 6 W-series vectors; same
+  private key signs identically on Node and BouncyCastle.
+- Prehash-is-load-bearing test passes both sides.
 
-**Test counts:** 153 backend (85 pre-existing + 45 JCS + 23 schema),
-86 Android (48 pre-existing + 4 number formatter + 11 JCS + 23 schema).
+**KI-010 resolved by option B.** Node built-in `crypto` on TS;
+BouncyCastle on Kotlin; `@noble/ed25519` stays scoped to
+`auth/verify.ts`. Two Ed25519 paths, two protocols, no shared surface.
 
-**Matrix sign/verify — done, both sides.** Protocol per §3.8 exact:
-JCS(wrapper) → SHA-256 of canonical UTF-8 bytes → Ed25519 over the
-32-byte digest → base64url no-pad. The prehash is load-bearing and
-tested.
+**US-ADD-001 §8.1 amendment** (commit `13c3a83`). Ruling: the
+`com.google.*` prohibition covers Google-the-company runtime services,
+not every Maven groupId. Named carve-out: `com.google.zxing:core`.
+Future matching artifacts require individual review per §8.1.
 
-- `backend/src/crypto/matrix-sign.ts` — `matrixDigest`, `signMatrix`,
-  `verifyMatrix`. Node built-in crypto (KI-010 option B).
-- `backend/src/crypto/matrix-sign.test.ts` — 22 tests, all passing.
-- `android/.../crypto/MatrixSigner.kt` — `object MatrixSigner` with
-  `matrixDigest`, `sign`, `verify`, `publicKeyFromRaw`,
-  `privateKeyFromSeed`. BouncyCastle 1.79 (already a declared dep).
-- `android/.../crypto/MatrixSignerTest.kt` — 12 tests, all passing.
+**zxing dependency** (commit `4346802`).
 
-**Cross-language agreement proven:**
-- 6/6 vector signatures byte-identical between TS generator, TS signer,
-  and Kotlin signer.
-- HKDF-derived test key produces the same public key on Node and
-  BouncyCastle (`hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M`), so the
-  same private key signs identically on both sides.
-- Prehash-is-load-bearing test passes on both: a signature over raw
-  canonical bytes (skipping SHA-256) does NOT verify.
+- `com.journeyapps:zxing-android-embedded:4.3.0` pinned in
+  `android/app/build.gradle.kts`.
+- Transitive: `com.google.zxing:core:3.4.1` (api scope). Clean POM,
+  no other deps.
+- `docs/security/DEPENDENCY-EXCEPTIONS.md` created (new file),
+  §2 interpretation carve-out entry recorded.
 
-**KI-010 resolved by option B.** Node built-in `crypto` on the TS side;
-BouncyCastle on Kotlin. `@noble/ed25519` stays scoped to
-`auth/verify.ts` (challenge-response protocol). Two Ed25519 paths in
-the backend serving two protocols — clean separation, no shared
-dependency surface. See KI-010 for the alternative consolidation path
-if a future session wants to unify.
+**TASK-P1-025 core crypto** (commit `42646dc`).
 
-**Caveats carried:**
-- Kotlin number formatter, canonicalizer, cross-check, and matrix signer
-  use Java platform types in a few places, producing benign Kotlin
-  compiler warnings (`String?` vs `String`, nullable `File?`). Tests
-  pass. Not Session A scope to clean up.
-- `@noble/ed25519` approval status is still undocumented. Not blocking
-  since it's not on the matrix path, but the auth path still relies on
-  it. Worth a §6 review when auth is next touched.
+- `android/.../crypto/ProvisioningBundle.kt` — parses amended
+  enrollment QR payload; strict schema (domain, printable-ASCII
+  device_id ≤64, base64url-32 keys, no extra fields).
+- `android/.../crypto/MatrixBuilder.kt` — constructs unsigned
+  `{domain,matrix}` wrapper; routes through `SignedMatrix.fromJsonMap`
+  for validation; sorts `permitted_contacts` for deterministic bytes.
+- Tests: 16 `ProvisioningBundleTest` + 9 `MatrixBuilderTest`,
+  all passing.
+- TEST-PROVSCHEMA-001 reclassified as a **builder test** (the schema
+  layer cannot detect a swap between two same-length base64url fields).
+  Both the positive and negative builder variants pass.
 
-**Updated test counts:** 175 backend (85 pre-existing + 45 JCS + 23
-schema + 22 sign/verify), 98 Android (48 pre-existing + 4 number
-formatter + 11 JCS + 23 schema + 12 sign/verify).
+**TASK-P1-025 AdminScreen UI** (commit `f605c35`).
+
+- Provisioning section added to `AdminScreen.kt` (+168 lines).
+- journeyapps ScanContract → ProvisioningBundle.parse.
+- Clearance field; version field (default "1") with hint text;
+  permitted_contacts multi-select over active devices excluding the
+  device being provisioned.
+- MatrixBuilder.build + JCS canonicalize + SHA-256 display.
+- Copy-to-clipboard for wrapper and hash.
+- **No signing. No QR display of output — that's TASK-P1-033.**
+
+### Build-flavor decision
+
+Build Master §4's "Android admin mode" means a runtime mode, not a
+separate distribution artifact. The admin UI ships in the same APK as
+the user client; no build flavor, no separate package. The §11
+prohibition is about the provisioning private key (§3.2 keeps it off
+the admin app entirely), not about shipping the UI. Decided 2026-10-14
+for TASK-P1-025. If a future requirement needs distribution-level
+separation, open a new task — do not re-litigate here.
+
+### QR payload format (owner ruling, 2026-10-14)
+
+Amended format, superseding the earlier version:
+
+```json
+{
+  "domain": "umoja.enrollment-request.v1",
+  "device_id": "<string, <=64 printable ASCII>",
+  "pub_device_auth_key": "<base64url 32B>",
+  "pub_messaging_identity_key": "<base64url 32B>",
+  "pub_wipe_confirmation_key": "<base64url 32B>"
+}
+```
+
+- `device_id` is device-generated (UUID v4 recommended), stored in
+  DataStore, not derived from key material, public.
+- Payload is NOT JCS-canonicalized and NOT signed in Phase 1.
+  `domain` is documentation today; becomes load-bearing if the payload
+  is ever signed by the device auth key (future hardening task).
+- **Propagates to TASK-P1-019** (enrolling-device QR generator) —
+  P1-019 must conform.
+
+### Version-source ruling
+
+Matrix `version` is admin-entered, default "1", with hint text
+explaining monotonicity is device-enforced. Backend does not track a
+current matrix version in Phase 1. Backend version tracking is a
+future improvement, not P1-025.
 
 ---
 
 ## 4. Known issues
 
 ### KI-001 (FIXED): OkHttp cannot reach .onion through SOCKS
+
+Fixed in `v0.29-tor-transport` with the Socks5Bridge.
+
 ### KI-002: Backend Docker image goes stale during iteration
 `docker compose up -d --build backend` after backend changes, or run
 `npm run dev` on the Mac during iteration.
 
 ### KI-003: Emulator loses app data on cold boot
-Shut down emulator cleanly (menu → Power off). Or accept re-enrollment.
+Shut down emulator cleanly (menu -> Power off). Or accept re-enrollment.
 
-### KI-004 (RESOLVED): Canonical-matrix test vectors still scaffold
-Resolved by commit `e6eed9b`. File now has `generated: true`, all six
-W-series vectors populated, test-only Ed25519 key derived from a fixed
-seed. See Section 3.
+### KI-004 (RESOLVED): Canonical-matrix test vectors were scaffold
+Resolved by commit `e6eed9b`. File has `generated: true`, all six
+W-series vectors populated.
 
-(Historical context: `docs/reference/canonical-matrix-test-vectors.json` originally had `generated: false`.
-Inputs authored; outputs `null`.
-
-**Now fully unblockable.** TS and Kotlin canonicalizers are both proven.
-Populate by running either on each `input_wrapper`. The signing fields
-require the test-only key derivation per the file's
-`test_only_key_derivation` block.
-
-**Consequence:** no matrix signing code may commit until `generated: true`.
-
-### KI-005: Requirements layer was authored after the code
-The four canonical documents were written 2026-10-14. Session A's
-conformance sweep was four greps, not a full audit.
+### KI-005: Requirements layer authored after the code
+The four canonical documents were written 2026-10-14. Conformance
+sweeps have been partial.
 
 ### KI-006: USER-ONBOARDING.md still missing
 Referenced by Build Master §2 and §3.4. Not blocking.
@@ -296,137 +272,146 @@ Resolved by `ff15357`.
 |---|---|---|
 | `canonicalizeChallenge` (TS) / `CanonicalChallenge.encode` (KT) | challenge-response | no |
 | `canonicalJson` (TS, duplicated) | audit hash chain | no |
-| `jcsCanonicalize` (TS) / `jcsCanonicalizeString` (KT) | matrix signing | **yes** (SHA-256) |
+| `jcsCanonicalize` (TS) / `jcsCanonicalizeString` (KT) | matrix signing | yes (SHA-256) |
 
 Do not unify. Different protocols, different signing rules.
 
-Optional cleanup, not Session A: `canonicalJson` is duplicated between
+Optional cleanup: `canonicalJson` is duplicated between
 `backend/src/audit/log.ts` and `audit/verify.ts`.
 
 ### KI-009: Backend test suite requires Postgres
-Every `vitest run` triggers `test/global-setup.ts` → Postgres connection.
+`vitest run` triggers `test/global-setup.ts` -> Postgres connection.
 Fix: Docker up, or a conditional in `global-setup.ts`.
 
-### KI-010 (RESOLVED by option B): `@noble/ed25519` not on approved list
-Used in `backend/src/auth/verify.ts` for challenge-response verification.
-Build Master §6 requires human approval for every dependency.
+### KI-010 (RESOLVED by option B): @noble/ed25519 approval
+See §3. Matrix path uses Node built-in crypto (TS) and BouncyCastle
+(Kotlin). `@noble/ed25519` stays scoped to `auth/verify.ts`.
 
-**Resolved by choosing option B for the matrix path:**
-- Matrix sign/verify on the TS side uses Node built-in `crypto`
-  (`backend/src/crypto/matrix-sign.ts`).
-- Matrix sign/verify on the Kotlin side uses BouncyCastle 1.79,
-  already a declared dep (`MatrixSigner.kt`).
-- `@noble/ed25519` stays scoped to `auth/verify.ts`.
-
-**Consequence:** two Ed25519 code paths in the backend, serving
-two distinct protocols (challenge-response vs matrix signing).
-This is intentional — different protocols, different signing
-rules, no shared code surface to accidentally couple.
-
-**Not resolved:** whether `@noble/ed25519` was ever formally
-approved for the auth path. It's outside Session A scope, but
-it's a §6 audit item when auth is next touched. If unapproved,
-option C (consolidate on Node built-in for auth too) is the
-likely remedy.
+**Not resolved:** whether `@noble/ed25519` was ever formally approved
+for the auth path. §6 audit item when auth is next touched.
 
 ### KI-011 (RESOLVED): Kotlin canonicalizer corpus test parser
-Resolved by adding test-scope `org.json:json:20240303`. Option A chosen
-over hand-transcription because the number-parsing boundary (BigDecimal
-on the org.json side) is part of the protocol and a hand-transcribed
-corpus would have silently skipped it.
+Resolved by adding test-scope `org.json:json:20240303`.
 
-### KI-012 (RESOLVED): JCS implementations must be cross-checked, not
-  just individually validated
+### KI-012 (RESOLVED): JCS implementations must be cross-checked
+Resolved by commit `41f52b0`. PASS on 38 inputs.
 
-Both sides now pass their own corpora. **That is necessary but not
-sufficient.** The whole point of the from-scratch decision was
-independent implementations converging on the same bytes for the same
-inputs.
+### KI-013 (NEW): Handoff test counts were fabricated
+The prior handoff claimed "85 backend tests, 48 Android tests"
+(baseline), then "98 Android tests" after Session A crypto work.
+Actual JVM unit-test count after Session A is 77; androidTest is 0
+files. Backend count verified this session: 175.
 
-A cross-check harness does not yet exist. Until it does, a divergence on
-an input neither corpus covers would go undetected.
+**Consequence:** do not propagate test counts from prior handoffs.
+Recount from test-runner output.
 
-**Resolved by commit `41f52b0`.** `scripts/jcs-cross-check.sh` runs both
-implementations on all 38 inputs and fails on any divergence. Result is
-currently PASS. See Section 3.
+### KI-014 (NEW): ADR-PROVISIONING-001 §7 residual item
+The ADR asked for file-level verification of Q1/Q4 against
+THREAT-MODEL-001 and AUTH-SPEC-001 "at Session A kickoff." Those two
+files were authored *after* the ADR, from the same attestations the
+ADR recorded. File-level verification is therefore definitional, not
+independent. Recorded as documented exception (b). Amendment pending —
+see §5.
+
+### KI-015 (NEW): `AdminScreen.kt.bak-navdiag` is tracked
+`android/app/src/main/java/com/umoja/secure/ui/admin/AdminScreen.kt.bak-navdiag`
+is in `git ls-files`. Backup file in a source tree — pollutes the
+package, ends up on classpath. Delete in a small cleanup commit.
+Not folded into P1-025.
+
+### KI-016 (NEW): Duplicated base64url validators
+`ProvisioningBundle.kt` and `AuthorizationMatrix.kt` each define
+file-private `requireBase64Url32` / `requireString` / `BASE64URL_RE`.
+~30 lines duplicated. Optional cleanup; do not fold into unrelated
+tasks.
+
+### KI-017 (NEW): QR payload not signed
+The enrollment QR payload carries public keys and a device_id with no
+signature. In Phase 1 this is spec-conformant (§3.2: public material
+only). A future hardening task could have the device sign the payload
+with its auth key — at which point the `domain` field becomes
+load-bearing and the payload should be JCS-canonicalized. Not Phase 1.
+
+### KI-018 (NEW): Backend does not track current matrix version
+Matrix `version` is admin-entered with no server-side source of truth.
+Monotonicity is device-enforced (§3.7), so a bad number fails safe,
+but the admin has no way to query "what version is currently
+authorized." Future improvement.
 
 ---
 
 ## 5. Immediate next steps (recommended order)
 
-**1. Signing cross-check harness.** Extend `scripts/jcs-cross-check.sh`
-   to cover signing: TS signs each wrapper vector, Kotlin verifies; and
-   vice versa. The individual suites already prove agreement on the
-   stored vectors — this makes the agreement continuously enforced on
-   every run, not just at development time.
+**1. Commit 5 — ADR-PROVISIONING-001 §7 amendment.** Amend the ADR to
+record:
 
-   Inputs: the 6 W-series wrappers from
-   `canonical-matrix-test-vectors.json`. Expected: every signature
-   produced by either side verifies on the other.
+- Flag 2 / KI-014: exception (b). The four reference docs postdate the
+  ADR and were authored from the same attestations, so file-level
+  verification is definitional, not independent.
+- TEST-PROVSCHEMA-001 reclassification: it is a **builder test**, not
+  a schema test. The schema cannot detect a swap between two
+  same-length base64url fields. Restate in §5.
+- QR payload format record: add the amended `umoja.enrollment-request.v1`
+  format from §3 to §6 step 5. Flag that TASK-P1-019 must conform.
+- Version-source note: manual entry, default 1; backend tracking is a
+  future improvement.
+- P1-019 propagation flag: the QR format is authoritative in the ADR;
+  the enrolling-device generator must match.
 
-**2. QR ceremony (TASK-P1-025).** Device displays QR with three public
-   keys (device auth, messaging identity, wipe-confirmation); admin
-   scans; assigns clearance and permitted contacts; admin app produces
-   the unsigned matrix plus its JCS-canonical hash.
+**2. Verify TASK-P1-025 AdminScreen on emulator.** Manual run: launch
+Admin, scan a synthetic QR payload (any JSON editor generating the
+amended format), confirm parse, build matrix, hash displays, copy
+buttons work. Screenshot for the record. No instrumented tests exist;
+manual verification is the safety net.
 
-**3. Offline signing handoff (TASK-P1-033 boundary).** Admin app
-   displays hash + matrix; offline signer re-canonicalizes, confirms
-   hash, displays matrix for human confirmation, signs via
-   `MatrixSigner` (loaded private key from Keystore), returns signature
-   over QR. Admin app attaches the signature and pushes the signed
-   matrix. **The admin app never holds the provisioning private key.**
+**3. Backend `bound_public_key` schema addition.** Per ADR §2 Q2 and
+AUTH-SPEC-001 §10.2:
 
-**4. Client verification and storage (TASK-P1-026 remainder).** Device
-   receives signed matrix; re-canonicalizes wrapper; verifies Ed25519
-   against pinned provisioning public key; enforces
-   `highest_seen_version` (post-enrollment) or inclusive floor
-   (replacement device); populates contacts from
-   `permitted_contacts[]`; stores `highest_seen_version` locally.
+- `enrollment_tokens` gains `bound_public_key BYTEA`.
+- `consumeEnrollmentToken` updated to match on the bound key.
+- Tests: TEST-TOKEN-CONCURRENT, TEST-TOKEN-SUBSTITUTION.
+- Separate task (TASK-P1-014-adjacent). Not P1-025.
 
-**5. Enrollment token `bound_public_key` schema addition.** Per AUTH-SPEC-001 §10.2.
+**4. TASK-P1-033 — offline provisioning-key signing workflow.**
 
-   Suggested shape:
-   - `backend/src/crypto/jcs-dump.ts` — reads JSON from stdin, writes
-     canonical string to stdout. Thin wrapper over `jcsCanonicalizeString`.
-   - Kotlin side: either a small CLI main in the Android module, or a
-     Gradle-invoked JVM test that shells out to the TS side. Simpler:
-     a standalone Kotlin test that feeds a fixed input list through
-     `jcsCanonicalizeString`, writes each result to a file, and a shell
-     script that runs the TS side on the same list and diffs.
-   - Input list: the 24 RFC samples, the 6 cyberphone pairs, and the 9
-     Umoja wrapper `input_wrapper` objects from
-     `canonical-matrix-test-vectors.json`.
+- Admin app displays hash + matrix; offline signer re-canonicalizes,
+  confirms hash, displays matrix for human confirmation, signs via
+  `MatrixSigner` (loaded key), returns signature.
+- Admin app attaches signature and pushes signed matrix.
+- **The admin app never holds the provisioning private key.**
 
-   Gate: the diff must be empty. Any divergence is a bug in one of the
-   two canonicalizers; the vendored corpus is ground truth for
-   adjudicating which.
+**5. TASK-P1-019 — enrolling-device QR generator.** Must emit the
+amended `umoja.enrollment-request.v1` format. Device generates
+`device_id` (UUID v4) at first provisioning-mode launch, stores in
+DataStore.
 
-**2. Populate `canonical-matrix-test-vectors.json`.** Run the (now
-   cross-checked) canonicalizer on each `input_wrapper`. Fill
-   `expected_canonical_bytes_utf8`. Derive the test-only Ed25519 key per
-   the file's `test_only_key_derivation` block. Sign the SHA-256 digest.
-   Fill the remaining three fields. Flip `generated: true`.
+**6. TASK-P1-026 remainder — client verification and storage.**
+Re-canonicalize wrapper; verify Ed25519 against pinned provisioning
+public key; enforce `highest_seen_version` (post-enrollment) or
+inclusive floor (replacement device); populate contacts from
+`permitted_contacts[]`; store `highest_seen_version` locally.
 
-**3. Matrix schema.** Single TS type + single Kotlin data class. Fields
-   per `docs/architecture/ADR-PROVISIONING-001.md` §4. Separate
-   `pub_device_auth_key` and `pub_messaging_identity_key`.
-
-**4. Sign/verify per §3.8.** JCS(wrapper) → SHA-256 → Ed25519 over
-   digest → base64url no-pad. Both sides.
-
-**5. QR ceremony, offline signing handoff, client verification,
-   storage, `bound_public_key` schema addition, tests.**
+**7. TASK-P1-030 — replacement-device flow (integrated test per
+Build Master §3.7).**
 
 **After Session A:**
 
-6. Emergency lock (TASK-P1-021a).
-7. Duress wipe (TASK-P1-021b).
-8. Signing-key custody (TASK-P1-029), offline signer (TASK-P1-033),
-   recovery key (TASK-P1-035).
-9. Hardware-backed Ed25519 verification (TASK-P1-034). Requires
-   physical hardware.
-10. Hardening: SBOM, Android redaction audit, penetration test,
+8. Emergency lock (TASK-P1-021a).
+9. Duress wipe (TASK-P1-021b).
+10. Signing-key custody (TASK-P1-029), recovery key (TASK-P1-035).
+11. Hardware-backed Ed25519 verification (TASK-P1-034). Requires
+    physical hardware.
+12. Hardening: SBOM, Android redaction audit, penetration test,
     independent review.
+
+**Backlog items (not scheduled):**
+- Instrumented Compose tests for admin flows (no test rule configured;
+  belongs with TASK-P1-022 or a new task).
+- Delete `AdminScreen.kt.bak-navdiag` (KI-015).
+- Deduplicate base64url validators (KI-016).
+- `canonicalJson` deduplication between `audit/log.ts` and
+  `audit/verify.ts` (KI-008).
+- Backend current-matrix-version tracking (KI-018).
 
 ---
 
@@ -437,36 +422,54 @@ currently PASS. See Section 3.
     umoja-secure/
       backend/
         src/
-          crypto/           jcs.ts, jcs.test.ts             ← new
+          crypto/           jcs.ts, jcs.test.ts,
+                            jcs-dump.ts, matrix-schema.ts,
+                            matrix-schema.test.ts,
+                            matrix-sign.ts, matrix-sign.test.ts
           auth/             canonical.ts, verify.ts
           audit/            log.ts, verify.ts
           admin/, enrollment/, authorization/, routes/, ws/ ...
+        scripts/            generate-matrix-vectors.ts
       android/
         app/
-          build.gradle.kts  (org.json test-scope dep)        ← new
+          build.gradle.kts  (org.json test-scope;
+                             journeyapps:zxing-android-embedded:4.3.0)
           src/
             main/java/com/umoja/secure/
               crypto/       DeviceKeyManager.kt, DeviceIdentity.kt,
                             SignalIdentityStore.kt,
-                            JcsNumberFormatter.kt,           ← new
-                            JcsCanonicalizer.kt              ← new
+                            JcsNumberFormatter.kt,
+                            JcsCanonicalizer.kt,
+                            AuthorizationMatrix.kt,
+                            MatrixSigner.kt,
+                            ProvisioningBundle.kt,
+                            MatrixBuilder.kt
               auth/         CanonicalChallenge.kt, SessionManager.kt
               transport/    AdminApi.kt, ContactsApi.kt, Socks5Bridge.kt
-              ui/           admin/, contacts/
+              ui/           admin/, contacts/, chat/, conversations/,
+                            navigation/, settings/, diagnostics/, theme/
             test/java/com/umoja/secure/
               ExampleUnitTest.kt
-              crypto/       JcsNumberFormatterTest.kt,       ← new
-                            JcsCanonicalizerTest.kt          ← new
+              crypto/       JcsNumberFormatterTest.kt,
+                            JcsCanonicalizerTest.kt,
+                            JcsCrossCheckTest.kt,
+                            AuthorizationMatrixTest.kt,
+                            MatrixSignerTest.kt,
+                            ProvisioningBundleTest.kt,
+                            MatrixBuilderTest.kt
       docs/
         architecture/       ADR-PROVISIONING-001.md
         ops/                TOR-ONION.md
         reference/
           AUTH-SPEC-001.md
           THREAT-MODEL-001.md
-          canonical-matrix-test-vectors.json  (scaffold, generated:false)
+          canonical-matrix-test-vectors.json  (generated: true)
           rfc8785-number-samples.json         (24 samples)
           jcs-conformance/                    (6 pairs, Apache 2.0)
+        security/
+          DEPENDENCY-EXCEPTIONS.md
       infra/
+      scripts/              jcs-cross-check.sh
       UMOJA-SECURE-BUILD-MASTER.md
       docker-compose.yml
       handoff.md
@@ -508,11 +511,15 @@ currently PASS. See Section 3.
     # Verify a test actually ran (Gradle can succeed with 0 matched):
     cat app/build/test-results/testDebugUnitTest/TEST-com.umoja.secure.crypto.JcsCanonicalizerTest.xml
 
+    # Total count — recount, don't trust the handoff number:
+    grep -h -o 'tests="[0-9]*"' app/build/test-results/testDebugUnitTest/TEST-*.xml \
+      | awk -F'"' '{s+=$2} END {print s}'
+
 ### Android app build / device install
 
     cd ~/umoja-secure/android
     ./gradlew installDebug
-    ./gradlew connectedAndroidTest
+    ./gradlew connectedAndroidTest   # currently 0 tests (KI-013)
 
 ### Tor mode toggle
 
@@ -532,7 +539,7 @@ Rebuild after flipping — read at HttpClient construction time.
 ### Tor verification
 
     curl --socks5-hostname 127.0.0.1:9050 -sS --max-time 20 \
-      http://vsf2kj6uapla74qea4wp4vwbahyqzftq3aywsjd3hknlcvgbtzn6xjad.onion/health
+      http://vsf2kjuapla74qea4wp4vwbahyqzftq3aywsjd3hknlcvgbtzn6xjad.onion/health
 
     docker compose logs backend --tail=20 | grep -i onion
     # remoteAddress should be 172.18.0.4 (the tor container)
@@ -542,14 +549,20 @@ Rebuild after flipping — read at HttpClient construction time.
 ## 7. Conventions
 
 - One task per session. Do not mix unrelated work.
-- **Every commit block ends with `git push origin main`.** Tags: follow
+- Every commit block ends with `git push origin main`. Tags: follow
   with `git push origin --tags`.
 - Update this Handoff at the end of every session.
 - For file writes, prefer a text editor (`open -e <path>`, `nano`) over
   terminal heredocs for anything over ~150 lines. Heredocs fragment on
-  paste.
-- Placeholders like `<paste content here>` are never to be typed
-  literally. A suspiciously short file means the placeholder was left in.
+  paste — and as of Session A, so does TextEdit for content over ~400
+  lines. Chunk large writes.
+- **No shell-block comments.** Two shell traps bit Session A:
+  - zsh without `interactive_comments` treats `#` as a command word:
+    `zsh: command not found: #`.
+  - zsh tilde expansion fires inside what looks like a comment:
+    `zsh: no such user or named directory: 190`.
+  Put annotations in prose above the block, not inside it.
+- Placeholders like `<paste content here>` are never typed literally.
 - When debugging, log the exception before swallowing it.
 - For libsignal, don't hold native handles across scope boundaries in
   tests. Serialize to bytes if state must outlive the store.
@@ -561,8 +574,17 @@ Rebuild after flipping — read at HttpClient construction time.
   `--tests`, verify the XML report shows `tests="N" failures="0"`.
 - **Two implementations passing their own tests is not interop proof.**
   See KI-012. Cross-check is required.
-- Test count is the quickest pulse check. Current:
-  **175 backend tests**, **98 Android tests**.
+- **Do not propagate test counts from prior handoffs.** Recount from
+  test-runner output. See KI-013.
+- **Ground truth for JCS is the vendored corpus**, not either
+  implementation. If TS and corpus ever disagree, TS is wrong. Same
+  for Kotlin.
+- **`toJSON` rejection is a deliberate deviation.** Both
+  implementations reject objects with a `toJSON` method even though
+  RFC 8785's reference code calls it. Do not "fix" this.
+
+Current verified state: **77 Android JVM tests** and **175 backend
+tests** (both verified 2026-10-14 from runner output).
 
 ---
 
@@ -572,30 +594,35 @@ Rebuild after flipping — read at HttpClient construction time.
 
 - `docs/architecture/ADR-PROVISIONING-001.md` — §2 (threat-model
   answers), §3 (signing protocol), §4 (matrix schema), §5 (test plan),
-  §6 (11-line plan).
+  §6 (11-line plan). Amendment pending (see §5 step 1).
 - `docs/reference/THREAT-MODEL-001.md` §5–§8.
 - `docs/reference/AUTH-SPEC-001.md` §5, §6, §9, §10.
-- `docs/US-ADD-001.md` §7.
-- `UMOJA-SECURE-BUILD-MASTER.md` §3.6, §3.7, §3.8.
+- `docs/US-ADD-001.md` §7, §8, §8.1 (com.google.* interpretation).
+- `UMOJA-SECURE-BUILD-MASTER.md` §3.6, §3.7, §3.8, §6, §11.
 
 ### Conformance data
 
 - `docs/reference/rfc8785-number-samples.json` — 24 samples.
 - `docs/reference/jcs-conformance/` — 6 pairs.
-- `docs/reference/canonical-matrix-test-vectors.json` — Umoja wrapper
-  vectors, currently scaffold.
+- `docs/reference/canonical-matrix-test-vectors.json` — generated.
 
 ### Current code shape
 
-JCS implementations (the new stuff):
+JCS + matrix crypto (the Session A work):
 - `backend/src/crypto/jcs.ts` — TS reference
 - `backend/src/crypto/jcs.test.ts` — 45 tests
-- `android/.../crypto/JcsNumberFormatter.kt` — ES6 number formatting
-- `android/.../crypto/JcsCanonicalizer.kt` — Kotlin canonicalizer
-- `android/app/src/test/java/com/umoja/secure/crypto/JcsNumberFormatterTest.kt`
-  — 4 tests
-- `android/app/src/test/java/com/umoja/secure/crypto/JcsCanonicalizerTest.kt`
-  — 11 tests
+- `backend/src/crypto/jcs-dump.ts` — TS producer for cross-check
+- `backend/src/crypto/matrix-schema.ts` + `.test.ts` — 23 tests
+- `backend/src/crypto/matrix-sign.ts` + `.test.ts` — 22 tests
+- `backend/scripts/generate-matrix-vectors.ts`
+- `android/.../crypto/JcsNumberFormatter.kt` — 4 tests
+- `android/.../crypto/JcsCanonicalizer.kt` — 11 tests
+- `android/.../crypto/JcsCrossCheckTest.kt` — 1 test
+- `android/.../crypto/AuthorizationMatrix.kt` — 23 tests
+- `android/.../crypto/MatrixSigner.kt` — 12 tests
+- `android/.../crypto/ProvisioningBundle.kt` — 16 tests
+- `android/.../crypto/MatrixBuilder.kt` — 9 tests
+- `scripts/jcs-cross-check.sh` — the harness
 
 Backend — pre-existing, unchanged:
 - `backend/src/auth/canonical.ts` — challenge canonicalizer. **Do not
@@ -616,12 +643,12 @@ Android — pre-existing, unchanged:
   **Do not modify.**
 - `android/.../auth/SessionManager.kt`
 - `android/.../transport/{AdminApi,ContactsApi,Socks5Bridge}.kt`
-- `android/.../ui/admin/AdminScreen.kt`
+- `android/.../ui/admin/AdminScreen.kt` — extended in P1-025
 
 ### Verify paths before reading
 
     find ~/umoja-secure/backend/src -name "*.ts" | grep -E "crypto|admin|enroll|contact|session|canonical" | sort
-    find ~/umoja-secure/android/app/src -name "*.kt" | grep -E "Admin|Contact|Device|Signal|Session|Canonical|Jcs" | sort
+    find ~/umoja-secure/android/app/src -name "*.kt" | grep -E "Admin|Contact|Device|Signal|Session|Canonical|Jcs|Matrix|Provisioning" | sort
 
 ### Notes for a new agent
 
@@ -631,16 +658,8 @@ to "SBOM generation and dependency review gate". Registry is
 authoritative. Do not "fix" the old commit label.
 
 **Canonical document provenance.** `US-ADD-001`, `US-MASTER-001`,
-`AUTH-SPEC-001`, `THREAT-MODEL-001` were authored on 2026-10-14. They did
+`AUTH-SPEC-001`, `THREAT-MODEL-001` were authored 2026-10-14. They did
 not exist before. Each carries a §1 Provenance section recording this.
 
-**Ground truth for JCS is the vendored corpus, not either
-implementation.** If TS and corpus ever disagree, TS is wrong. Same for
-Kotlin.
-
-**`toJSON` rejection is a deliberate deviation.** Both implementations
-reject objects with a `toJSON` method, even though RFC 8785's reference
-code calls it. Do not "fix" this to match the RFC.
-
-If a security-relevant question arises that none of these answers, do
-not guess. STOP and escalate, per Build Master §0.
+**If a security-relevant question arises that none of these answers,
+do not guess. STOP and escalate, per Build Master §0.**
