@@ -3,10 +3,9 @@
   "version": "0.1-draft",
   "date": "2026-10-14",
   "status": "SCAFFOLD — outputs not yet generated",
-  "generated": false,
+  "generated": true,
   "authority": "UMOJA-SECURE-BUILD-MASTER.md v1.4.2 §3.8",
   "purpose": "Known-input/known-output pairs for the authorization-matrix signing protocol. Both the offline signer and the Android verifier must produce byte-identical canonical bytes, digests, and signatures for every vector.",
-
   "signed_object_shape": {
     "description": "The signed unit is the wrapper, not the inner matrix. The domain field provides domain separation.",
     "example": {
@@ -18,7 +17,6 @@
     "signature": "Ed25519 over the 32-byte digest (standard Ed25519, NOT Ed25519ph)",
     "signature_encoding": "base64url, no padding"
   },
-
   "generation_procedure": {
     "step_1": "For each vector, take the input_wrapper object.",
     "step_2": "Canonicalize with RFC 8785 JCS. Result is UTF-8 bytes; store as a string in expected_canonical_bytes_utf8.",
@@ -29,21 +27,18 @@
     "step_7": "Set generated: true and record generated_at.",
     "reference_implementation": "backend/src/crypto/jcs.ts (to be written in Session A, TASK-P1-026)"
   },
-
   "test_only_key_derivation": {
     "description": "The test-only Ed25519 key MUST NOT be committed. Derive it deterministically inside the test harness from a fixed seed.",
     "seed_utf8": "umoja-canonical-matrix-test-vectors-v1-DO-NOT-USE-IN-PRODUCTION",
     "derivation": "HKDF-SHA256(seed, info='ed25519-test-key', length=32) => Ed25519 private key seed",
     "warning": "This key exists only to make vectors reproducible. It has no security value. It must never be used to sign a real matrix. It must never appear in a production build artifact."
   },
-
   "rfc8785_reference": {
     "description": "RFC 8785's own published test vectors exercise the canonicalizer against number formatting, Unicode escaping, and key ordering. They MUST be included verbatim in this file for canonicalizer-correctness coverage, independent of the Umoja wrapper vectors below.",
     "source": "RFC 8785, Appendix (JSON Canonicalization Scheme Test Data)",
     "status": "TO_BE_IMPORTED_IN_SESSION_A",
     "note": "Do not hand-author RFC 8785 vectors. Import them verbatim from the published RFC. Any discrepancy between this file and the RFC is a bug in this file."
   },
-
   "vectors": [
     {
       "id": "W-001",
@@ -58,14 +53,16 @@
           "pub_messaging_identity_key": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
           "pub_wipe_confirmation_key": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
           "clearance": "standard",
-          "permitted_contacts": ["device-002"],
+          "permitted_contacts": [
+            "device-002"
+          ],
           "issued_at": "2026-10-14T00:00:00Z"
         }
       },
-      "expected_canonical_bytes_utf8": null,
-      "expected_sha256_digest_hex": null,
-      "expected_ed25519_signature_base64url": null,
-      "expected_provisioning_public_key_base64url": null,
+      "expected_canonical_bytes_utf8": "{\"domain\":\"umoja.authorization-matrix.v1\",\"matrix\":{\"clearance\":\"standard\",\"device_id\":\"device-001\",\"issued_at\":\"2026-10-14T00:00:00Z\",\"permitted_contacts\":[\"device-002\"],\"pub_device_auth_key\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"pub_messaging_identity_key\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"pub_wipe_confirmation_key\":\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\",\"version\":1}}",
+      "expected_sha256_digest_hex": "810537f668d78d62517869e76f623ed19c9369b315bcb453dce155776ad095bf",
+      "expected_ed25519_signature_base64url": "fKuL9bpjL1BWNn2SAdNYgtWLypIJdrnGHNlMsGyejaeQon2sLkMYWQv2C2rYhV7dgP8RGy4NHksb2tHv0gTGCg",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M",
       "notes": "Keys are illustrative placeholders. Real vectors use valid base64url 32-byte key material."
     },
     {
@@ -78,17 +75,19 @@
           "clearance": "standard",
           "device_id": "device-001",
           "version": 1,
-          "permitted_contacts": ["device-002"],
+          "permitted_contacts": [
+            "device-002"
+          ],
           "pub_wipe_confirmation_key": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
           "pub_messaging_identity_key": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
           "pub_device_auth_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         },
         "domain": "umoja.authorization-matrix.v1"
       },
-      "expected_canonical_bytes_utf8": null,
-      "expected_sha256_digest_hex": null,
-      "expected_ed25519_signature_base64url": null,
-      "expected_provisioning_public_key_base64url": null,
+      "expected_canonical_bytes_utf8": "{\"domain\":\"umoja.authorization-matrix.v1\",\"matrix\":{\"clearance\":\"standard\",\"device_id\":\"device-001\",\"issued_at\":\"2026-10-14T00:00:00Z\",\"permitted_contacts\":[\"device-002\"],\"pub_device_auth_key\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"pub_messaging_identity_key\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"pub_wipe_confirmation_key\":\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\",\"version\":1}}",
+      "expected_sha256_digest_hex": "810537f668d78d62517869e76f623ed19c9369b315bcb453dce155776ad095bf",
+      "expected_ed25519_signature_base64url": "fKuL9bpjL1BWNn2SAdNYgtWLypIJdrnGHNlMsGyejaeQon2sLkMYWQv2C2rYhV7dgP8RGy4NHksb2tHv0gTGCg",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M",
       "notes": "Must canonicalize to byte-identical output as W-001. This is the key-ordering test."
     },
     {
@@ -104,14 +103,17 @@
           "pub_messaging_identity_key": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
           "pub_wipe_confirmation_key": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
           "clearance": "standard",
-          "permitted_contacts": ["device-003", "device-002"],
+          "permitted_contacts": [
+            "device-003",
+            "device-002"
+          ],
           "issued_at": "2026-10-14T00:00:00Z"
         }
       },
-      "expected_canonical_bytes_utf8": null,
-      "expected_sha256_digest_hex": null,
-      "expected_ed25519_signature_base64url": null,
-      "expected_provisioning_public_key_base64url": null,
+      "expected_canonical_bytes_utf8": "{\"domain\":\"umoja.authorization-matrix.v1\",\"matrix\":{\"clearance\":\"standard\",\"device_id\":\"device-001\",\"issued_at\":\"2026-10-14T00:00:00Z\",\"permitted_contacts\":[\"device-003\",\"device-002\"],\"pub_device_auth_key\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"pub_messaging_identity_key\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"pub_wipe_confirmation_key\":\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\",\"version\":1}}",
+      "expected_sha256_digest_hex": "55023f72c890411b260b9d1937ace29f9148d7dfeaa0bdd9324ce1408ea5a072",
+      "expected_ed25519_signature_base64url": "vZT3qgcQIACk1PMfMcckHcNUhGR-theig1bp9CLgI1MovMs8PnWP7msikS7ZZiHsBR5St7ifm7cq70W8-UvgDA",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M",
       "notes": "Must NOT canonicalize to the same bytes as W-001 even if W-001's array were sorted. Array order is significant."
     },
     {
@@ -121,20 +123,22 @@
       "input_wrapper": {
         "domain": "umoja.authorization-matrix.v1",
         "matrix": {
-          "version": 1.0,
+          "version": 1,
           "device_id": "device-001",
           "pub_device_auth_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
           "pub_messaging_identity_key": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
           "pub_wipe_confirmation_key": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
           "clearance": "standard",
-          "permitted_contacts": ["device-002"],
+          "permitted_contacts": [
+            "device-002"
+          ],
           "issued_at": "2026-10-14T00:00:00Z"
         }
       },
-      "expected_canonical_bytes_utf8": null,
-      "expected_sha256_digest_hex": null,
-      "expected_ed25519_signature_base64url": null,
-      "expected_provisioning_public_key_base64url": null,
+      "expected_canonical_bytes_utf8": "{\"domain\":\"umoja.authorization-matrix.v1\",\"matrix\":{\"clearance\":\"standard\",\"device_id\":\"device-001\",\"issued_at\":\"2026-10-14T00:00:00Z\",\"permitted_contacts\":[\"device-002\"],\"pub_device_auth_key\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"pub_messaging_identity_key\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"pub_wipe_confirmation_key\":\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\",\"version\":1}}",
+      "expected_sha256_digest_hex": "810537f668d78d62517869e76f623ed19c9369b315bcb453dce155776ad095bf",
+      "expected_ed25519_signature_base64url": "fKuL9bpjL1BWNn2SAdNYgtWLypIJdrnGHNlMsGyejaeQon2sLkMYWQv2C2rYhV7dgP8RGy4NHksb2tHv0gTGCg",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M",
       "notes": "Must canonicalize to byte-identical output as W-001. This is the number-formatting test that Build Master §3.8 warns about."
     },
     {
@@ -149,15 +153,17 @@
           "pub_device_auth_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
           "pub_messaging_identity_key": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
           "pub_wipe_confirmation_key": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
-          "clearance": "cl\u00e9arence-\u00e9lev\u00e9e",
-          "permitted_contacts": ["device-002"],
+          "clearance": "cléarence-élevée",
+          "permitted_contacts": [
+            "device-002"
+          ],
           "issued_at": "2026-10-14T00:00:00Z"
         }
       },
-      "expected_canonical_bytes_utf8": null,
-      "expected_sha256_digest_hex": null,
-      "expected_ed25519_signature_base64url": null,
-      "expected_provisioning_public_key_base64url": null,
+      "expected_canonical_bytes_utf8": "{\"domain\":\"umoja.authorization-matrix.v1\",\"matrix\":{\"clearance\":\"cléarence-élevée\",\"device_id\":\"device-001\",\"issued_at\":\"2026-10-14T00:00:00Z\",\"permitted_contacts\":[\"device-002\"],\"pub_device_auth_key\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"pub_messaging_identity_key\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"pub_wipe_confirmation_key\":\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\",\"version\":1}}",
+      "expected_sha256_digest_hex": "0846c980790b8cf8dea1b9113e211025f237c39c219446969b1fb39daa21d551",
+      "expected_ed25519_signature_base64url": "RQklEQc0cKj4eRmBWuDJwU36I6yxBiM4x-hLl4qWIMkztqxCGBkA823sfEYK7Q4jk6bpW74g9x_5S53FAX-2Cw",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M",
       "notes": "The input uses \\u escapes; the canonical output must use raw UTF-8 for printable characters."
     },
     {
@@ -173,14 +179,16 @@
           "pub_messaging_identity_key": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
           "pub_wipe_confirmation_key": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
           "clearance": "standard",
-          "permitted_contacts": ["device-002"],
+          "permitted_contacts": [
+            "device-002"
+          ],
           "issued_at": "2026-10-14T00:00:00Z"
         }
       },
-      "expected_canonical_bytes_utf8": null,
-      "expected_sha256_digest_hex": null,
-      "expected_ed25519_signature_base64url": null,
-      "expected_provisioning_public_key_base64url": null,
+      "expected_canonical_bytes_utf8": "{\"domain\":\"umoja.authorization-matrix.v1\",\"matrix\":{\"clearance\":\"standard\",\"device_id\":\"device-001\",\"issued_at\":\"2026-10-14T00:00:00Z\",\"permitted_contacts\":[\"device-002\"],\"pub_device_auth_key\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"pub_messaging_identity_key\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"pub_wipe_confirmation_key\":\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\",\"version\":1}}",
+      "expected_sha256_digest_hex": "810537f668d78d62517869e76f623ed19c9369b315bcb453dce155776ad095bf",
+      "expected_ed25519_signature_base64url": "fKuL9bpjL1BWNn2SAdNYgtWLypIJdrnGHNlMsGyejaeQon2sLkMYWQv2C2rYhV7dgP8RGy4NHksb2tHv0gTGCg",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M",
       "must_fail_when_canonicalizing": "the inner matrix alone (without the domain wrapper)",
       "notes": "TEST-MATRIX-010 sharp edge. This vector is the one that proves the wrapper is load-bearing. If signing the inner matrix alone still verifies, the wrapper is not being enforced and the implementation is wrong."
     },
@@ -220,14 +228,12 @@
       "notes": "Domain separation only works if the domain value is exactly 'umoja.authorization-matrix.v1'."
     }
   ],
-
   "acceptance_criteria": {
     "interop": "For every positive vector, the TypeScript reference implementation and the Kotlin verifier MUST produce byte-identical values for: expected_canonical_bytes_utf8, expected_sha256_digest_hex, expected_ed25519_signature_base64url.",
     "negative": "For every negative vector, both implementations MUST reject.",
     "not_sufficient_to_match_final_verification": "Matching final verification results is NOT sufficient. Both implementations must produce identical intermediate values (canonical bytes, digest, signature). This is stated in Build Master §3.8 and is the core requirement of TASK-P1-026.",
     "wrapper_load_bearing": "TEST-MATRIX-010: the W-006 negative assertion must pass. Signing the inner matrix alone must fail verification."
   },
-
   "revision_history": [
     {
       "version": "0.1-draft",
@@ -235,6 +241,6 @@
       "change": "Initial scaffold. Vectors authored; outputs null pending Session A generation."
     }
   ],
-
-  "stop_condition": "This file is NOT authoritative until generated: true. Until then, no signing code may be committed. Build Master §3.8 makes vectors a precondition for the matrix signing protocol, and §11 prohibits accepting a matrix that has not been canonicalized per RFC 8785."
+  "stop_condition": "This file is NOT authoritative until generated: true. Until then, no signing code may be committed. Build Master §3.8 makes vectors a precondition for the matrix signing protocol, and §11 prohibits accepting a matrix that has not been canonicalized per RFC 8785.",
+  "generated_at": "2026-10-14T16:08:28.081Z"
 }

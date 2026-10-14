@@ -17,7 +17,8 @@
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src --ext .ts",
     "migrate": "tsx --env-file=.env scripts/migrate.ts",
     "sbom": "cyclonedx-npm --output-file sbom.json",
-    "verify-audit": "tsx --env-file=.env scripts/verify-audit.ts"
+    "verify-audit": "tsx --env-file=.env scripts/verify-audit.ts",
+    "generate-matrix-vectors": "tsx scripts/generate-matrix-vectors.ts"
   },
   "dependencies": {
     "@fastify/cors": "10.0.1",
