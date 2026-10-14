@@ -1,7 +1,7 @@
 # US-ADD-001 — Approved Decisions and Parameters
 
 Document ID: US-ADD-001
-Version: 0.1 (draft for owner review)
+Version: 0.2 (draft for owner review)
 Date: 2026-10-14
 Authority: Highest authority for approved decisions and parameters. Per UMOJA-SECURE-BUILD-MASTER.md §0, this document wins over US-MASTER-001 in any conflict.
 Status: Draft. Not yet in force. Subject to revision.
@@ -207,6 +207,28 @@ Violating any of these requires reverting the entire session:
   enrollment.
 - Signing the raw canonical bytes instead of the SHA-256 digest.
 
+### §8.1 Interpretation of the `com.google.*` prohibition
+
+The prohibition on `com.google.*` runtime dependencies in §8 applies to
+Google-the-company runtime services and SDKs — Firebase, FCM, Google
+Play services, Tink, `googleapis`, `gaxios`, `google-auth-library`, and
+their transitive dependencies. It does not apply to Maven artifacts
+whose groupId begins with `com.google.` but which are Apache-2.0
+community projects with no Google service dependency, no Google runtime
+callback, and no network egress to Google-controlled infrastructure.
+
+Currently identified as outside the prohibition:
+
+- `com.google.zxing:core` — community ZXing, Apache 2.0, no Google
+  services, no runtime callback. Pulled transitively by
+  `com.journeyapps:zxing-android-embedded`.
+
+New artifacts matching the namespace but not the intent must be
+individually reviewed against this paragraph and recorded in
+`docs/security/DEPENDENCY-EXCEPTIONS.md` with owner, rationale, and
+date. The §6 dependency-tree grep continues to flag the namespace
+pattern; human review cites this section when clearing.
+
 ---
 
 ## §9 Authority and precedence
@@ -237,6 +259,7 @@ Do not guess.
 | Version | Date | Change |
 |---------|------|--------|
 | 0.1 | 2026-10-14 | Initial draft. Authored from Build Master v1.4.2 §3, §4, §6, §11 + owner attestation. |
+| 0.2 | 2026-10-14 | §8.1 added: interprets the `com.google.*` prohibition as covering Google-the-company runtime services, not every matching Maven groupId. Named carve-out: `com.google.zxing:core` (community Apache-2.0, no Google services). Future matching artifacts require individual review. |
 
 ---
 
