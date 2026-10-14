@@ -24,6 +24,7 @@ const CreateTokenBody = z.object({
   role: z.enum(['owner', 'admin', 'user', 'auditor']),
   label_hint: z.string().max(64).optional(),
   ttl_seconds: z.number().int().min(60).max(86400).default(86400),
+  bound_public_key: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
 });
 
 const ReasonBody = z.object({ reason: z.string().min(1).max(256) });
@@ -77,6 +78,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         role: parse.data.role,
         label_hint: parse.data.label_hint,
         ttl_seconds: parse.data.ttl_seconds,
+        bound_public_key: parse.data.bound_public_key,
       });
       return reply.code(201).send(result);
     },

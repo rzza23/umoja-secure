@@ -9,6 +9,7 @@ export interface CreateTokenInput {
   role: 'owner' | 'admin' | 'user' | 'auditor';
   label_hint?: string;
   ttl_seconds: number;
+  bound_public_key: string;
 }
 
 export interface CreateTokenResult {
@@ -20,6 +21,11 @@ export interface CreateTokenResult {
 export async function createEnrollmentToken(
   input: CreateTokenInput,
 ): Promise<CreateTokenResult> {
+  const boundKey = Buffer.from(input.bound_public_key, 'base64url');
+  if (boundKey.length !== 32) {
+    throw Object.assign(new Error('invalid_bound_public_key'), { statusCode: 400 });
+  }
+
   const token = randomBytes(32).toString('base64url');
   const tokenHash = createHash('sha256').update(token, 'utf8').digest();
   const expiresAt = new Date(Date.now() + input.ttl_seconds * 1000);
@@ -27,8 +33,8 @@ export async function createEnrollmentToken(
   return withTransaction(async (tx) => {
     const res = await tx.query(
       `INSERT INTO enrollment_tokens
-         (token_hash, org_id, role, label_hint, expires_at, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
+         (token_hash, org_id, role, label_hint, expires_at, created_by, bound_public_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING token_id, expires_at`,
       [
         tokenHash,
@@ -37,6 +43,7 @@ export async function createEnrollmentToken(
         input.label_hint ?? null,
         expiresAt,
         input.actor_device_id,
+        boundKey,
       ],
     );
 

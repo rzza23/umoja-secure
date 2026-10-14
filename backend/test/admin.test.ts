@@ -73,7 +73,10 @@ describe('admin plane', () => {
         method: 'POST',
         url: '/admin/enrollment-tokens',
         headers: { authorization: `Bearer ${u.token}` },
-        payload: { role: 'user' },
+        payload: {
+          role: 'user',
+          bound_public_key: randomBytes(32).toString('base64url'),
+        },
       });
       expect(res.statusCode).toBe(403);
     });
@@ -84,7 +87,11 @@ describe('admin plane', () => {
         method: 'POST',
         url: '/admin/enrollment-tokens',
         headers: { authorization: `Bearer ${admin.token}` },
-        payload: { role: 'user', ttl_seconds: 3600 },
+        payload: {
+          role: 'user',
+          ttl_seconds: 3600,
+          bound_public_key: randomBytes(32).toString('base64url'),
+        },
       });
       expect(res.statusCode).toBe(201);
       const body = res.json();
@@ -98,7 +105,10 @@ describe('admin plane', () => {
         method: 'POST',
         url: '/admin/enrollment-tokens',
         headers: { authorization: `Bearer ${admin.token}` },
-        payload: { role: 'admin' },
+        payload: {
+          role: 'admin',
+          bound_public_key: randomBytes(32).toString('base64url'),
+        },
       });
       expect(res.statusCode).toBe(403);
     });
@@ -109,7 +119,10 @@ describe('admin plane', () => {
         method: 'POST',
         url: '/admin/enrollment-tokens',
         headers: { authorization: `Bearer ${owner.token}` },
-        payload: { role: 'admin' },
+        payload: {
+          role: 'admin',
+          bound_public_key: randomBytes(32).toString('base64url'),
+        },
       });
       expect(res.statusCode).toBe(201);
     });
@@ -122,7 +135,11 @@ describe('admin plane', () => {
         method: 'POST',
         url: '/admin/enrollment-tokens',
         headers: { authorization: `Bearer ${admin.token}` },
-        payload: { role: 'user', ttl_seconds: 3600 },
+        payload: {
+          role: 'user',
+          ttl_seconds: 3600,
+          bound_public_key: randomBytes(32).toString('base64url'),
+        },
       });
       const res = await app.inject({
         method: 'GET',

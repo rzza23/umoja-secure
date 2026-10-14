@@ -38,9 +38,9 @@ export async function consumeEnrollmentToken(
     const tok = await tx.query(
       `SELECT token_id, org_id, role, expires_at, used_at, revoked_at
        FROM enrollment_tokens
-       WHERE token_hash = $1
+       WHERE token_hash = $1 AND bound_public_key = $2
        FOR UPDATE`,
-      [tokenHash],
+      [tokenHash, publicKey],
     );
 
     if (tok.rowCount !== 1) throw new EnrollmentError('invalid_token');
