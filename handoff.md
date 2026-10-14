@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-14 (Session A — JCS done both sides, cross-check harness next)
+Last updated: 2026-10-14 (Session A — JCS cross-verified, vectors populated, matrix schema next)
 Purpose: Enable a new AI agent or developer session to pick up the project
 without re-reading the entire chat history.
 
@@ -145,6 +145,40 @@ handoff; two still open:
 against the same external corpus.** 45 TS tests + 15 Kotlin tests,
 byte-identical across every shared input.
 
+**Cross-check harness — done** (commit `41f52b0`). Closes KI-012.
+
+- `backend/src/crypto/jcs-dump.ts` — TS producer, writes
+  `{id}\t{base64(canonical)}` lines to stdout.
+- `android/.../crypto/JcsCrossCheckTest.kt` — Kotlin producer, writes the
+  same shape to `android/app/build/jcs-cross-check/kotlin.tsv`.
+- `scripts/jcs-cross-check.sh` — runs both, diffs, exits nonzero on any
+  divergence.
+
+**Result: PASS — 38 inputs, byte-identical output from both
+implementations.** (6 cyberphone pairs + 8 Umoja wrapper vectors + 24 RFC
+number samples.) This is the proof that "two implementations passing
+their own tests" was upgraded to "two implementations that produce the
+same bytes."
+
+**Matrix test vectors — populated** (commit `e6eed9b`). Closes KI-004.
+
+- `backend/scripts/generate-matrix-vectors.ts` — fills the six
+  `expected_*` fields for each W-series vector. Test-only Ed25519 key
+  derived deterministically from a fixed seed per the file's
+  `test_only_key_derivation` block. Uses **Node built-in crypto** —
+  `@noble/ed25519` (KI-010) is not involved and remains open for the
+  production signing path.
+- `docs/reference/canonical-matrix-test-vectors.json` now has
+  `generated: true`, `generated_at: 2026-10-14T16:08:28.081Z`, all six
+  W-series vectors filled, one distinct test public key:
+  `hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M`.
+- Each signature is immediately verified before writing.
+- Cross-check still passes with the populated file (38 inputs, identical).
+- Run: `cd backend && npm run generate-matrix-vectors`.
+- Determinism caveat: the crypto outputs are deterministic, but the
+  `generated_at` timestamp is not — re-running produces the same
+  signatures and a different timestamp.
+
 ---
 
 ## 4. Known issues
@@ -157,8 +191,12 @@ byte-identical across every shared input.
 ### KI-003: Emulator loses app data on cold boot
 Shut down emulator cleanly (menu → Power off). Or accept re-enrollment.
 
-### KI-004: Canonical-matrix test vectors still scaffold
-`docs/reference/canonical-matrix-test-vectors.json` has `generated: false`.
+### KI-004 (RESOLVED): Canonical-matrix test vectors still scaffold
+Resolved by commit `e6eed9b`. File now has `generated: true`, all six
+W-series vectors populated, test-only Ed25519 key derived from a fixed
+seed. See Section 3.
+
+(Historical context: `docs/reference/canonical-matrix-test-vectors.json` originally had `generated: false`.
 Inputs authored; outputs `null`.
 
 **Now fully unblockable.** TS and Kotlin canonicalizers are both proven.
@@ -205,8 +243,8 @@ over hand-transcription because the number-parsing boundary (BigDecimal
 on the org.json side) is part of the protocol and a hand-transcribed
 corpus would have silently skipped it.
 
-### KI-012: JCS implementations must be cross-checked, not just
-  individually validated
+### KI-012 (RESOLVED): JCS implementations must be cross-checked, not
+  just individually validated
 
 Both sides now pass their own corpora. **That is necessary but not
 sufficient.** The whole point of the from-scratch decision was
@@ -216,14 +254,24 @@ inputs.
 A cross-check harness does not yet exist. Until it does, a divergence on
 an input neither corpus covers would go undetected.
 
-See §5 item 1.
+**Resolved by commit `41f52b0`.** `scripts/jcs-cross-check.sh` runs both
+implementations on all 38 inputs and fails on any divergence. Result is
+currently PASS. See Section 3.
 
 ---
 
 ## 5. Immediate next steps (recommended order)
 
-**1. Build the cross-check harness.** Feed every input through TS and
-   Kotlin; diff the bytes; fail on any divergence.
+**1. Matrix schema.** Single TS type + single Kotlin data class. Fields
+   per `docs/architecture/ADR-PROVISIONING-001.md` §4. Separate
+   `pub_device_auth_key` and `pub_messaging_identity_key`.
+
+   **Decision needed before drafting:** exact field set (ADR §4 lists
+   version, device_id, pub_device_auth_key, pub_messaging_identity_key,
+   pub_wipe_confirmation_key, clearance, permitted_contacts, issued_at)
+   and whether key material is base64url strings (matches the wire format
+   and the generated test vectors) or raw bytes (avoids boundary
+   encoding, but Kotlin byte arrays complicate equality and JSON).
 
    Suggested shape:
    - `backend/src/crypto/jcs-dump.ts` — reads JSON from stdin, writes
