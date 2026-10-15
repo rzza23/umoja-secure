@@ -372,19 +372,28 @@ Recorded:
 - P1-019 propagation flag: the QR format is authoritative in the ADR;
   the enrolling-device generator must match.
 
-**2. Verify TASK-P1-025 AdminScreen on emulator.** Manual run: launch
-Admin, scan a synthetic QR payload (any JSON editor generating the
-amended format), confirm parse, build matrix, hash displays, copy
-buttons work. Screenshot for the record. No instrumented tests exist;
-manual verification is the safety net.
+**2. Verify TASK-P1-025 AdminScreen on emulator — IN PROGRESS.** The
+gate: launch Admin, load a synthetic QR payload, confirm parse →
+build matrix → hash displays → copy buttons work. Screenshot for the
+record. No instrumented tests exist; manual verification is the
+safety net.
 
-**3. Backend `bound_public_key` schema addition.** Per ADR §2 Q2 and
-AUTH-SPEC-001 §10.2:
+`ScanContract` has no injectable path on an emulator without a second
+device or virtual-camera setup. A `FLAG_DEBUGGABLE`-gated paste field
+is added inline in the "Provision new device" section (no
+`BuildConfig` change; AGP 8.x does not generate it unless
+`buildConfig = true`). Zero production behavior change.
 
-- `enrollment_tokens` gains `bound_public_key BYTEA`.
-- `consumeEnrollmentToken` updated to match on the bound key.
-- Tests: TEST-TOKEN-CONCURRENT, TEST-TOKEN-SUBSTITUTION.
-- Separate task (TASK-P1-014-adjacent). Not P1-025.
+**3. Android `bound_public_key` wiring — FOLLOW-UP.** Backend landed
+(commit `3d3ff60`, migration `012_enrollment_tokens_bound_public_key.sql`,
+tests 175 → 178). Android side still needs:
+
+- `AdminApi.CreateTokenRequest` gains `boundPublicKey: String`.
+- `AdminScreen.kt` "Create enrollment token" section reads
+  `scannedBundle.pubDeviceAuthKey` and passes it.
+- **Blocked on a UX decision:** does the admin scan the device QR
+  first, then create a token? Or does the token section refuse until
+  a bundle exists? Answer before writing code.
 
 **4. TASK-P1-033 — offline provisioning-key signing workflow.**
 
@@ -576,6 +585,10 @@ Rebuild after flipping — read at HttpClient construction time.
   - zsh tilde expansion fires inside what looks like a comment:
     `zsh: no such user or named directory: 190`.
   Put annotations in prose above the block, not inside it.
+- **Prefer `python3` + `assert count == 1` over multi-hunk `git apply`
+  patches.** Session A: three multi-hunk patches failed on paste
+  truncation or hunk drift. Direct file edits with a count guard are
+  self-verifying and verbose on failure.
 - Placeholders like `<paste content here>` are never typed literally.
 - When debugging, log the exception before swallowing it.
 - For libsignal, don't hold native handles across scope boundaries in
@@ -597,8 +610,8 @@ Rebuild after flipping — read at HttpClient construction time.
   implementations reject objects with a `toJSON` method even though
   RFC 8785's reference code calls it. Do not "fix" this.
 
-Current verified state: **77 Android JVM tests** and **175 backend
-tests** (both verified 2026-10-14 from runner output).
+Current verified state: **77 Android JVM tests** (2026-10-14) and
+**178 backend tests** (2026-10-15, 13 files), both from runner output.
 
 ---
 
