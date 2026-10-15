@@ -160,6 +160,10 @@ fun AdminScreen(
             }
             item {
                 Column {
+                    var debugPasteText by remember { mutableStateOf("") }
+                    val isDebug = (context.applicationInfo.flags and
+                        android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
                     Button(onClick = {
                         val options = ScanOptions().apply {
                             setDesiredBarcodeFormats(ScanOptions.QR_CODE)
@@ -169,6 +173,33 @@ fun AdminScreen(
                         }
                         scanLauncher.launch(options)
                     }) { Text("Scan device QR") }
+
+                    if (isDebug) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Debug: paste QR payload",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        OutlinedTextField(
+                            value = debugPasteText,
+                            onValueChange = { debugPasteText = it },
+                            label = { Text("Enrollment JSON") },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Row {
+                            Button(onClick = {
+                                try {
+                                    scannedBundle = ProvisioningBundle.parse(debugPasteText)
+                                    error = null
+                                } catch (e: IllegalArgumentException) {
+                                    error = "QR parse failed: ${e.message}"
+                                }
+                            }) { Text("Load JSON") }
+                            Spacer(Modifier.width(8.dp))
+                            TextButton(onClick = { debugPasteText = "" }) { Text("Clear") }
+                        }
+                    }
 
                     scannedBundle?.let { b ->
                         Spacer(Modifier.height(8.dp))
