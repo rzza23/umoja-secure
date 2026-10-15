@@ -22,6 +22,10 @@ export const enrollmentRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(201).send(result);
     } catch (err) {
       if (err instanceof EnrollmentError) {
+        req.log.warn(
+          { error: err.code, device_public_key: parse.data.device_public_key, label: parse.data.label },
+          'enrollment rejected',
+        );
         return reply.code(err.statusCode).send({ error: err.code });
       }
       req.log.error({ err }, 'enrollment failed');
