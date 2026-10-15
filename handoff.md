@@ -85,7 +85,9 @@ Endpoints:
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
 - **JVM unit tests: 77** (verified from XML this session)
-- **androidTest: 0 files** (verified this session)
+- **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
+  connectedAndroidTest XML; was wrongly recorded as 0 files in an
+  earlier handoff — see KI-013)
 
 Note: a prior handoff claimed 98 Android tests. That was wrong. The
 actual prior count was ~1 (ExampleUnitTest only); the crypto work
@@ -291,6 +293,27 @@ The emulator was deleted and recreated during Session A troubleshooting.
   backend logs the pubkey a device presented when enrollment fails.
   Without this, there is no way to diagnose binding mismatches. Keep it.
 
+### Session A follow-up — enrollment.ts pubkey log (commit 7992fec)
+
+`backend/src/routes/enrollment.ts` gained a `req.log.warn` on enrollment
+rejection that prints the presented `device_public_key` and `label` beside
+the error code. Applied during Session A, committed 2026-10-15.
+`device_public_key` is not in the redact list (public key, not secret), so
+the log prints as intended. This is the diagnostic that made binding
+mismatches debuggable during the emulator bootstrap.
+
+### WipeConfirmationKeyManager (commit 8bd4ab5, tag v0.33-wipe-key)
+
+`android/.../crypto/WipeConfirmationKeyManager.kt` — composition wrapper
+over `DeviceKeyManager` with alias `umoja.wipe.confirmation.v1`. Ed25519
+keypair, distinct Keystore entry and prefs slot from the device auth key.
+Public surface: `hasKey`, `ensureKeyPair`, `publicKeyBase64Url`, `sign`,
+`deleteKey`. KDoc on `deleteKey` records the §3.4 single-use contract:
+called by the duress-wipe flow after the wipe notification is sent,
+best-effort; do not call from any other path; do not treat as
+reset-and-regenerate. 7 androidTest. Prerequisite for TASK-P1-019 (the
+enrolling device's QR payload includes the wipe-confirmation pubkey).
+
 ### Tor mode — worked (do not chase a phantom bug)
 
 An early `POST /enrollment` during the bootstrap returned client-side
@@ -362,6 +385,10 @@ The prior handoff claimed "85 backend tests, 48 Android tests"
 (baseline), then "98 Android tests" after Session A crypto work.
 Actual JVM unit-test count after Session A is 77; androidTest is 0
 files. Backend count verified this session: 175 (later raised to 178 by commit 3d3ff60, the token-binding work).
+
+The androidTest count was also wrong in an earlier handoff ("0 files",
+actual 6 files / 46 tests as of 2026-10-15). Same failure mode: counts
+propagated without verification against runner output.
 
 **Consequence:** do not propagate test counts from prior handoffs.
 Recount from test-runner output.
@@ -447,10 +474,19 @@ tests 175 → 178). Android side still needs:
 - Admin app attaches signature and pushes signed matrix.
 - **The admin app never holds the provisioning private key.**
 
-**5. TASK-P1-019 — enrolling-device QR generator.** Must emit the
-amended `umoja.enrollment-request.v1` format. Device generates
-`device_id` (UUID v4) at first provisioning-mode launch, stores in
-DataStore.
+**5. TASK-P1-019 — enrolling-device QR generator — IN PROGRESS.**
+Must emit the amended `umoja.enrollment-request.v1` format. Device
+generates `device_id` (UUID v4) at first entry to the new
+`EnrollmentQrScreen`, stores in `SecureStorage` (not DataStore — the
+handoff's "DataStore" wording was descriptive, not prescriptive; see
+Commit 2 notes when they land). QR is rendered via
+`com.journeyapps.barcodescanner.BarcodeEncoder` (already a dependency).
+Payload builder is a pure function; unit-tested against
+`ProvisioningBundle.parse` for producer/consumer interop. Manual
+round-trip required (generate on emulator, scan with admin app).
+
+Wipe-confirmation key prerequisite: DONE — `WipeConfirmationKeyManager`
+(commit `8bd4ab5`).
 
 **6. TASK-P1-026 remainder — client verification and storage.**
 Re-canonicalize wrapper; verify Ed25519 against pinned provisioning
@@ -654,8 +690,11 @@ Rebuild after flipping — read at HttpClient construction time.
   implementations reject objects with a `toJSON` method even though
   RFC 8785's reference code calls it. Do not "fix" this.
 
-Current verified state: **77 Android JVM tests** (2026-10-14) and
-**178 backend tests** (2026-10-15, 13 files), both from runner output.
+Current verified state: **77 Android JVM tests** (2026-10-14),
+**46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
+and **178 backend tests** (2026-10-15, 13 files), all from runner output.
+Android JVM and androidTest are tracked separately — they run on different
+infrastructure (Mac vs emulator) and must not be summed.
 
 ---
 
