@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-15 (Session A — P1-019 done; KI-019 resolved (a); §5 item 3 fully specified; next: §5 item 3)
+Last updated: 2026-10-15 (Session A — §5 item 3 done: KI-019 passthrough + A1 inline token flow verified end-to-end; next: P1-026)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -44,8 +44,8 @@ Authoritative documents (all exist on disk):
 
 - Node.js 24.x, Fastify 5.12.5, PostgreSQL 16
 - Docker-deployable (docker compose up -d --build from repo root)
-- **178 tests passing** (13 test files; verified 2026-10-15 via
-  `npm test`).
+- **192 tests passing** (14 test files; verified 2026-10-15 via
+  `npm test` — +12 deviceId.test.ts, +2 enrollment route tests).
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -406,6 +406,60 @@ Implementation changes scoped into the `bound_public_key` wiring step
 Not a P1-019 regression — the QR round-trip that P1-019 was scoped to
 prove works correctly.
 
+### §5 item 3 — Android bound_public_key wiring + KI-019 passthrough (commit `24cf292`)
+
+Done and verified end-to-end.
+
+**Backend (commit `f361cb0`):**
+- `backend/src/enrollment/deviceId.ts` (new): strict canonical
+  hyphenated UUID schema. Extracted so the route stays a one-line
+  parse and the validator is testable in isolation.
+- `consume.ts`: `randomUUID()` → `input.device_id`.
+- `routes/enrollment.ts`: `device_id` added to `EnrollmentBody`;
+  reject with 400 `invalid_request` before any DB write; the warn
+  log on the rejected path gained `device_id`.
+- 14 new tests: `deviceId.test.ts` (12) plus
+  TEST-ENROLL-DEVICEID-ECHO and TEST-ENROLL-DEVICEID-COLLISION.
+  Backend 178 → 192.
+
+**Android (commit `24cf292`):**
+- `AdminApi.CreateTokenRequest` gains `boundPublicKey`; wire field
+  `bound_public_key`.
+- `EnrollmentRequest` gains `deviceId`; wire field `device_id`.
+  Threaded from `DeviceIdStore.getOrCreate()` in
+  `MainActivity.enrollDevice`.
+- `AdminScreen`: strict A1. Scanned-device card gains the inline
+  "Create enrollment token for this device" button (role hardcoded
+  `"user"`, `boundPublicKey` from the bundle) and a "Copy token"
+  affordance. Standalone "Create enrollment token" section deleted.
+- `createdToken` state hoisted from a `key(b.deviceId)`-scoped
+  `remember` to screen scope. The `key`-scoped version did not
+  recompose on state write (observed on emulator: status message
+  rendered, token text did not).
+
+**Strict A1 rationale.** Removing the role picker converts a
+privilege-escalation attack from "stolen admin phone + one tap"
+into "stolen admin phone + backend SQL access." The offline signer
+(P1-033) already keeps the provisioning private key off the admin
+app; strict A1 closes the adjacent gap where the app could mint
+non-`user` tokens. It removes the UI's ability to create second-
+admin tokens — recorded as a follow-up (§5 item 9).
+
+**Verification (manual, 2026-10-15).** Synthetic payload
+(`device_id = 1c364f88-ab60-4f02-8b27-36f7f11568e8`, generated at
+`/tmp/a1-payload.json`) loaded into the admin debug paste field.
+Token created via the inline button; psql confirmed `role = user`
+and `bound_public_key` byte-for-byte matching the payload's
+`pub_device_auth_key`. curl `POST /enrollment` with the payload's
+`device_id` returned the same value in the response body; `devices`
+row carried it with `status = active`; `enrollment_tokens.used_by_
+device_id` referenced it. Screenshots of the card, the token row,
+and the device row captured.
+
+**Not verified by this task:** the Android client's `device_id`
+transmission at enrollment time is compile-verified only. The full
+client-side round-trip is blocked by KI-020 (below).
+
 ---
 
 ## 4. Known issues
@@ -486,11 +540,16 @@ ADR recorded. File-level verification is therefore definitional, not
 independent. Recorded as documented exception (b). Amendment landed in
 ADR §7.1.1 (commit `4abcf53`).
 
-### KI-015 (NEW): `AdminScreen.kt.bak-navdiag` is tracked
-`android/app/src/main/java/com/umoja/secure/ui/admin/AdminScreen.kt.bak-navdiag`
-is in `git ls-files`. Backup file in a source tree — pollutes the
-package, ends up on classpath. Delete in a small cleanup commit.
-Not folded into P1-025.
+### KI-015 (CORRECTED 2026-10-15): six tracked backup files
+`git ls-files | grep -E '\.bak|\.orig|\.swp|~$'` returns six:
+`MainActivity.kt.bak`, `MainActivity.kt.bak-navdiag`,
+`AdminScreen.kt.bak-navdiag`, `MainNavigation.kt.bak`,
+`MainNavigation.kt.bak-tab-sync`, `backend/package.json.bak`.
+
+The prior text said "one file" and claimed it "ends up on classpath."
+Both wrong. Gradle's Kotlin compiler ignores `.bak` — the file does
+not reach the classpath. The actual harm is repo pollution and
+search noise. Delete all six in a small cleanup commit.
 
 ### KI-016 (NEW): Duplicated base64url validators
 `ProvisioningBundle.kt` and `AuthorizationMatrix.kt` each define
@@ -510,6 +569,35 @@ Matrix `version` is admin-entered with no server-side source of truth.
 Monotonicity is device-enforced (§3.7), so a bad number fails safe,
 but the admin has no way to query "what version is currently
 authorized." Future improvement.
+
+### KI-020 (NEW): EnrollmentQrScreen unreachable before authentication
+`EnrollmentQrScreen` is reached via Settings → "Enrollment QR",
+which is only reachable from `MainNavigation`, which is only
+reachable after `AppScreen.Authenticated`. A fresh device starts at
+`AppScreen.Enrollment` and cannot reach Settings.
+
+**Consequence:** a fresh device cannot produce its enrollment QR.
+The admin cannot scan a real device during cold provisioning. The
+A1 verification sidestepped this with the admin-side debug paste
+field; the real QR flow requires the fix.
+
+**Fix (small):** add a "Show enrollment QR" button to
+`EnrollmentScreen` itself, opening `EnrollmentQrScreen` as a
+full-screen overlay (same pattern as `openChat` in the admin
+screen).
+
+**Blocking:** the real QR provisioning round-trip. Does not block
+P1-026 (client verification can proceed against a synthetic or
+already-scanned bundle).
+
+### KI-021 (NEW): emulator 5556 black screen after cold boot
+`Pixel_9_API35` (or `Pixel_9_API35_B` — the AVD name in the launch
+log did not match the handoff's recorded name) boots to a black
+framebuffer on cold boot. `adb` connects, `sys.boot_completed = 1`,
+but the display is black. Likely GPU/environment config, not a
+project bug. Not blocking. Rebuilds and reinstalls land cleanly if
+the device is targeted explicitly with `-gpu swiftshader_indirect`.
+Not verified this session — set aside for Path 1 + 3 verification.
 
 ---
 
@@ -540,7 +628,7 @@ is added inline in the "Provision new device" section (no
 `BuildConfig` change; AGP 8.x does not generate it unless
 `buildConfig = true`). Zero production behavior change.
 
-**3. Android `bound_public_key` wiring + KI-019 passthrough — FOLLOW-UP.**
+**3. Android `bound_public_key` wiring + KI-019 passthrough — DONE** (commits `f361cb0`, `24cf292`). See §3 for evidence.
 Backend landed (commit `3d3ff60`, migration `012_enrollment_tokens_bound_public_key.sql`,
 tests 175 → 178). Android + backend remaining work, now fully specified
 by rulings 2026-10-15.
@@ -624,12 +712,23 @@ Build Master §3.7).**
 
 **After Session A:**
 
-8. Emergency lock (TASK-P1-021a).
-9. Duress wipe (TASK-P1-021b).
-10. Signing-key custody (TASK-P1-029), recovery key (TASK-P1-035).
-11. Hardware-backed Ed25519 verification (TASK-P1-034). Requires
+8. **KI-020 fix — EnrollmentQrScreen reachable before auth.** Small
+   UI change; unblocks the real QR provisioning flow. See §4 KI-020.
+9. **Deliberate role-elevation flow.** Strict A1 (commit `24cf292`)
+   removed the admin UI's ability to mint non-`user` tokens.
+   Second-admin provisioning currently requires direct SQL. Add a
+   guarded CLI, dedicated screen behind re-auth, or offline process.
+   Not a UI affordance in the provisioning card.
+10. **Token lifecycle UI.** The A1 change deleted the standalone
+    "Create enrollment token" section, which was the admin's only
+    view of tokens already in the DB. Restore list-unused + revoke
+    under the inline flow.
+11. Emergency lock (TASK-P1-021a).
+12. Duress wipe (TASK-P1-021b).
+13. Signing-key custody (TASK-P1-029), recovery key (TASK-P1-035).
+14. Hardware-backed Ed25519 verification (TASK-P1-034). Requires
     physical hardware.
-12. Hardening: SBOM, Android redaction audit, penetration test,
+15. Hardening: SBOM, Android redaction audit, penetration test,
     independent review.
 
 **Backlog items (not scheduled):**
@@ -817,7 +916,7 @@ Rebuild after flipping — read at HttpClient construction time.
 
 Current verified state: **89 Android JVM tests** (2026-10-15),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
-and **178 backend tests** (2026-10-15, 13 files), all from runner output.
+and **192 backend tests** (2026-10-15, 14 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
 infrastructure (Mac vs emulator) and must not be summed.
 
