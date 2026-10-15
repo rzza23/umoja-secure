@@ -1,7 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-14 (Session A — TASK-P1-025 admin provisioning
-UI landed; ADR §7 amendment pending; handoff accuracy corrected)
+Last updated: 2026-10-15 (Session A — P1-025 UI verified on emulator; emulator bootstrap completed; ADR §7 amendment done; next: P1-019)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -251,6 +250,54 @@ explaining monotonicity is device-enforced. Backend does not track a
 current matrix version in Phase 1. Backend version tracking is a
 future improvement, not P1-025.
 
+### P1-025 UI verification — DONE (2026-10-15)
+
+Manual emulator run against the amended `umoja.enrollment-request.v1`
+payload, via the debug paste path (commit `44b6520`). The gate P1-025
+sat on is now closed.
+
+Verified end-to-end:
+
+- `ProvisioningBundle.parse` accepted a synthetic 5-field payload.
+- `MatrixBuilder.build` produced the wrapper.
+- JCS output is correct: top-level `domain` < `matrix`; matrix keys in
+  UTF-16 order; `version: 1` as bare `1` (ES6 number rule); empty array
+  preserved as `[]`; all three 43-char base64url keys round-tripped.
+- SHA-256 hash displayed:
+  `5KRZ_e9rTv0YTxK0lXppa1eWee6JAt_-GQ1zBj--8_Q` — 43 base64url chars,
+  correct length for a 32-byte digest.
+- Copy buttons work for wrapper and hash.
+
+No unit test substitutes for this. P1-025's UI is verified running,
+not just compiling.
+
+### Emulator bootstrap (2026-10-15) — operational note
+
+The emulator was deleted and recreated during Session A troubleshooting.
+
+- The old admin device `57ca1b67-36fb-4c04-b2fe-56a84a338b79` lost its
+  private key (Android Keystore is device-local). Unrecoverable. Its
+  `devices` row is a historical record; revoke it when convenient:
+  `UPDATE devices SET status='revoked', revoked_at=now(), revoke_reason='emulator wiped' WHERE device_id='57ca1b67-36fb-4c04-b2fe-56a84a338b79';`
+- Postgres survived the wipe. No other device rows were lost.
+- A new admin was enrolled by binding a fresh enrollment token to the
+  new emulator's pubkey via direct SQL — `POST /admin/enrollment-tokens`
+  requires a live admin session, which we did not have.
+- **Trap:** `docker compose exec postgres psql ... <<SQL ...` fails with
+  `cannot attach stdin to a TTY-enabled container because stdin is not a
+  terminal`. Add `-T` after `exec`: `docker compose exec -T postgres psql ...`.
+  Required whenever piping a heredoc into a container.
+- **`enrollment rejected` log line is permanent, not debug-only.** The
+  backend logs the pubkey a device presented when enrollment fails.
+  Without this, there is no way to diagnose binding mismatches. Keep it.
+
+### Tor mode — worked (do not chase a phantom bug)
+
+An early `POST /enrollment` during the bootstrap returned client-side
+`network_error`. This was transient. A subsequent attempt reached the
+backend over the onion:
+
+
 ---
 
 ## 4. Known issues
@@ -314,7 +361,7 @@ Resolved by commit `41f52b0`. PASS on 38 inputs.
 The prior handoff claimed "85 backend tests, 48 Android tests"
 (baseline), then "98 Android tests" after Session A crypto work.
 Actual JVM unit-test count after Session A is 77; androidTest is 0
-files. Backend count verified this session: 175.
+files. Backend count verified this session: 175 (later raised to 178 by commit 3d3ff60, the token-binding work).
 
 **Consequence:** do not propagate test counts from prior handoffs.
 Recount from test-runner output.
@@ -372,11 +419,8 @@ Recorded:
 - P1-019 propagation flag: the QR format is authoritative in the ADR;
   the enrolling-device generator must match.
 
-**2. Verify TASK-P1-025 AdminScreen on emulator — IN PROGRESS.** The
-gate: launch Admin, load a synthetic QR payload, confirm parse →
-build matrix → hash displays → copy buttons work. Screenshot for the
-record. No instrumented tests exist; manual verification is the
-safety net.
+**2. Verify TASK-P1-025 AdminScreen on emulator — DONE**
+(2026-10-15, commit 44b6520). See §3 for the evidence.
 
 `ScanContract` has no injectable path on an emulator without a second
 device or virtual-camera setup. A `FLAG_DEBUGGABLE`-gated paste field
