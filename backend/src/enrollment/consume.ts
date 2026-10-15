@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { withTransaction } from '../db/client.js';
 
 export class EnrollmentError extends Error {
@@ -13,6 +13,7 @@ export class EnrollmentError extends Error {
 
 export interface EnrollmentInput {
   token: string;
+  device_id: string;
   device_public_key: string;
   label: string;
   attestation?: string;
@@ -51,7 +52,7 @@ export async function consumeEnrollmentToken(
       throw new EnrollmentError('invalid_token');
     }
 
-    const deviceId = randomUUID();
+    const deviceId = input.device_id;
 
     try {
       await tx.query(

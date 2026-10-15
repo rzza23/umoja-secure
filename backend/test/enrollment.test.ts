@@ -67,6 +67,7 @@ describe('POST /enrollment', () => {
       url: '/enrollment',
       payload: {
         token,
+        device_id: randomUUID(),
         device_public_key: deviceKey,
         label: 'test-device-1',
       },
@@ -100,7 +101,7 @@ describe('POST /enrollment', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/enrollment',
-      payload: { token, device_public_key: deviceKey, label: 'test-expired' },
+      payload: { token, device_id: randomUUID(), device_public_key: deviceKey, label: 'test-expired' },
     });
 
     expect(res.statusCode).toBe(401);
@@ -120,7 +121,7 @@ describe('POST /enrollment', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/enrollment',
-      payload: { token, device_public_key: deviceKey, label: 'test-reused' },
+      payload: { token, device_id: randomUUID(), device_public_key: deviceKey, label: 'test-reused' },
     });
 
     expect(res.statusCode).toBe(401);
@@ -139,7 +140,7 @@ describe('POST /enrollment', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/enrollment',
-      payload: { token, device_public_key: deviceKey, label: 'test-revoked' },
+      payload: { token, device_id: randomUUID(), device_public_key: deviceKey, label: 'test-revoked' },
     });
 
     expect(res.statusCode).toBe(401);
@@ -163,14 +164,14 @@ describe('POST /enrollment', () => {
     const res1 = await app.inject({
       method: 'POST',
       url: '/enrollment',
-      payload: { token: token1, device_public_key: sameKey, label: 'first' },
+      payload: { token: token1, device_id: randomUUID(), device_public_key: sameKey, label: 'first' },
     });
     expect(res1.statusCode).toBe(201);
 
     const res2 = await app.inject({
       method: 'POST',
       url: '/enrollment',
-      payload: { token: token2, device_public_key: sameKey, label: 'second' },
+      payload: { token: token2, device_id: randomUUID(), device_public_key: sameKey, label: 'second' },
     });
     expect(res2.statusCode).toBe(409);
     expect(res2.json().error).toBe('device_already_enrolled');
@@ -197,7 +198,7 @@ describe('POST /enrollment', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/enrollment',
-      payload: { token, device_public_key: deviceKey, label: 'bound-match' },
+      payload: { token, device_id: randomUUID(), device_public_key: deviceKey, label: 'bound-match' },
     });
 
     expect(res.statusCode).toBe(201);
@@ -218,7 +219,7 @@ describe('POST /enrollment', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/enrollment',
-      payload: { token, device_public_key: presentedKey, label: 'substitute' },
+      payload: { token, device_id: randomUUID(), device_public_key: presentedKey, label: 'substitute' },
     });
 
     expect(res.statusCode).toBe(401);
@@ -240,7 +241,7 @@ describe('POST /enrollment', () => {
       expiresAt: new Date(Date.now() + 3600_000),
     });
 
-    const payload = { token, device_public_key: deviceKey, label: 'concurrent' };
+    const payload = { token, device_id: randomUUID(), device_public_key: deviceKey, label: 'concurrent' };
     const [res1, res2] = await Promise.all([
       app.inject({ method: 'POST', url: '/enrollment', payload }),
       app.inject({ method: 'POST', url: '/enrollment', payload }),
@@ -254,5 +255,83 @@ describe('POST /enrollment', () => {
       [createHash('sha256').update(token).digest()],
     );
     expect(consumed.rows[0].used_by_device_id).not.toBeNull();
+  });
+
+  it('TEST-ENROLL-DEVICEID-ECHO echoes the client-supplied device_id', async () => {
+    const token = randomBytes(32).toString('base64url');
+    const deviceKey = makePublicKey();
+    const deviceId = randomUUID();
+    await insertToken({
+      tokenPlaintext: token,
+      boundPublicKey: deviceKey,
+      expiresAt: new Date(Date.now() + 3600_000),
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/enrollment',
+      payload: {
+        token,
+        device_id: deviceId,
+        device_public_key: deviceKey,
+        label: 'echo-test',
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.device_id).toBe(deviceId);
+
+    const db = await pool.query(
+      'SELECT device_id FROM devices WHERE device_id = $1',
+      [deviceId],
+    );
+    expect(db.rowCount).toBe(1);
+    expect(db.rows[0].device_id).toBe(deviceId);
+  });
+
+  it('TEST-ENROLL-DEVICEID-COLLISION rejects when device_id already exists', async () => {
+    const token = randomBytes(32).toString('base64url');
+    const requestKey = makePublicKey();
+    const existingKey = makePublicKey();
+    const collidingDeviceId = randomUUID();
+
+    await pool.query(
+      `INSERT INTO devices (device_id, org_id, public_key, label, role)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        collidingDeviceId,
+        TEST_ORG_ID,
+        Buffer.from(existingKey, 'base64url'),
+        'pre-existing',
+        'user',
+      ],
+    );
+
+    await insertToken({
+      tokenPlaintext: token,
+      boundPublicKey: requestKey,
+      expiresAt: new Date(Date.now() + 3600_000),
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/enrollment',
+      payload: {
+        token,
+        device_id: collidingDeviceId,
+        device_public_key: requestKey,
+        label: 'collision',
+      },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('device_already_enrolled');
+
+    const tokenRow = await pool.query(
+      'SELECT used_at FROM enrollment_tokens WHERE token_hash = $1',
+      [createHash('sha256').update(token).digest()],
+    );
+    expect(tokenRow.rows[0].used_at).toBeNull();
   });
 });
