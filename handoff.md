@@ -45,7 +45,7 @@ Authoritative documents (all exist on disk):
 
 - Node.js 24.x, Fastify 5.12.5, PostgreSQL 16
 - Docker-deployable (docker compose up -d --build from repo root)
-- **175 tests passing** (13 test files; verified 2026-10-14 via
+- **178 tests passing** (13 test files; verified 2026-10-15 via
   `npm test`).
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
@@ -208,6 +208,20 @@ the admin app entirely), not about shipping the UI. Decided 2026-10-14
 for TASK-P1-025. If a future requirement needs distribution-level
 separation, open a new task — do not re-litigate here.
 
+### Backend token binding (commit `3d3ff60`)
+
+- Migration `012_enrollment_tokens_bound_public_key.sql`.
+- `bound_public_key BYTEA NOT NULL`, CHECK octet_length = 32.
+- Sentinel 32 zero bytes for pre-existing rows; the well-formed
+  base64url collision is noted in the migration comment.
+- `createEnrollmentToken` validates and stores the key.
+- `POST /admin/enrollment-tokens` requires it (zod regex
+  `^[A-Za-z0-9_-]{43}$`); 400 on absence.
+- `consumeEnrollmentToken` SELECT gains `AND bound_public_key = $2`.
+  Key mismatch yields zero rows and does not mark the token consumed.
+- Tests: TEST-TOKEN-BOUND-MATCH, TEST-TOKEN-SUBSTITUTION,
+  TEST-TOKEN-CONCURRENT. Backend test count 175 -> 178.
+
 ### QR payload format (owner ruling, 2026-10-14)
 
 Amended format, superseding the earlier version:
@@ -310,8 +324,8 @@ The ADR asked for file-level verification of Q1/Q4 against
 THREAT-MODEL-001 and AUTH-SPEC-001 "at Session A kickoff." Those two
 files were authored *after* the ADR, from the same attestations the
 ADR recorded. File-level verification is therefore definitional, not
-independent. Recorded as documented exception (b). Amendment pending —
-see §5.
+independent. Recorded as documented exception (b). Amendment landed in
+ADR §7.1.1 (commit `4abcf53`).
 
 ### KI-015 (NEW): `AdminScreen.kt.bak-navdiag` is tracked
 `android/app/src/main/java/com/umoja/secure/ui/admin/AdminScreen.kt.bak-navdiag`
