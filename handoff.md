@@ -807,13 +807,17 @@ Build Master §3.7).**
     cd ~/umoja-secure
     docker compose up -d
 
-    # Emulators (one or two).
+    # Emulators (two for two-device tests).
+    # Available AVDs: ls ~/.android/avd/*.avd
+    #   Current: Pixel_9, Pixel_9_2, Pixel_9_API35
     $HOME/Library/Android/sdk/emulator/emulator -avd Pixel_9 &
-    $HOME/Library/Android/sdk/emulator/emulator -avd Pixel_9_API35_B -memory 1535 &
+    $HOME/Library/Android/sdk/emulator/emulator -avd Pixel_9_2 -memory 1535 &
 
-    # Reverse ports.
+    # Reverse ports. First emulator is emulator-5554, second is emulator-5556.
     $HOME/Library/Android/sdk/platform-tools/adb -s emulator-5554 reverse tcp:8080 tcp:8080
     $HOME/Library/Android/sdk/platform-tools/adb -s emulator-5554 reverse tcp:9050 tcp:9050
+    $HOME/Library/Android/sdk/platform-tools/adb -s emulator-5556 reverse tcp:8080 tcp:8080
+    $HOME/Library/Android/sdk/platform-tools/adb -s emulator-5556 reverse tcp:9050 tcp:9050
 
 ### Backend iteration
 
