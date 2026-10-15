@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-15 (Session A — P1-019 QR generator done; KI-019 blocks P1-026)
+Last updated: 2026-10-15 (Session A — P1-019 QR generator done; KI-019 resolved by option (a); next: P1-026)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -356,7 +356,7 @@ three public keys. Screenshot evidence captured.
 through parser, deterministic ordering, rejection of malformed
 `device_id` and pubkeys, all-three-keys-distinct preservation.
 
-### KI-019 (NEW) — two `device_id`s for one physical device
+### KI-019 (RESOLVED 2026-10-15) — two `device_id`s for one physical device
 
 The QR payload carries a device-chosen `device_id` (from
 `DeviceIdStore`, generated locally on first screen entry). The
@@ -373,9 +373,38 @@ authoritative. Options:
 - (c) Drop `device_id` from the QR payload entirely; the backend
   assigns and the device learns it post-enrollment.
 
-**Block for TASK-P1-026.** Not a P1-019 regression — the QR round-trip
-that P1-019 was scoped to prove works correctly. Recorded here pending
-§4 consolidation if a future handoff pass reorganizes KIs.
+**RESOLVED (2026-10-15).** Ruling: **option (a) — the backend accepts
+the QR-supplied `device_id` at enrollment.** Rationale: the device
+already generates it deliberately, persists it durably, and treats it
+as its identity; renaming on the backend would force the device to
+overwrite its own identity post-enrollment (a hostile coupling and a
+bootstrapping round-trip). The QR is the natural binding point between
+"a device being provisioned" and a `devices` row. `device_id` is not
+a credential — the security control is the token binding on
+`bound_public_key` (commit `3d3ff60`); an attacker who intercepts an
+enrollment token still cannot produce the private key matching the
+bound public key regardless of which `device_id` they present. Options
+(b) and (c) both require a post-enrollment round-trip to convey the
+assigned ID for zero security gain.
+
+Implementation changes scoped into the `bound_public_key` wiring step
+(§5 item 3):
+- `backend/src/enrollment/consume.ts` — replace `randomUUID()` with
+  the `device_id` from the request body.
+- `backend/src/routes/enrollment.ts` — validate `device_id` on the
+  same strict shape `ProvisioningBundle.kt` enforces (printable
+  ASCII, ≤64, UUID v4 recommended not required); reject with 400
+  before any DB write.
+- Confirm `devices.device_id` unique constraint fires on collision
+  (replay) — must fail closed. (It's the PRIMARY KEY; the 23505 path
+  is already wired.)
+- `POST /enrollment` response echoes `device_id` for client assert.
+  (Field already exists; source changes from `randomUUID()` to the
+  client-supplied value. No contract change.)
+- Tests: TEST-ENROLL-DEVICEID-ECHO, TEST-ENROLL-DEVICEID-COLLISION.
+
+Not a P1-019 regression — the QR round-trip that P1-019 was scoped to
+prove works correctly.
 
 ---
 
@@ -518,6 +547,11 @@ tests 175 → 178). Android side still needs:
 - `AdminApi.CreateTokenRequest` gains `boundPublicKey: String`.
 - `AdminScreen.kt` "Create enrollment token" section reads
   `scannedBundle.pubDeviceAuthKey` and passes it.
+- **KI-019 ruling adds:** the same enrollment POST carries the
+  QR-supplied `device_id` through to the backend; see §3 KI-019 for
+  the full change list (consume.ts, routes/enrollment.ts, response
+  echo, collision test). Small addition to the same wiring, not a
+  separate task.
 - **Blocked on a UX decision:** does the admin scan the device QR
   first, then create a token? Or does the token section refuse until
   a bundle exists? Answer before writing code.
@@ -545,6 +579,7 @@ Wipe-confirmation key prerequisite: DONE — `WipeConfirmationKeyManager`
 (commit `8bd4ab5`).
 
 **6. TASK-P1-026 remainder — client verification and storage.**
+KI-019 resolved (option a, 2026-10-15) — this task is now writable.
 Re-canonicalize wrapper; verify Ed25519 against pinned provisioning
 public key; enforce `highest_seen_version` (post-enrollment) or
 inclusive floor (replacement device); populate contacts from
