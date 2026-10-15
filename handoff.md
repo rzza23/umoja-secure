@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-15 (Session A — P1-025 UI verified on emulator; emulator bootstrap completed; ADR §7 amendment done; next: P1-019)
+Last updated: 2026-10-15 (Session A — P1-019 QR generator done; KI-019 blocks P1-026)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -84,14 +84,14 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 77** (verified from XML this session)
+- **JVM unit tests: 89** (verified 2026-10-15; +12 EnrollmentQrPayloadTest)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
 
 Note: a prior handoff claimed 98 Android tests. That was wrong. The
 actual prior count was ~1 (ExampleUnitTest only); the crypto work
-brought it to 77. See §4 KI-013.
+brought it to 77, then 89 after P1-019. See §4 KI-013.
 
 ### Tor (dev)
 
@@ -321,6 +321,62 @@ An early `POST /enrollment` during the bootstrap returned client-side
 backend over the onion:
 
 
+### TASK-P1-019 — enrolling-device QR generator (commit `a4ec1f9`)
+
+Delivered end-to-end, both halves of the ceremony now exist:
+
+- `android/.../crypto/EnrollmentQrPayload.kt` — pure builder for the
+  amended `umoja.enrollment-request.v1` payload. Manual serialization
+  (not `JSONObject.toString()`) for deterministic key order across
+  Android and JVM — Android's `org.json` preserves insertion order,
+  the JVM test-scope artifact does not. Round-trips through
+  `ProvisioningBundle.parse` as a self-check before returning.
+- `android/.../crypto/DeviceIdStore.kt` — persists `device_id` (UUID v4)
+  via `SecureStorage`, generate-on-first-call, never regenerated for
+  the life of the entity. A wipe destroys it — that is correct.
+- `android/.../ui/provisioning/EnrollmentQrScreen.kt` — renders the QR
+  via `journeyapps.BarcodeEncoder`, exposes copy-to-clipboard JSON and
+  inline text fallback. Reached from Settings.
+- `android/.../ui/settings/SettingsScreen.kt` + `ui/navigation/MainNavigation.kt`
+  — new "Enrollment QR" menu item, full-screen overlay mirroring the
+  `openChat` pattern.
+- `SignalIdentityStore.messagingIdentityKeyBase64Url()` — new accessor
+  that strips libsignal's `0x05` type prefix so the messaging identity
+  key matches the 32-byte shape the matrix and QR validators require.
+  The 33-byte serialized form is preserved everywhere it already
+  existed (persist, `PersistentSignalProtocolStore`); this accessor
+  only adds a projection. No existing caller is affected.
+
+**Round-trip verified on emulator (2026-10-15).** Producer JSON →
+clipboard → admin paste field → parser → "Scanned device" card. All
+four values preserved exactly: `device_id` `ea23e1a2-...`, and the
+three public keys. Screenshot evidence captured.
+
+**Test coverage:** `EnrollmentQrPayloadTest` — 12 JVM tests: round-trip
+through parser, deterministic ordering, rejection of malformed
+`device_id` and pubkeys, all-three-keys-distinct preservation.
+
+### KI-019 (NEW) — two `device_id`s for one physical device
+
+The QR payload carries a device-chosen `device_id` (from
+`DeviceIdStore`, generated locally on first screen entry). The
+enrollment endpoint assigns its own `device_id` (`randomUUID()` in
+`consume.ts`) and inserts it into `devices`. Both identify "the same"
+physical device; they diverge.
+
+**Consequence:** the authorization matrix binds a single `device_id`.
+Before TASK-P1-026 (client verification), decide which one is
+authoritative. Options:
+- (a) Backend accepts the QR-supplied `device_id` at enrollment.
+- (b) `DeviceIdStore` reads the backend-assigned value after enrollment
+  and overwrites its local copy.
+- (c) Drop `device_id` from the QR payload entirely; the backend
+  assigns and the device learns it post-enrollment.
+
+**Block for TASK-P1-026.** Not a P1-019 regression — the QR round-trip
+that P1-019 was scoped to prove works correctly. Recorded here pending
+§4 consolidation if a future handoff pass reorganizes KIs.
+
 ---
 
 ## 4. Known issues
@@ -474,7 +530,7 @@ tests 175 → 178). Android side still needs:
 - Admin app attaches signature and pushes signed matrix.
 - **The admin app never holds the provisioning private key.**
 
-**5. TASK-P1-019 — enrolling-device QR generator — IN PROGRESS.**
+**5. TASK-P1-019 — enrolling-device QR generator — DONE** (commit `a4ec1f9`). See §3 for evidence.
 Must emit the amended `umoja.enrollment-request.v1` format. Device
 generates `device_id` (UUID v4) at first entry to the new
 `EnrollmentQrScreen`, stores in `SecureStorage` (not DataStore — the
@@ -690,7 +746,7 @@ Rebuild after flipping — read at HttpClient construction time.
   implementations reject objects with a `toJSON` method even though
   RFC 8785's reference code calls it. Do not "fix" this.
 
-Current verified state: **77 Android JVM tests** (2026-10-14),
+Current verified state: **89 Android JVM tests** (2026-10-15),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
 and **178 backend tests** (2026-10-15, 13 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
