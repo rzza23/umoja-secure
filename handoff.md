@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-15 (Session A — P1-019 QR generator done; KI-019 resolved by option (a); next: P1-026)
+Last updated: 2026-10-15 (Session A — P1-019 done; KI-019 resolved (a); §5 item 3 fully specified; next: §5 item 3)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -540,21 +540,55 @@ is added inline in the "Provision new device" section (no
 `BuildConfig` change; AGP 8.x does not generate it unless
 `buildConfig = true`). Zero production behavior change.
 
-**3. Android `bound_public_key` wiring — FOLLOW-UP.** Backend landed
-(commit `3d3ff60`, migration `012_enrollment_tokens_bound_public_key.sql`,
-tests 175 → 178). Android side still needs:
+**3. Android `bound_public_key` wiring + KI-019 passthrough — FOLLOW-UP.**
+Backend landed (commit `3d3ff60`, migration `012_enrollment_tokens_bound_public_key.sql`,
+tests 175 → 178). Android + backend remaining work, now fully specified
+by rulings 2026-10-15.
 
+**Ruling (UI): A1 — inline in the "Scanned device" card.** The admin
+provisions one device end-to-end while holding it: scan QR → name →
+clearance → contacts → build matrix → create token → hand over. One
+continuous action on one screen. The standalone "Create enrollment
+token" section is deleted in this task; token lifecycle management
+(list unused, revoke) is a separate follow-up if needed. No bulk
+pre-provisioning — the workflow doesn't support it.
+
+**Ruling (binding): no `device_id` in the token.** The token binds a
+public key. That is the complete credential binding. `device_id` is a
+client-chosen identifier (KI-019), not a secret, not a claim the
+backend can verify. Binding it adds no threat-model value — a leaked
+token still requires the private key matching the bound pubkey, and
+an attacker holding that key already controls the device. No migration
+013. No second predicate in `consumeEnrollmentToken`. Recorded here
+so it isn't re-litigated.
+
+Change list:
+- `backend/src/enrollment/consume.ts` — replace `randomUUID()` with
+  the `device_id` from the request body.
+- `backend/src/routes/enrollment.ts` — validate `device_id` on the
+  same strict shape `ProvisioningBundle.kt` enforces (printable
+  ASCII, ≤64, UUID v4 recommended not required); reject with 400
+  before any DB write. Response `device_id` field already exists;
+  source changes from `randomUUID()` to the client-supplied value.
 - `AdminApi.CreateTokenRequest` gains `boundPublicKey: String`.
-- `AdminScreen.kt` "Create enrollment token" section reads
-  `scannedBundle.pubDeviceAuthKey` and passes it.
-- **KI-019 ruling adds:** the same enrollment POST carries the
-  QR-supplied `device_id` through to the backend; see §3 KI-019 for
-  the full change list (consume.ts, routes/enrollment.ts, response
-  echo, collision test). Small addition to the same wiring, not a
-  separate task.
-- **Blocked on a UX decision:** does the admin scan the device QR
-  first, then create a token? Or does the token section refuse until
-  a bundle exists? Answer before writing code.
+- `AdminScreen.kt` — "Scanned device" card gains a "Create token for
+  this device" button that reads `scannedBundle.pubDeviceAuthKey` and
+  passes it. Enrollment POST carries `scannedBundle.deviceId`
+  (KI-019). The standalone "Create enrollment token" section is
+  deleted.
+- Tests: TEST-ENROLL-DEVICEID-ECHO (response value equals the sent
+  value — not a new-field test), TEST-ENROLL-DEVICEID-COLLISION
+  (existing PK → 23505 → `device_not_already_enrolled` path fires).
+
+**Note on the echo.** The response `device_id` is a sanity check, not
+a security control. The client generated the value and the backend
+now echoes it back, so the check can only surface a backend bug. Name
+it that way in code and tests; do not imply it is a binding.
+
+**Follow-up (separate task):** token lifecycle management — list
+unused tokens, revoke. Once the standalone section is deleted the
+admin has no UI to see tokens already in the DB; the follow-up
+restores that under the new inline flow.
 
 **4. TASK-P1-033 — offline provisioning-key signing workflow.**
 
