@@ -23,6 +23,7 @@ import com.umoja.secure.ui.chat.ChatScreen
 import com.umoja.secure.ui.chat.ChatViewModel
 import com.umoja.secure.ui.contacts.ContactsScreen
 import com.umoja.secure.ui.conversations.ConversationsScreen
+import com.umoja.secure.ui.provisioning.EnrollmentQrScreen
 import com.umoja.secure.ui.settings.SettingsScreen
 
 enum class Tab(val label: String, val icon: ImageVector) {
@@ -42,11 +43,20 @@ fun MainNavigation(
     onSelectTab: (Tab) -> Unit,
 ) {
     var openChat by remember { mutableStateOf<OpenChat?>(null) }
+    var openEnrollmentQr by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val chatViewModel = remember { ChatViewModel(context) }
 
     // If a chat is open, show it full-screen instead of the tabbed shell.
+    if (openEnrollmentQr) {
+        EnrollmentQrScreen(
+            onBack = { openEnrollmentQr = false },
+            modifier = Modifier.fillMaxSize(),
+        )
+        return
+    }
+
     val activeChat = openChat
     if (activeChat != null) {
         ChatScreen(
@@ -87,6 +97,7 @@ fun MainNavigation(
                 onLogout = onLogout,
                 onOpenAdmin = onOpenAdmin,
                 onOpenDiagnostics = onOpenDiagnostics,
+                onOpenEnrollmentQr = { openEnrollmentQr = true },
                 modifier = contentModifier,
             )
         }

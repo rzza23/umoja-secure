@@ -111,6 +111,33 @@ class SignalIdentityStore(
         }
     }
 
+    /**
+     * The messaging identity public key in the format the authorization
+     * matrix and the QR payload expect: raw 32-byte Curve25519 DH public
+     * key, base64url, no padding (43 chars).
+     *
+     * libsignal's IdentityKey.serialize() is 33 bytes — a 0x05 type prefix
+     * followed by the 32-byte DH public key. The matrix validator requires
+     * 32 bytes (43 base64url chars), so the prefix is stripped here. The
+     * full 33-byte serialization is preserved everywhere it already exists
+     * (persist, PersistentSignalProtocolStore); this accessor only adds a
+     * new projection for the matrix/QR use case.
+     */
+    fun messagingIdentityKeyBase64Url(): String {
+        val serialized = getOrGenerate().publicKey.serialize()
+        require(serialized.size == 33) {
+            "unexpected identity key serialization length: ${serialized.size}"
+        }
+        require(serialized[0] == 0x05.toByte()) {
+            "unexpected identity key type byte: 0x%02x".format(serialized[0])
+        }
+        val raw = serialized.copyOfRange(1, 33)
+        return Base64.encodeToString(
+            raw,
+            Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
+        )
+    }
+
     fun clearIdentity() {
         cached = null
         storage.remove(pubKey)

@@ -32,6 +32,7 @@ fun SettingsScreen(
     onLogout: () -> Unit,
     onOpenAdmin: (() -> Unit)?,
     onOpenDiagnostics: () -> Unit,
+    onOpenEnrollmentQr: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -69,6 +70,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
 
         // Menu
+        MenuItem("Enrollment QR", onOpenEnrollmentQr)
         if (onOpenAdmin != null) {
             MenuItem("Admin panel", onOpenAdmin)
         }
