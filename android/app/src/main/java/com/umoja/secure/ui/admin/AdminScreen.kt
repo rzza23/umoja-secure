@@ -63,14 +63,11 @@ fun AdminScreen(
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var devices by remember { mutableStateOf<List<AdminApi.DeviceEntry>>(emptyList()) }
     var contacts by remember { mutableStateOf<List<AdminApi.ContactEntry>>(emptyList()) }
-    var createdToken by remember { mutableStateOf<AdminApi.CreatedToken?>(null) }
-
-    var newTokenRole by remember { mutableStateOf("user") }
-    var newTokenLabel by remember { mutableStateOf("") }
     var ownerDeviceId by remember { mutableStateOf("") }
     var contactDeviceId by remember { mutableStateOf("") }
 
     var scannedBundle by remember { mutableStateOf<ProvisioningBundle?>(null) }
+    var createdToken by remember { mutableStateOf<AdminApi.CreatedToken?>(null) }
     var provisionClearance by remember { mutableStateOf("") }
     var provisionVersion by remember { mutableStateOf("1") }
     var provisionContacts by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -86,6 +83,7 @@ fun AdminScreen(
         if (contents != null) {
             try {
                 scannedBundle = ProvisioningBundle.parse(contents)
+                createdToken = null
                 error = null
             } catch (e: IllegalArgumentException) {
                 error = "QR parse failed: ${e.message}"
@@ -191,6 +189,7 @@ fun AdminScreen(
                             Button(onClick = {
                                 try {
                                     scannedBundle = ProvisioningBundle.parse(debugPasteText)
+                                    createdToken = null
                                     error = null
                                 } catch (e: IllegalArgumentException) {
                                     error = "QR parse failed: ${e.message}"
@@ -209,6 +208,40 @@ fun AdminScreen(
                             Text("auth: ${b.pubDeviceAuthKey.take(12)}...", style = MaterialTheme.typography.bodySmall)
                             Text("msg: ${b.pubMessagingIdentityKey.take(12)}...", style = MaterialTheme.typography.bodySmall)
                             Text("wipe: ${b.pubWipeConfirmationKey.take(12)}...", style = MaterialTheme.typography.bodySmall)
+                            Spacer(Modifier.height(8.dp))
+                            Button(onClick = {
+                                val tok = sessionToken ?: return@Button
+                                scope.launch {
+                                    error = null
+                                    statusMessage = null
+                                    try {
+                                        val t = withContext(Dispatchers.IO) {
+                                            api.createEnrollmentToken(
+                                                AdminApi.CreateTokenRequest(
+                                                    role = "user",
+                                                    boundPublicKey = b.pubDeviceAuthKey,
+                                                ),
+                                                tok,
+                                            )
+                                        }
+                                        createdToken = t
+                                        statusMessage = "Token created"
+                                    } catch (e: AdminApiException) {
+                                        error = e.code
+                                    }
+                                }
+                            }) { Text("Create enrollment token for this device") }
+                            createdToken?.let { t ->
+                                Spacer(Modifier.height(8.dp))
+                                Text("Token (shown once)", style = MaterialTheme.typography.labelSmall)
+                                Text(t.token, style = MaterialTheme.typography.bodySmall)
+                                Text("Expires: ${t.expiresAt}", style = MaterialTheme.typography.bodySmall)
+                                Spacer(Modifier.height(8.dp))
+                                Button(onClick = {
+                                    clipboard.setText(AnnotatedString(t.token))
+                                    statusMessage = "Token copied"
+                                }) { Text("Copy token") }
+                            }
                         } }
                     }
                 }
@@ -320,62 +353,6 @@ fun AdminScreen(
                                     statusMessage = "Hash copied"
                                 }) { Text("Copy hash") }
                             }
-                        } }
-                    }
-                }
-            }
-
-            item {
-                Spacer(Modifier.height(8.dp))
-                Text("Create enrollment token", style = MaterialTheme.typography.titleMedium)
-            }
-            item {
-                Column {
-                    OutlinedTextField(
-                        value = newTokenRole,
-                        onValueChange = { newTokenRole = it },
-                        label = { Text("Role (user / admin / owner / auditor)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = newTokenLabel,
-                        onValueChange = { newTokenLabel = it },
-                        label = { Text("Label hint") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Button(onClick = {
-                        val tok = sessionToken ?: return@Button
-                        scope.launch {
-                            error = null
-                            statusMessage = null
-                            try {
-                                val t = withContext(Dispatchers.IO) {
-                                    api.createEnrollmentToken(
-                                        AdminApi.CreateTokenRequest(
-                                            role = newTokenRole.trim(),
-                                            labelHint = newTokenLabel.trim().ifBlank { null },
-                                        ),
-                                        tok,
-                                    )
-                                }
-                                createdToken = t
-                                statusMessage = "Token created"
-                            } catch (e: AdminApiException) {
-                                error = e.code
-                            }
-                        }
-                    }) { Text("Create token") }
-
-                    createdToken?.let { t ->
-                        Spacer(Modifier.height(8.dp))
-                        Card { Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                            Text("Token (shown once)", style = MaterialTheme.typography.labelSmall)
-                            Text(t.token, style = MaterialTheme.typography.bodySmall)
-                            Text("Expires: ${t.expiresAt}", style = MaterialTheme.typography.bodySmall)
                         } }
                     }
                 }

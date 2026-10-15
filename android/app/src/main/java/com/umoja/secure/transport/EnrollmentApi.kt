@@ -4,6 +4,7 @@ import org.json.JSONObject
 
 data class EnrollmentRequest(
     val token: String,
+    val deviceId: String,
     val devicePublicKey: String,
     val label: String,
 )
@@ -24,6 +25,7 @@ class EnrollmentApi(private val http: HttpClient) {
     fun enroll(request: EnrollmentRequest): EnrollmentResponse {
         val body = JSONObject().apply {
             put("token", request.token)
+            put("device_id", request.deviceId)
             put("device_public_key", request.devicePublicKey)
             put("label", request.label)
         }.toString()

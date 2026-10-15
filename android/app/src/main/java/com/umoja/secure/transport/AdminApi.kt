@@ -21,6 +21,7 @@ class AdminApi(private val http: HttpClient) {
 
     data class CreateTokenRequest(
         val role: String,           // owner | admin | user | auditor
+        val boundPublicKey: String, // base64url 32B, from the scanned device QR
         val ttlSeconds: Int = 86400,
         val labelHint: String? = null,
     )
@@ -37,6 +38,7 @@ class AdminApi(private val http: HttpClient) {
     ): CreatedToken {
         val body = JSONObject().apply {
             put("role", req.role)
+            put("bound_public_key", req.boundPublicKey)
             put("ttl_seconds", req.ttlSeconds)
             if (req.labelHint != null) put("label_hint", req.labelHint)
         }.toString()

@@ -100,7 +100,7 @@ brought it to 77, then 89 after P1-019. See §4 KI-013.
   `adb reverse tcp:9050 tcp:9050`
 - transport/Socks5Bridge.kt — HTTP→SOCKS5 bridge inside the app. Solves
   Java's local-DNS-for-SOCKS bug that broke .onion.
-- Onion: `vsf2kjuapla74qea4wp4vwbahyqzftq3aywsjd3hknlcvgbtzn6xjad.onion`
+- Onion: `vsf2kj6uapla74qea4wp4vwbahyqzftq3aywsjd3hknlcvgbtzn6xjad.onion`
   (fresh: `docker compose exec tor cat /var/lib/tor/umoja-backend/hostname`)
 
 ---
@@ -578,7 +578,7 @@ Change list:
   deleted.
 - Tests: TEST-ENROLL-DEVICEID-ECHO (response value equals the sent
   value — not a new-field test), TEST-ENROLL-DEVICEID-COLLISION
-  (existing PK → 23505 → `device_not_already_enrolled` path fires).
+  (existing PK → 23505 → `device_already_enrolled` path fires).
 
 **Note on the echo.** The response `device_id` is a sanity check, not
 a security control. The client generated the value and the backend
@@ -767,7 +767,7 @@ Rebuild after flipping — read at HttpClient construction time.
 ### Tor verification
 
     curl --socks5-hostname 127.0.0.1:9050 -sS --max-time 20 \
-      http://vsf2kjuapla74qea4wp4vwbahyqzftq3aywsjd3hknlcvgbtzn6xjad.onion/health
+      http://vsf2kj6uapla74qea4wp4vwbahyqzftq3aywsjd3hknlcvgbtzn6xjad.onion/health
 
     docker compose logs backend --tail=20 | grep -i onion
     # remoteAddress should be 172.18.0.4 (the tor container)

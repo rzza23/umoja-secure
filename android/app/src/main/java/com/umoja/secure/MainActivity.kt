@@ -42,6 +42,7 @@ import com.umoja.secure.ui.diagnostics.DiagnosticsScreen
 import com.umoja.secure.ui.navigation.MainNavigation
 import com.umoja.secure.ui.navigation.Tab
 import com.umoja.secure.ui.theme.UmojaSecureTheme
+import com.umoja.secure.crypto.DeviceIdStore
 import com.umoja.secure.crypto.DeviceIdentity
 import com.umoja.secure.crypto.DeviceKeyManager
 import kotlinx.coroutines.Dispatchers
@@ -298,17 +299,20 @@ private suspend fun enrollDevice(
         val keyInfo = keyManager.ensureKeyPair()
         val publicKeyB64 = DeviceIdentity.encodePublicKey(keyInfo.spkiEncoded)
 
+        val storage = SecureStorage(context)
+        val deviceId = DeviceIdStore(storage).getOrCreate()
+
         val http = HttpClient(HttpClient.DEV_BASE_URL)
         val api = EnrollmentApi(http)
         val response = api.enroll(
             EnrollmentRequest(
                 token = token,
+                deviceId = deviceId,
                 devicePublicKey = publicKeyB64,
                 label = label,
             ),
         )
 
-        val storage = SecureStorage(context)
         storage.put("device_id", response.deviceId)
         storage.put("org_id", response.orgId)
         storage.put("role", response.role)
