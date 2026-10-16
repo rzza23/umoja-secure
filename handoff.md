@@ -708,6 +708,41 @@ need a real channel; decision pending.
 `docs/US-TASK-P1-001.md` so a future agent does not read it as one
 session's work.
 
+### P1-030 scoping (2026-10-16)
+
+§3.7 of the Build Master specifies the replacement-device flow as an
+11-step integrated test. Mapping against existing code shows P1-030
+is six sub-tasks, not one session, and KI-018 is a hard prerequisite:
+
+- **3a** — backend tracks current matrix version per org. Closes
+  KI-018. §3.7 step 1 requires the backend to record "the current
+  matrix version at the time of token issuance"; KI-018 defers that
+  tracking today.
+- **3b** — migration: `enrollment_matrix_version_floor` on
+  `enrollment_tokens`. Issuance records the current version.
+- **3c** — `POST /enrollment` response carries the floor. Client
+  stores it.
+- **3d** — `MatrixStore.accept` gains floor-aware mode. Accepts
+  `version >= floor` during initial enrollment, strictly-greater
+  thereafter. Current implementation is strictly-greater always.
+- **3e** — peer identity-change notification + ack state. New
+  protocol message. Peers block sending to the replacement device
+  until they acknowledge its new key.
+- **3f** — integrated test: the 11-step scenario in §3.7.
+
+**Transport caveat.** Steps 5 and 7 of the integrated test push a
+matrix to a device — no delivery transport exists (TASK-P1-037).
+Interim path: the P1-026 c2b Diagnostics debug paste field can drive
+those steps, since the floor semantics are orthogonal to transport.
+Steps 8-9 (identity-change notification) are peer-to-peer and likely
+need a real channel; decision pending.
+
+**Recommended sequence:** 3a alone next session.
+
+**Registry:** P1-030 should be re-registered as six sub-tasks in
+`docs/US-TASK-P1-001.md` so a future agent does not read it as one
+session's work.
+
 ### KI-021 (RESOLVED 2026-10-16): emulator 5556 black screen after cold boot
 `Pixel_9_API35` (or `Pixel_9_API35_B` — the AVD name in the launch
 log did not match the handoff's recorded name) boots to a black
