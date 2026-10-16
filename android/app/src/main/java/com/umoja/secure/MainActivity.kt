@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -41,6 +42,7 @@ import com.umoja.secure.ui.admin.AdminScreen
 import com.umoja.secure.ui.diagnostics.DiagnosticsScreen
 import com.umoja.secure.ui.navigation.MainNavigation
 import com.umoja.secure.ui.navigation.Tab
+import com.umoja.secure.ui.provisioning.EnrollmentQrScreen
 import com.umoja.secure.ui.theme.UmojaSecureTheme
 import com.umoja.secure.crypto.DeviceIdStore
 import com.umoja.secure.crypto.DeviceIdentity
@@ -79,6 +81,7 @@ fun AppRoot() {
     var screen by remember { mutableStateOf<AppScreen>(AppScreen.Enrollment) }
     var selectedTab by remember { mutableStateOf(Tab.Conversations) }
     var envelopesReceived by remember { mutableStateOf(0) }
+    var openEnrollmentQr by remember { mutableStateOf(false) }
 
     val wsState by app.webSocketClient.state.collectAsState()
 
@@ -117,6 +120,15 @@ fun AppRoot() {
         }
     }
 
+    // KI-020: enrollment QR overlay. Renders full-screen over the
+    // current screen and returns to it on Back. Mirrors the overlay
+    // pattern in MainNavigation. Placed after the LaunchedEffect
+    // blocks so the early return does not dispose them.
+    if (openEnrollmentQr) {
+        EnrollmentQrScreen(onBack = { openEnrollmentQr = false })
+        return
+    }
+
     when (val s = screen) {
         AppScreen.Enrollment -> EnrollmentScreen(
             deviceId = deviceId,
@@ -130,6 +142,7 @@ fun AppRoot() {
                 role = store.get("session_role")
                 screen = AppScreen.Authenticated
             },
+            onOpenEnrollmentQr = { openEnrollmentQr = true },
         )
 
         AppScreen.Authenticated -> MainNavigation(
@@ -178,6 +191,7 @@ fun EnrollmentScreen(
     deviceId: String?,
     onEnrolled: (String) -> Unit,
     onAuthenticated: () -> Unit,
+    onOpenEnrollmentQr: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -244,6 +258,13 @@ fun EnrollmentScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(if (isBusy) "Enrolling..." else "Enroll device")
+                }
+                Spacer(Modifier.height(8.dp))
+                TextButton(
+                    onClick = onOpenEnrollmentQr,
+                    enabled = !isBusy,
+                ) {
+                    Text("Show enrollment QR")
                 }
             } else {
                 Text("Device enrolled", color = MaterialTheme.colorScheme.primary,
