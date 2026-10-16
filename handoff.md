@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-15 (Session A — §5 item 3 done: KI-019 passthrough + A1 inline token flow verified end-to-end; next: P1-026)
+Last updated: 2026-10-15 (Session B — §5 item 6 done: P1-026 client verification + storage verified end-to-end; next: P1-030 replacement-device flow)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -590,6 +590,89 @@ the latter keeps `EnrollmentScreen` composed, which is fine today
 (no `LaunchedEffect`) but a latent hazard if any are added later.
 Recorded, not fixed.
 
+### §5 item 6 — P1-026 client verification and storage (commit `a76a9a1`)
+
+Done and verified end-to-end.
+
+**Code:**
+- `crypto/MatrixVerifier.kt` — new. `verify(canonical, sig,
+  trustedKeys: Set<PublicKey>)`. Iterates the set, fails closed on
+  empty set and malformed signature. Stateless, no anti-rollback.
+  The set is the seam for the rotation overlap window; Phase 1 uses
+  a singleton.
+- `crypto/MatrixSigner.kt` — added `matrixDigestRaw(canonical)` and
+  `verifyRaw(canonical, sig, pubkey): Boolean`. `verify(signed, ...)`
+  keeps its existing throw-on-malformed contract (MatrixSignerTest
+  asserts it) and now delegates to a shared private `verifyDigest`.
+  The throw-vs-false distinction is provenance: parsed `SignedMatrix`
+  means programming error, wire bytes mean untrusted data.
+- `crypto/ProvisioningKeys.kt` — new. `CURRENT_PROVISIONING_PUBKEY_
+  B64U` derived from the vector file's test seed; `RECOVERY_PUBKEY_
+  B64U` is a visibly-fake placeholder. Both are TEST KEYS; TASK-P1-029
+  replaces them before any production build. Cross-checked against
+  the vector file by `ProvisioningKeysTest`.
+- `crypto/MatrixStore.kt` — new. Single JSON envelope
+  `{"canonical": "<b64u>", "signature": "<b64u>"}` under one
+  SecureStorage key. `accept` = verify → parse → anti-rollback check
+  → persist. `load`, `highestSeenVersion`, `permittedContacts` derive
+  from the stored canonical bytes; nothing is stored twice.
+- `storage/KeyValueStore.kt` — new interface, four methods. Exists so
+  `MatrixStore` is JVM-testable without a `Context`.
+- `storage/SecureStorage.kt` — implements `KeyValueStore`.
+- `ui/diagnostics/DiagnosticsScreen.kt` — debug-only (FLAG_DEBUGGABLE)
+  Matrix section: two paste fields, Verify and store, Clear stored
+  matrix, read-back display.
+
+**Design rulings recorded (2026-10-15):**
+- Storage: SecureStorage, single JSON envelope. Verification on read
+  is hash-then-verify; no re-canonicalization in the trust path.
+  Parse is convenience, not trust — the stored bytes remain verified
+  against the signature even if `AuthorizationMatrix.fromJsonMap`
+  widens in future.
+- `highest_seen_version` derived from `matrix.version`, not stored
+  separately. Closes a crash-window inconsistency.
+- Two distinct trusted sets. Matrix-verification set: provisioning
+  keys only. Notice-verification set: recovery key only. Never
+  conflate — matrices are never verified against the recovery key.
+- Structural seams for rotation ship in P1-026 (`previous_
+  provisioning_pubkey` and `highest_recovery_key_version` present in
+  `ProvisioningKeys` but unused; `verifyMatrix` takes a Set). Handlers
+  deferred to TASK-P1-036.
+- Contacts are a projection of the verified matrix. `/me/contacts`
+  is a convenience view, not a trust source. P1-026 exposes
+  `permitted_contacts[]` as an accessor; wiring `ContactsScreen` to
+  consult it is a follow-up UI decision.
+- Anti-rollback lives in `MatrixStore.accept`, not `MatrixVerifier`.
+  Separating policy state from the stateless crypto primitive means
+  the rule cannot be bypassed by calling the verifier directly.
+
+**Manual emulator verification (Pixel_9, emulator-5554):**
+1. Loaded W-001's canonical bytes and signature via the Diagnostics
+   debug section. Tap "Verify and store" → `Accepted(version=1)`,
+   read-back `highestSeenVersion=1 contacts=1`.
+2. Force-stopped the app. Reopened. Re-pasted identical values. Tap
+   "Verify and store" → `Rejected(rollback)`, read-back unchanged.
+
+Step 2 is the load-bearing verification. It proves persistence (the
+version came from disk, not in-memory state), anti-rollback (`1 ≤ 1`
+fired the policy check), and store-unchanged-on-rejection.
+
+**Not covered by this task:** transport. How the signed matrix
+reaches the device — HTTP, QR, or both — is deferred. Authority comes
+from the signature and the pinned key, not the transport
+(THREAT-MODEL-001 §7, ADR §2 Q3). Named follow-up: TASK-P1-037 —
+matrix transport (`/me/matrix` HTTP endpoint + client fetch).
+
+**Follow-ups filed:**
+- TASK-P1-036 — provisioning-key rotation and recovery-key
+  revocation notice handling.
+- TASK-P1-037 — matrix transport.
+- Token bootstrap: 5554 was wiped by an earlier `pm clear` during
+  KI-020 verification, so re-enrollment used the direct-SQL path
+  from §3's emulator bootstrap note. Second occurrence. Candidate
+  for a debug-only bootstrap affordance or a `scripts/` helper, if
+  it recurs.
+
 ### KI-021 (NEW): emulator 5556 black screen after cold boot
 `Pixel_9_API35` (or `Pixel_9_API35_B` — the AVD name in the launch
 log did not match the handoff's recorded name) boots to a black
@@ -700,8 +783,9 @@ round-trip required (generate on emulator, scan with admin app).
 Wipe-confirmation key prerequisite: DONE — `WipeConfirmationKeyManager`
 (commit `8bd4ab5`).
 
-**6. TASK-P1-026 remainder — client verification and storage.**
-KI-019 resolved (option a, 2026-10-15) — this task is now writable.
+**6. TASK-P1-026 — client verification and storage — DONE** (commits
+`bcd0375`, `e56f832`, `b750e48`, `a76a9a1`). See §3 for the manual
+verification evidence.
 
 **Design decisions (ruled 2026-10-15, before implementation):**
 
