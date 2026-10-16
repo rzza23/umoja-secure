@@ -910,6 +910,11 @@ Rebuild after flipping — read at HttpClient construction time.
   See KI-012. Cross-check is required.
 - **Do not propagate test counts from prior handoffs.** Recount from
   test-runner output. See KI-013.
+- **Read the edit script's RESULTS block before typing the commit
+  message.** `raise SystemExit` guards the file write, not the commit;
+  the shell runs the next command regardless. Two pushed commits
+  (1a0069c, 60350cd) claimed work their scripts didn't land. The
+  second step must read the first's output.
 - **Ground truth for JCS is the vendored corpus**, not either
   implementation. If TS and corpus ever disagree, TS is wrong. Same
   for Kotlin.
