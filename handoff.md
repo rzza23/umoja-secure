@@ -673,7 +673,7 @@ matrix transport (`/me/matrix` HTTP endpoint + client fetch).
   for a debug-only bootstrap affordance or a `scripts/` helper, if
   it recurs.
 
-### KI-021 (NEW): emulator 5556 black screen after cold boot
+### KI-021 (RESOLVED 2026-10-16): emulator 5556 black screen after cold boot
 `Pixel_9_API35` (or `Pixel_9_API35_B` — the AVD name in the launch
 log did not match the handoff's recorded name) boots to a black
 framebuffer on cold boot. `adb` connects, `sys.boot_completed = 1`,
@@ -681,6 +681,10 @@ but the display is black. Likely GPU/environment config, not a
 project bug. Not blocking. Rebuilds and reinstalls land cleanly if
 the device is targeted explicitly with `-gpu swiftshader_indirect`.
 Not verified this session — set aside for Path 1 + 3 verification.
+
+**RESOLVED 2026-10-16.** Host reboot. The black screen was a stale
+qemu process surviving a prior crash; a full Mac restart cleared it.
+Next time this symptom appears: try reboot before deeper diagnosis.
 
 ---
 
@@ -869,6 +873,10 @@ Build Master §3.7).**
 - `canonicalJson` deduplication between `audit/log.ts` and
   `audit/verify.ts` (KI-008).
 - Backend current-matrix-version tracking (KI-018).
+- `scripts/bootstrap-enrollment-token.sh` — one-command enrollment
+  recovery. Reads the device's QR JSON, generates a token, inserts
+  the enrollment_tokens row, prints the token. Three occurrences of
+  the manual procedure make it worth scripting.
 
 ---
 
@@ -932,6 +940,25 @@ Build Master §3.7).**
       handoff.md
 
 ### Start of session
+
+> **Dev-environment notes (2026-10-16).** Three things routinely need
+> re-doing after a host update or reboot, and none is obvious from
+> the failure symptoms:
+>
+> - **adb reverse ports are per-boot.** Set them for both emulators
+>   before testing. Missing `tcp:9050` presents as `network_error` in
+>   the app; missing `tcp:8080` affects clearnet paths only.
+> - **Mac Tor can degrade after host sleep or OS updates.** Symptom:
+>   curl to the onion times out even though the container's Tor is
+>   healthy. Diagnose with `docker compose exec -T tor curl
+>   --socks5-hostname 127.0.0.1:9050 http://<onion>/health` — if that
+>   works but the Mac's curl doesn't, it's the host Tor. Workaround: a
+>   socat sidecar bridging host:9150 -> umoja-tor:9050, with the
+>   emulator's reverse re-pointed. See commit a7f31e9.
+> - **Direct-SQL enrollment bootstrap** is the recovery path when
+>   app data is cleared (host update, AVD reset, `pm clear`). Three
+>   occurrences so far. Procedure is in §3's emulator bootstrap note.
+>   A `scripts/bootstrap-enrollment-token.sh` helper is queued.
 
     # Docker Desktop must be running.
     cd ~/umoja-secure
