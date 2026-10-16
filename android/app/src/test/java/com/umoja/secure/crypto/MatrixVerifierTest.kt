@@ -22,7 +22,7 @@ import java.util.Base64
 class MatrixVerifierTest {
 
     private fun repoRoot(): File {
-        var dir = File(System.getProperty("user.dir"))
+        var dir = File(System.getProperty("user.dir")!!)
         for (i in 0 until 10) {
             if (File(dir, "UMOJA-SECURE-BUILD-MASTER.md").exists()) return dir
             dir = dir.parentFile ?: break
