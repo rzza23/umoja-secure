@@ -540,7 +540,7 @@ ADR recorded. File-level verification is therefore definitional, not
 independent. Recorded as documented exception (b). Amendment landed in
 ADR §7.1.1 (commit `4abcf53`).
 
-### KI-015 (CORRECTED 2026-10-15): six tracked backup files
+### KI-015 (RESOLVED 2026-10-15, commit `407bbac`): six tracked backup files
 `git ls-files | grep -E '\.bak|\.orig|\.swp|~$'` returns six:
 `MainActivity.kt.bak`, `MainActivity.kt.bak-navdiag`,
 `AdminScreen.kt.bak-navdiag`, `MainNavigation.kt.bak`,
@@ -549,7 +549,7 @@ ADR §7.1.1 (commit `4abcf53`).
 The prior text said "one file" and claimed it "ends up on classpath."
 Both wrong. Gradle's Kotlin compiler ignores `.bak` — the file does
 not reach the classpath. The actual harm is repo pollution and
-search noise. Delete all six in a small cleanup commit.
+search noise. All six were deleted in commit `407bbac`.
 
 ### KI-016 (NEW): Duplicated base64url validators
 `ProvisioningBundle.kt` and `AuthorizationMatrix.kt` each define
@@ -734,7 +734,6 @@ Build Master §3.7).**
 **Backlog items (not scheduled):**
 - Instrumented Compose tests for admin flows (no test rule configured;
   belongs with TASK-P1-022 or a new task).
-- Delete `AdminScreen.kt.bak-navdiag` (KI-015).
 - Deduplicate base64url validators (KI-016).
 - `canonicalJson` deduplication between `audit/log.ts` and
   `audit/verify.ts` (KI-008).
