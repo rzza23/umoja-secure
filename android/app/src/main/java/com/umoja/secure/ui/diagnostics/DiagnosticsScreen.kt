@@ -1,6 +1,7 @@
 package com.umoja.secure.ui.diagnostics
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,9 +32,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.umoja.secure.auth.PreKeyUploader
 import com.umoja.secure.auth.SessionManager
+import com.umoja.secure.crypto.MatrixSigner
+import com.umoja.secure.crypto.MatrixStore
+import com.umoja.secure.crypto.ProvisioningKeys
 import com.umoja.secure.messaging.MessagingService
 import com.umoja.secure.storage.SecureStorage
 import com.umoja.secure.transport.WebSocketClient
+import java.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -57,6 +62,10 @@ fun DiagnosticsScreen(
     var peerDeviceIdInput by remember { mutableStateOf("") }
     var sentMessageInput by remember { mutableStateOf("hello from Umoja") }
     var receivedMessagesText by remember { mutableStateOf<String?>(null) }
+    var matrixCanonicalB64 by remember { mutableStateOf("") }
+    var matrixSignatureB64 by remember { mutableStateOf("") }
+    var matrixResult by remember { mutableStateOf<String?>(null) }
+    var matrixReadBack by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         val s = SecureStorage(context)
@@ -230,7 +239,111 @@ fun DiagnosticsScreen(
                 color = MaterialTheme.colorScheme.primary)
         }
 
+        val isDebug = (context.applicationInfo.flags and
+            ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (isDebug) {
+            Spacer(Modifier.height(24.dp))
+            Text("Matrix (debug)", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = matrixCanonicalB64,
+                onValueChange = { matrixCanonicalB64 = it },
+                label = { Text("canonical_b64 (JCS bytes, base64url no-pad)") },
+                enabled = !isBusy,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = matrixSignatureB64,
+                onValueChange = { matrixSignatureB64 = it },
+                label = { Text("signature_b64 (Ed25519, base64url no-pad)") },
+                enabled = !isBusy,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    isBusy = true
+                    matrixResult = null
+                    matrixReadBack = null
+                    scope.launch {
+                        val outcome = verifyAndStoreMatrix(
+                            context,
+                            matrixCanonicalB64.trim(),
+                            matrixSignatureB64.trim(),
+                        )
+                        withContext(Dispatchers.Main) {
+                            isBusy = false
+                            matrixResult = outcome.first
+                            matrixReadBack = outcome.second
+                        }
+                    }
+                },
+                enabled = !isBusy &&
+                    matrixCanonicalB64.isNotBlank() &&
+                    matrixSignatureB64.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Verify and store")
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = {
+                    MatrixStore(SecureStorage(context)).clear()
+                    matrixResult = "Cleared"
+                    matrixReadBack = null
+                },
+                enabled = !isBusy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Clear stored matrix")
+            }
+
+            matrixResult?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(it, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary)
+            }
+            matrixReadBack?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it, fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+private suspend fun verifyAndStoreMatrix(
+    context: Context,
+    canonicalB64: String,
+    signatureB64: String,
+): Pair<String, String?> = withContext(Dispatchers.IO) {
+    try {
+        val canonical = Base64.getUrlDecoder().decode(canonicalB64)
+        val store = MatrixStore(SecureStorage(context))
+        val rawPub = Base64.getUrlDecoder()
+            .decode(ProvisioningKeys.CURRENT_PROVISIONING_PUBKEY_B64U)
+        val pub = MatrixSigner.publicKeyFromRaw(rawPub)
+        val result = store.accept(canonical, signatureB64, setOf(pub))
+        val resultText = when (result) {
+            is MatrixStore.AcceptResult.Accepted ->
+                "Accepted(version=${result.version})"
+            is MatrixStore.AcceptResult.Rejected ->
+                "Rejected(${result.reason})"
+        }
+        val readBack = try {
+            val v = store.highestSeenVersion()
+            val contacts = store.permittedContacts()
+            "highestSeenVersion=$v contacts=${contacts?.size ?: "null"}"
+        } catch (e: Exception) {
+            "read-back failed: ${e.message}"
+        }
+        resultText to readBack
+    } catch (e: Exception) {
+        "error: ${e.message}" to null
     }
 }
 

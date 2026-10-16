@@ -962,6 +962,12 @@ Rebuild after flipping — read at HttpClient construction time.
   the shell runs the next command regardless. Two pushed commits
   (1a0069c, 60350cd) claimed work their scripts didn't land. The
   second step must read the first's output.
+- **Edit scripts must read back their changes.** `raise SystemExit`
+  guards anchor drift; it does not guard omitted steps. The c2a
+  SecureStorage.kt edit replaced strings in memory, passed every
+  anchor check, and exited 0 — but `write_text` was never called.
+  Every edit script now re-reads each modified file and asserts the
+  target string is present before exiting.
 - **Ground truth for JCS is the vendored corpus**, not either
   implementation. If TS and corpus ever disagree, TS is wrong. Same
   for Kotlin.
