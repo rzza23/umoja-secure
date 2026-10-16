@@ -570,25 +570,25 @@ Monotonicity is device-enforced (§3.7), so a bad number fails safe,
 but the admin has no way to query "what version is currently
 authorized." Future improvement.
 
-### KI-020 (NEW): EnrollmentQrScreen unreachable before authentication
-`EnrollmentQrScreen` is reached via Settings → "Enrollment QR",
-which is only reachable from `MainNavigation`, which is only
-reachable after `AppScreen.Authenticated`. A fresh device starts at
-`AppScreen.Enrollment` and cannot reach Settings.
+### KI-020 (RESOLVED 2026-10-15): EnrollmentQrScreen unreachable before authentication
+`EnrollmentQrScreen` was reached only via Settings → "Enrollment QR",
+which is behind `AppScreen.Authenticated`. A fresh device could not
+reach it. Fixed by adding a "Show enrollment QR" `TextButton` on the
+unenrolled `EnrollmentScreen`, opening the QR as a full-screen overlay
+via an `openEnrollmentQr` boolean in `AppRoot` (mirrors the pattern
+already in `MainNavigation`). Button is gated on the inverse of
+`isBusy`.
 
-**Consequence:** a fresh device cannot produce its enrollment QR.
-The admin cannot scan a real device during cold provisioning. The
-A1 verification sidestepped this with the admin-side debug paste
-field; the real QR flow requires the fix.
-
-**Fix (small):** add a "Show enrollment QR" button to
-`EnrollmentScreen` itself, opening `EnrollmentQrScreen` as a
-full-screen overlay (same pattern as `openChat` in the admin
-screen).
-
-**Blocking:** the real QR provisioning round-trip. Does not block
-P1-026 (client verification can proceed against a synthetic or
-already-scanned bundle).
+**Known papercut.** `EnrollmentScreen`'s local `tokenInput` and
+`labelInput` do not survive the QR round-trip: the early `return`
+short-circuits the `when` dispatcher, `EnrollmentScreen` leaves the
+composition, and its `remember` slots are discarded. Not exercised
+by the documented workflow (QR-first, then token). If this becomes
+a real problem, the fix options are (2) hoist the two fields to
+`AppRoot`, or (3) occlude via `Box` rather than early-returning —
+the latter keeps `EnrollmentScreen` composed, which is fine today
+(no `LaunchedEffect`) but a latent hazard if any are added later.
+Recorded, not fixed.
 
 ### KI-021 (NEW): emulator 5556 black screen after cold boot
 `Pixel_9_API35` (or `Pixel_9_API35_B` — the AVD name in the launch
@@ -712,7 +712,7 @@ Build Master §3.7).**
 
 **After Session A:**
 
-8. **KI-020 fix — EnrollmentQrScreen reachable before auth.** Small
+8. **KI-020 fix — EnrollmentQrScreen reachable before auth — DONE.**
    UI change; unblocks the real QR provisioning flow. See §4 KI-020.
 9. **Deliberate role-elevation flow.** Strict A1 (commit `24cf292`)
    removed the admin UI's ability to mint non-`user` tokens.
