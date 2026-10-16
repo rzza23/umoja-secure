@@ -2,7 +2,10 @@
 # Exposes the backend at http://<onion>.onion/ from the Docker network.
 # Clients reach it via SOCKS or their own embedded Tor.
 
-SocksPort 9050
+# Bind to all interfaces so the socat dev-bridge (host:9150 -> tor:9050)
+# can reach it. Loopback-only 9050 is unreachable from another container.
+# Dev-environment only; not a production posture. See docs/ops/TOR-ONION.md.
+SocksPort 0.0.0.0:9050
 ControlPort 9051
 
 DataDirectory /var/lib/tor
