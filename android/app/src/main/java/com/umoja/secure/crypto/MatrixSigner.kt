@@ -52,13 +52,27 @@ object MatrixSigner {
     }
 
     /**
-     * Compute the SHA-256 digest that gets signed.
+     * SHA-256 of the given canonical bytes. The primitive underlying both
+     * [matrixDigest] and [verifyRaw].
+     *
+     * Exposed so callers holding already-canonical bytes — e.g. a signed
+     * matrix read back from storage — can recompute the digest without
+     * re-canonicalizing. See MatrixStore KDoc: canonicalization runs once
+     * at receipt; stored matrices are verified by hash-then-verify, never
+     * by re-canonicalization.
+     */
+    fun matrixDigestRaw(canonical: ByteArray): ByteArray =
+        MessageDigest.getInstance("SHA-256").digest(canonical)
+
+    /**
+     * Compute the SHA-256 digest that gets signed, from a parsed
+     * [SignedMatrix]. Canonicalizes the wrapper first.
      *
      * Exposed so callers can inspect the exact bytes without signing.
      */
     fun matrixDigest(signed: SignedMatrix): ByteArray {
         val canonical = jcsCanonicalizeString(signed.toJsonMap()).toByteArray(Charsets.UTF_8)
-        return MessageDigest.getInstance("SHA-256").digest(canonical)
+        return matrixDigestRaw(canonical)
     }
 
     /**
@@ -76,15 +90,60 @@ object MatrixSigner {
     /**
      * Verify a SignedMatrix signature.
      *
-     * @return true if the signature verifies against [publicKey]. Does NOT
-     *   throw on a bad signature; only throws on malformed inputs.
+     * @return true if the signature verifies against [publicKey].
+     *
+     * Contract: throws on malformed input. The signature must decode as
+     * base64url and yield exactly 64 bytes, else [IllegalArgumentException].
+     * This is correct for callers who have already parsed a [SignedMatrix]
+     * — a malformed signature there is a programming error, not attacker
+     * input. Callers holding bytes directly from the wire use [verifyRaw],
+     * which fails closed (returns false).
      */
     fun verify(signed: SignedMatrix, signatureBase64url: String, publicKey: PublicKey): Boolean {
         val sigBytes = Base64.getUrlDecoder().decode(signatureBase64url)
         require(sigBytes.size == 64) {
             "signature: expected 64 bytes, got ${sigBytes.size}"
         }
-        val digest = matrixDigest(signed)
+        val canonical = jcsCanonicalizeString(signed.toJsonMap()).toByteArray(Charsets.UTF_8)
+        return verifyDigest(matrixDigestRaw(canonical), sigBytes, publicKey)
+    }
+
+    /**
+     * Verify an Ed25519 signature over the SHA-256 digest of [canonical].
+     *
+     * Fails closed: returns false on a malformed signature (not base64url,
+     * or wrong length), a signature mismatch, or any verification failure.
+     * This is correct for callers holding bytes from the wire — malformed
+     * signatures there are untrusted data. Throws only if [publicKey] is
+     * malformed, which is a programming error.
+     *
+     * Low-level primitive. [verify] is the convenience wrapper that
+     * canonicalizes a [SignedMatrix] first and throws on malformed input;
+     * callers holding already-canonical bytes call this directly.
+     */
+    fun verifyRaw(
+        canonical: ByteArray,
+        signatureBase64url: String,
+        publicKey: PublicKey,
+    ): Boolean {
+        val sigBytes = try {
+            Base64.getUrlDecoder().decode(signatureBase64url)
+        } catch (_: IllegalArgumentException) {
+            return false
+        }
+        if (sigBytes.size != 64) return false
+        return verifyDigest(matrixDigestRaw(canonical), sigBytes, publicKey)
+    }
+
+    /**
+     * The primitive both [verify] and [verifyRaw] delegate to. Callers
+     * have already decoded [sigBytes] and computed [digest].
+     */
+    private fun verifyDigest(
+        digest: ByteArray,
+        sigBytes: ByteArray,
+        publicKey: PublicKey,
+    ): Boolean {
         val sig = Signature.getInstance("Ed25519")
         sig.initVerify(publicKey)
         sig.update(digest)
