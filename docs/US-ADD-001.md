@@ -131,6 +131,15 @@ Do not implement, do not plan, do not add:
 | Session token storage — prohibited | `androidx.security:security-crypto` / EncryptedSharedPreferences | Deprecated 1.1.0-alpha07, no drop-in replacement. |
 | Session token storage — prohibited | Tink (`com.google.crypto.tink:tink-android`) | Google runtime dependency. |
 
+### §5.1 Local-storage category interpretation
+
+§5's `Local storage | SQLCipher` row applies to the message store
+and other bulk, structured, queryable data. Small key-value blobs —
+session token, `device_id`, identity keys, the verified authorization
+matrix — use the Keystore-backed AES-256-GCM category described in
+§5's session-token row. No local data uses SQLCipher unless and until
+a specific task requires bulk query semantics.
+
 ---
 
 ## §6 Parameter register — device baseline

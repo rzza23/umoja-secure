@@ -702,10 +702,57 @@ Wipe-confirmation key prerequisite: DONE — `WipeConfirmationKeyManager`
 
 **6. TASK-P1-026 remainder — client verification and storage.**
 KI-019 resolved (option a, 2026-10-15) — this task is now writable.
-Re-canonicalize wrapper; verify Ed25519 against pinned provisioning
-public key; enforce `highest_seen_version` (post-enrollment) or
-inclusive floor (replacement device); populate contacts from
-`permitted_contacts[]`; store `highest_seen_version` locally.
+
+**Design decisions (ruled 2026-10-15, before implementation):**
+
+- **Storage.** SecureStorage, single JSON envelope under one key:
+  `{"canonical": "<base64url>", "signature": "<base64url>"}`.
+  Canonical bytes stored once at receipt. Verification on read is
+  hash then Ed25519 verify; no re-canonicalization, no parse in the
+  trust path. Field access parses the stored bytes; parse is
+  convenience, not trust. Record that invariant in the MatrixStore
+  KDoc when the code lands — if `AuthorizationMatrix.fromJsonMap`
+  is ever widened, the stored bytes remain verified against the
+  signature, so no parse-based bypass exists.
+- **highest_seen_version is derived**, not stored separately. It is
+  `parse(stored_bytes).version`. Separate storage invites a
+  crash-window inconsistency: write matrix, crash before writing
+  version, accept a rollback on next launch.
+- **Two distinct trusted sets.** Matrix-verification set:
+  `{current_provisioning_pubkey} ∪ {previous_provisioning_pubkey if
+  a rotation notice has been received and the overlap window is
+  open}`. For Phase 1 that is just `{current}`. Notice-verification
+  set: `{recovery_pubkey}`, used only when a `key_rotation` or
+  `key_revocation` notice arrives. Matrices are never verified
+  against the recovery key.
+- **Structural guards for rotation.** P1-026 ships the seams, not
+  the handlers:
+  - `current_provisioning_pubkey`, `recovery_pubkey` — consts in
+    the APK.
+  - `previous_provisioning_pubkey` — SecureStorage key, initialized
+    absent; nothing writes it in P1-026.
+  - `highest_recovery_key_version` — SecureStorage key, initialized
+    0; nothing increments it in P1-026.
+  - `verifyMatrix(wrapper, signature, trustedProvisioningKeys:
+    Set<PublicKey>): Boolean` takes a set even though it is size 1
+    in P1-026. That is the seam.
+  - Fail-closed if a rotation notice arrives before the follow-up:
+    the notice is ignored (no handler), `previous_provisioning_pubkey`
+    stays absent, new-key-signed matrices are rejected. Safe.
+- **Contacts are a projection.** The verified matrix is authoritative
+  for who is authorized. `GET /me/contacts` is a convenience view
+  that should match but is not trusted. Divergence is a
+  server-compromise signal, not a client-confusion signal. P1-026
+  exposes `permitted_contacts[]` as a read accessor on the verified
+  matrix; wiring `ContactsScreen` to consult it (or cross-check) is
+  a follow-up UI decision.
+- **Follow-up task:** TASK-P1-036 — provisioning-key rotation and
+  recovery-key revocation notice handling.
+
+Re-canonicalize wrapper; verify Ed25519 against the trusted
+provisioning key set; enforce `highest_seen_version`
+(post-enrollment) or inclusive floor (replacement device); expose
+contacts from `permitted_contacts[]`.
 
 **7. TASK-P1-030 — replacement-device flow (integrated test per
 Build Master §3.7).**
