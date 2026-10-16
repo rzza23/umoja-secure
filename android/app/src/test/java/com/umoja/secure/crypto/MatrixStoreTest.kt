@@ -137,7 +137,7 @@ class MatrixStoreTest {
     }
 
     @Test
-    fun `TEST-MATRIX-ROLLBACK accept rejects rollback and store is unchanged`() {
+    fun `accept rejects tampered and leaves prior state untouched`() {
         // Two vectors with different versions. Accept the higher one first
         // (need to allow it), then attempt the lower one and assert
         // rejection with the store unchanged.
@@ -172,7 +172,7 @@ class MatrixStoreTest {
     }
 
     @Test
-    fun `accept rejects equal version`() {
+    fun `TEST-MATRIX-ROLLBACK accept rejects equal version`() {
         // Accept a vector twice; the second attempt must be rejected
         // because version is not strictly greater.
         val v = loadSignedVectors().first()

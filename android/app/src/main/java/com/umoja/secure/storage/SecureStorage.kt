@@ -27,7 +27,7 @@ class SecureStorage(
     context: Context,
     prefsName: String = DEFAULT_PREFS,
     private val keyAlias: String = DEFAULT_KEY_ALIAS,
-) {
+) : KeyValueStore {
     companion object {
         const val DEFAULT_PREFS = "umoja.secure.storage"
         const val DEFAULT_KEY_ALIAS = "umoja.secure.storage.aes.v1"
@@ -41,7 +41,7 @@ class SecureStorage(
     private val keyStore: KeyStore =
         KeyStore.getInstance(KEYSTORE).apply { load(null) }
 
-    fun put(key: String, value: String) {
+    override fun put(key: String, value: String) {
         val encrypted = encrypt(value.toByteArray(Charsets.UTF_8))
         val encoded = Base64.encodeToString(
             encrypted,
@@ -50,7 +50,7 @@ class SecureStorage(
         prefs.edit().putString(key, encoded).apply()
     }
 
-    fun get(key: String): String? {
+    override fun get(key: String): String? {
         val encoded = prefs.getString(key, null) ?: return null
         return try {
             val payload = Base64.decode(
@@ -64,7 +64,7 @@ class SecureStorage(
         }
     }
 
-    fun remove(key: String) {
+    override fun remove(key: String) {
         prefs.edit().remove(key).apply()
     }
 
@@ -75,7 +75,7 @@ class SecureStorage(
     /** Returns the set of all keys currently stored. Values are encrypted. */
     fun allKeys(): Set<String> = prefs.all.keys.toSet()
 
-    fun has(key: String): Boolean = prefs.contains(key)
+    override fun has(key: String): Boolean = prefs.contains(key)
 
     private fun getOrCreateAesKey(): SecretKey {
         if (!keyStore.containsAlias(keyAlias)) {
