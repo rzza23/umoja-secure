@@ -84,14 +84,14 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 89** (verified 2026-10-15; +12 EnrollmentQrPayloadTest)
+- **JVM unit tests: 110** (verified 2026-10-16 from XML; +12 EnrollmentQrPayloadTest, +21 P1-026 MatrixVerifier/MatrixStore)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
 
 Note: a prior handoff claimed 98 Android tests. That was wrong. The
 actual prior count was ~1 (ExampleUnitTest only); the crypto work
-brought it to 77, then 89 after P1-019. See §4 KI-013.
+brought it to 77, then 89 after P1-019, then 110 after P1-026. See §4 KI-013.
 
 ### Tor (dev)
 
@@ -1121,7 +1121,7 @@ Rebuild after flipping — read at HttpClient construction time.
   implementations reject objects with a `toJSON` method even though
   RFC 8785's reference code calls it. Do not "fix" this.
 
-Current verified state: **89 Android JVM tests** (2026-10-15),
+Current verified state: **110 Android JVM tests** (2026-10-16),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
 and **192 backend tests** (2026-10-15, 14 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
