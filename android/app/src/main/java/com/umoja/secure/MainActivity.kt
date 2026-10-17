@@ -51,6 +51,14 @@ import com.umoja.secure.crypto.MatrixStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.umoja.secure.crypto.IdentityChangeController
+import com.umoja.secure.crypto.ProvisioningKeys
+import com.umoja.secure.crypto.ReplacementNoticeStore
+import com.umoja.secure.transport.IdentityChangeApi
+import java.security.KeyFactory
+import java.security.PublicKey
+import java.security.spec.X509EncodedKeySpec
+import java.util.Base64
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -85,6 +93,33 @@ fun AppRoot() {
     var openEnrollmentQr by remember { mutableStateOf(false) }
 
     val wsState by app.webSocketClient.state.collectAsState()
+
+    // Identity-change controller. Constructed once per deviceId;
+    // null pre-enrollment, non-null after. One HttpClient per
+    // controller lifetime — polling reuses the connection, does not
+    // rebuild the SOCKS stack on each refresh. The Authenticated
+    // branch reaches this only when deviceId is non-null (routing
+    // rule), so the error() guard is a programming-error check that
+    // should never fire.
+    val identityChangeController = remember(deviceId) {
+        deviceId?.let { id ->
+            val keyManager = DeviceKeyManager(context = context)
+            val api = IdentityChangeApi(HttpClient(HttpClient.DEV_BASE_URL))
+            IdentityChangeController(
+                listNotices = api::getNotices,
+                postAck = api::postAck,
+                store = ReplacementNoticeStore(
+                    store = SecureStorage(context),
+                    signingFn = { digest -> keyManager.sign(digest) },
+                    ackingDeviceId = id,
+                ),
+                sessionTokenProvider = {
+                    SessionManager(context).currentSession()?.sessionToken
+                },
+                trustedKeys = setOf(provisioningPublicKey()),
+            )
+        }
+    }
 
     // Initial state load
     LaunchedEffect(Unit) {
@@ -165,6 +200,8 @@ fun AppRoot() {
             onOpenDiagnostics = { screen = AppScreen.Diagnostics },
             selectedTab = selectedTab,
             onSelectTab = { selectedTab = it },
+            identityChangeController = identityChangeController
+                ?: error("Authenticated without identityChangeController"),
         )
 
         AppScreen.Admin -> AdminScreen(
@@ -346,4 +383,23 @@ private suspend fun enrollDevice(
     } catch (e: Exception) {
         EnrollUiOutcome.Failure("unexpected_error")
     }
+}
+
+// Ed25519 SubjectPublicKeyInfo prefix per RFC 8410 §4. Wraps a raw
+// 32-byte Ed25519 public key into the DER form KeyFactory expects.
+// Duplicated from MatrixSigner.SPKI_PREFIX; consolidated later if a
+// fourth consumer appears (three-file threshold rule).
+private val ED25519_SPKI_PREFIX = byteArrayOf(
+    0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+)
+
+private fun provisioningPublicKey(): PublicKey {
+    val raw = Base64.getUrlDecoder()
+        .decode(ProvisioningKeys.CURRENT_PROVISIONING_PUBKEY_B64U)
+    require(raw.size == 32) {
+        "expected 32-byte provisioning pubkey, got ${raw.size}"
+    }
+    val spki = ED25519_SPKI_PREFIX + raw
+    return KeyFactory.getInstance("Ed25519")
+        .generatePublic(X509EncodedKeySpec(spki))
 }

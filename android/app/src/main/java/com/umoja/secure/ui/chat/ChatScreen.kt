@@ -1,6 +1,7 @@
 package com.umoja.secure.ui.chat
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -32,14 +34,19 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.umoja.secure.crypto.AckDecision
+import com.umoja.secure.crypto.IdentityChangeController
+import com.umoja.secure.crypto.ReplacementNoticeStore
 import com.umoja.secure.messaging.MessagingService
 import com.umoja.secure.storage.local.Message
 import com.umoja.secure.storage.local.MessageDirection
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -50,39 +57,57 @@ fun ChatScreen(
     peerLabel: String,
     onBack: () -> Unit,
     viewModel: ChatViewModel,
+    identityChangeController: IdentityChangeController,
 ) {
-    // System back (gesture / hardware) should close the chat instead of
-    // popping the whole activity.
     BackHandler(enabled = true) { onBack() }
+
+    val scope = rememberCoroutineScope()
 
     var input by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
+    var showDialog by remember { mutableStateOf(false) }
+    var ackInProgress by remember { mutableStateOf(false) }
+    var ackError by remember { mutableStateOf<String?>(null) }
 
     val listState = rememberLazyListState()
-
-    // Reactive: messages come from the view model's StateFlow.
     val messages by viewModel.messages.collectAsState()
-
-    // Reactive: re-query whenever any message is persisted anywhere.
     val messagesVersion by MessagingService.messagesVersion.collectAsState()
+
+    val version by identityChangeController.version.collectAsState()
+    val gateState: IdentityChangeController.GateState =
+        remember(version, peerDeviceId) { identityChangeController.gateFor(peerDeviceId) }
+    val isBlocked = gateState is IdentityChangeController.GateState.Blocked
 
     LaunchedEffect(peerDeviceId) {
         viewModel.observe(peerDeviceId)
     }
-
+    LaunchedEffect(peerDeviceId) {
+        identityChangeController.refresh()
+    }
     LaunchedEffect(messagesVersion) {
         viewModel.refresh()
     }
-
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
         }
     }
 
+    val sendNow: () -> Unit = {
+        if (input.isNotBlank() && !sending && !isBlocked) {
+            val text = input.trim()
+            input = ""
+            sending = true
+            status = null
+            viewModel.send(peerDeviceId, text) { result ->
+                sending = false
+                if (result != null) status = "Error: $result"
+            }
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
-        // Header
         Surface(
             color = MaterialTheme.colorScheme.surface,
             modifier = Modifier.fillMaxWidth(),
@@ -104,7 +129,6 @@ fun ChatScreen(
             }
         }
 
-        // Messages
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (messages.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -135,7 +159,13 @@ fun ChatScreen(
             )
         }
 
-        // Composer
+        (gateState as? IdentityChangeController.GateState.Blocked)?.let { blocked ->
+            IdentityChangeBanner(
+                state = blocked,
+                onOpenDetails = { showDialog = true },
+            )
+        }
+
         Surface(color = MaterialTheme.colorScheme.surface) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -144,49 +174,166 @@ fun ChatScreen(
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
-                    placeholder = { Text("Message...") },
-                    enabled = !sending,
+                    placeholder = {
+                        Text(if (isBlocked) "Sending blocked" else "Message...")
+                    },
+                    enabled = !sending && !isBlocked,
                     maxLines = 4,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = {
-                        if (input.isNotBlank() && !sending) {
-                            val text = input.trim()
-                            input = ""
-                            sending = true
-                            status = null
-                            viewModel.send(peerDeviceId, text) { result ->
-                                sending = false
-                                if (result != null) status = "Error: $result"
-                            }
-                        }
-                    }),
+                    keyboardActions = KeyboardActions(onSend = { sendNow() }),
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.widthIn(min = 8.dp))
                 IconButton(
-                    onClick = {
-                        if (input.isNotBlank() && !sending) {
-                            val text = input.trim()
-                            input = ""
-                            sending = true
-                            status = null
-                            viewModel.send(peerDeviceId, text) { result ->
-                                sending = false
-                                if (result != null) status = "Error: $result"
-                            }
-                        }
-                    },
-                    enabled = input.isNotBlank() && !sending,
+                    onClick = sendNow,
+                    enabled = input.isNotBlank() && !sending && !isBlocked,
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send",
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = if (isBlocked) MaterialTheme.colorScheme.onSurfaceVariant
+                               else MaterialTheme.colorScheme.primary,
                     )
                 }
             }
         }
     }
+
+    val pendingNotice = (gateState as? IdentityChangeController.GateState.Blocked)
+        ?.takeIf { it.reason == IdentityChangeController.GateState.Reason.PENDING }
+        ?.notice
+    if (showDialog && pendingNotice != null) {
+        val pn = pendingNotice
+        val submitAck: (AckDecision) -> Unit = { decision ->
+            ackError = null
+            ackInProgress = true
+            scope.launch {
+                val result = identityChangeController.ackAndPost(pn, decision)
+                ackInProgress = false
+                val r = result.getOrNull()
+                if (r is IdentityChangeController.AckResult.Success) {
+                    showDialog = false
+                } else {
+                    ackError = (r as? IdentityChangeController.AckResult.Failure)
+                        ?.code ?: "unknown"
+                }
+            }
+        }
+        AckDialog(
+            notice = pn,
+            ackInProgress = ackInProgress,
+            ackError = ackError,
+            onAccept = { submitAck(AckDecision.ACCEPT) },
+            onReject = { submitAck(AckDecision.REJECT) },
+            onDismiss = { if (!ackInProgress) showDialog = false },
+        )
+    }
+}
+
+@Composable
+private fun IdentityChangeBanner(
+    state: IdentityChangeController.GateState.Blocked,
+    onOpenDetails: () -> Unit,
+) {
+    val isPending = state.reason == IdentityChangeController.GateState.Reason.PENDING
+    val message = if (isPending) {
+        "Device replacement awaiting your acknowledgment"
+    } else {
+        "You rejected the replacement of this device. Sending is blocked. " +
+            "Contact your admin to resolve."
+    }
+    val container = if (isPending) MaterialTheme.colorScheme.tertiaryContainer
+                    else MaterialTheme.colorScheme.errorContainer
+
+    Surface(
+        color = container,
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (isPending) Modifier.clickable { onOpenDetails() } else Modifier),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+        ) {
+            Text(
+                message,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            if (isPending) {
+                Spacer(Modifier.widthIn(min = 8.dp))
+                Text(
+                    "View",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AckDialog(
+    notice: ReplacementNoticeStore.StoredNotice,
+    ackInProgress: Boolean,
+    ackError: String?,
+    onAccept: () -> Unit,
+    onReject: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Device replacement") },
+        text = {
+            Column {
+                Text("Device was replaced:", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    notice.fromDeviceId,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "→ " + notice.toDeviceId,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Issued: ${notice.issuedAt}",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Text(
+                    "Notice: ${notice.noticeHash.take(8)}…",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Signature verified on receipt against pinned provisioning key.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ackError?.let {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Error: $it",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onAccept, enabled = !ackInProgress) {
+                Text(if (ackInProgress) "…" else "Acknowledge")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onReject, enabled = !ackInProgress) {
+                Text("Reject")
+            }
+        },
+    )
 }
 
 @Composable
