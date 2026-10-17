@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-17 (Session N — Hardening design: TASK-P1-036…041 filed in registry v0.6, ADR-HARDENING-001 landed. Next: TASK-P1-038 — send-gate verification, six reads at opening.)
+Last updated: 2026-10-17 (Session N + v0.2 correction — registry v0.6, ADR-HARDENING-001 v0.2. Next: TASK-P1-037 — matrix transport, prerequisite for 038's send gate.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
