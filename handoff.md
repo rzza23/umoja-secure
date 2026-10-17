@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-17 (Session O-1 — TASK-P1-037 backend done: migration 016, GET /me/matrix, 5 route tests. Next: TASK-P1-037 O-2 — MatrixApi client, sign-test-matrix.ts, AppRoot wiring, manual verification.)
+Last updated: 2026-10-17 (Session O-2 — TASK-P1-037 DONE: MatrixApi + AppRoot fetch + seed script + withContext fix; verified highestSeenVersion=1 on emulator. Next: TASK-P1-038 — send gate.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -93,7 +93,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 169** (verified 2026-10-17 from XML; Session K's 12 IdentityChangeController tests are the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only, no Android changes. Session O-1 backend-only, no Android changes.)
+- **JVM unit tests: 174** (verified 2026-10-17 from XML; Session K's 12 IdentityChangeController tests, then Session O-2's 5 MatrixApiTest tests as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1).)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -1591,6 +1591,101 @@ force-stop → reopen → assert `highestSeenVersion`); handoff close.
 ADR-HARDENING-001 §6 sequence is unchanged at task-id level — 037
 must complete (both sessions) before 038 begins.
 
+### Session O-2 — TASK-P1-037 client landed (2026-10-17)
+
+TASK-P1-037 client half landed. With this, TASK-P1-037 is DONE
+end-to-end. Seven commits:
+
+- `f5e7fd2` — `MatrixApi.kt`: transport client, structural mirror of
+  `IdentityChangeApi.kt` (lambda-injected `HttpResult` seam, not a
+  concrete `HttpClient` — Session K's `IdentityChangeController`
+  pattern, extending the codebase's own convention rather than
+  introducing an interface for a just-shipped final class).
+  `fetch(sessionToken): RemoteMatrix?` — null on 404, exception on
+  401 + invalid_response. `RemoteMatrix(canonicalUtf8,
+  signatureBase64url)` wire shape.
+- `258673d` — `MatrixApiTest.kt`: 5 JVM tests. Happy path, 404 → null,
+  401 → exception, invalid_response → exception, malformed JSON →
+  exception. Lambda fake in the constructor; no HttpClient mock.
+- `d03910d` — `MatrixStoreTest` strengthened:
+  `TEST-MATRIX-STORE-ON-VERIFY-SUCCESS` version assertions.
+- `bc1cf2c` — `sign-test-matrix.ts`: HKDF-derived test key (same seed
+  as `sign-test-notice.ts`), self-check before DB touch, wrapper
+  build via `MatrixBuilder.build`, direct `INSERT INTO matrices`.
+- `14c39c2` — `AppRoot` wiring: `LaunchedEffect(screen, deviceId)`
+  fires on `Authenticated` entry, `MatrixApi.fetch` →
+  `MatrixStore.accept` on non-null. Silent catch on
+  `MatrixApiException` per registry §B; preserves existing store on
+  reject.
+- `f2dbf43` — `DiagnosticsScreen.kt`: matrix read-back section
+  (`highestSeenVersion` + contacts count) for manual verification.
+- `dad5a49` — withContext fix. See failure #1.
+
+**Acceptance chain verified on emulator 5556:** seeded matrix for
+`943fbeeb` (version 1, empty contacts) → force-stop → relaunch →
+app reaches `Authenticated` → effect fires → `GET /me/matrix` 200 in
+backend log (`req-8`, 31ms) → Diagnostics shows
+`highestSeenVersion=1 contacts=0`.
+
+**Four failures before acceptance, each caught by the correct layer:**
+
+1. **`NetworkOnMainThreadException` on every `Authenticated` entry**
+   (app crash). `LaunchedEffect` body runs on `Dispatchers.Main`;
+   `MatrixApi.fetch` → `HttpClient.get` is a blocking OkHttp call.
+   Caught via `logcat -b crash`: trace named
+   `MainActivityKt$AppRoot$2$1` line 194. Fix: wrap effect body in
+   `withContext(Dispatchers.IO)` — the pattern `enrollDevice` and
+   `IdentityChangeController.refresh()` already use. Domain `catch`
+   clauses (`MatrixApiException`) do not catch
+   `NetworkOnMainThreadException` (a `RuntimeException`) — the crash
+   escapes and the app dies. §7 gains a bullet.
+
+2. **`me/matrix` 404 from stale container.** O-1's route commit
+   (`98fee5c`) landed in source but the running backend image was
+   pre-O-1. Caught by backend log during first successful fetch
+   attempt: `Route GET:/me/matrix not found`. Fix:
+   `docker compose up -d --build backend`, then curl returns 401
+   (route exists). Same class as Session C `/admin/matrix-version`
+   and KI-002. §7's "rebuild before curl" rule re-hit via the client
+   path — rule extended to "before client testing."
+
+3. **`Connection reset` on three concurrent requests.** Both
+   `DisposableEffect` (Session M, identity-change polling) and
+   `LaunchedEffect(screen, deviceId)` (O-2, matrix fetch) fire on
+   `Authenticated` entry. Three sockets opened simultaneously → Tor
+   circuit reset all three. Caught by `logcat` (SocketException × 3,
+   all within 36ms) + backend log (zero requests at that timestamp).
+   Fix: `adb reverse --remove-all` + re-add. Session M's socat
+   sidecar chain is unstable under concurrent first-request load.
+   Not a code fix in O-2; named as a known-transient class.
+
+4. **Stale APK during early acceptance attempts.** Reinstall at
+   O-2's first manual test was pre-withContext-fix; the fix commit
+   landed but the emulator APK was old. `./gradlew installDebug`
+   resolved it. Not a new lesson — confirms the discipline that
+   "commit pushed" ≠ "APK on device."
+
+**Sequencing status:** TASK-P1-037 DONE. Next per ADR-HARDENING-001
+§6: TASK-P1-038 (send gate).
+
+**Caveat carried into 038.** The seeded matrix has
+`permitted_contacts=[]`. 038's fail-closed gate will correctly
+reject all sends against an empty matrix — right behavior (no
+authorized peers → no sends) but it makes "gate works" vs. "matrix
+has no permitted contacts" indistinguishable in a naive acceptance
+test. 038's acceptance must include all three:
+- Empty `permitted_contacts` → send rejected (fail-closed proof)
+- Non-empty `permitted_contacts`, peer in set → send succeeds
+- Non-empty `permitted_contacts`, peer not in set → send rejected
+
+`sign-test-matrix.ts` needs a `--contacts` arg (or equivalent) to
+seed a matrix with at least one permitted contact before 038 opens.
+Confirm and extend at 038's session start.
+
+**Counts.** Android JVM 169 → 174 (+5 MatrixApiTest). Backend
+unchanged at 247. Both from runner output (XML aggregate for JVM,
+`npm test | tail -4` for backend).
+
 ---
 
 ## 4. Known issues
@@ -2173,13 +2268,21 @@ Original phrasing preserved below for history:
     matrix exists on-device; shipping 038 without 037 produces green
     tests and a gate that never fires in production.
 
-    TASK-P1-037 is split across two sessions. **O-1 backend DONE
-    2026-10-17** — migration 016 (`46a3443`), `GET /me/matrix`
-    (`98fee5c`), 5 route tests (`a6174ea`); see Session O-1 entry in
-    §3. **O-2 next** — `MatrixApi.fetch()` client,
-    `sign-test-matrix.ts`, `AppRoot` wiring into `Authenticated`
-    state entry, manual emulator verification. 030e-d deferred behind
-    the whole pass.
+    **TASK-P1-037 DONE 2026-10-17** across two sessions. O-1 backend
+    (migration 016 `46a3443`, `GET /me/matrix` `98fee5c`, 5 route
+    tests `a6174ea`); O-2 client (`f5e7fd2` MatrixApi, `258673d` +
+    `d03910d` tests, `bc1cf2c` seed script, `14c39c2` + `f2dbf43`
+    AppRoot + Diagnostics wiring, `dad5a49` withContext fix).
+    Verified on emulator: seed → force-stop → relaunch →
+    `highestSeenVersion=1 contacts=0`. See Session O-2 entry in §3.
+
+    **Next task: TASK-P1-038 — send gate.** Seeded matrix has
+    `permitted_contacts=[]`, so 038's fail-closed path is the right
+    first test — but acceptance must also cover non-empty
+    permitted_contacts (both matched and unmatched) or "gate works"
+    is indistinguishable from "matrix has no contacts."
+    `sign-test-matrix.ts` needs a contacts arg. 030e-d remains
+    deferred behind the whole 037–041 pass.
 
 **Backlog items (not scheduled):**
 - Instrumented Compose tests for admin flows (no test rule configured;
@@ -2569,8 +2672,30 @@ Rebuild after flipping — read at HttpClient construction time.
   ADR versions in the handoff §1 and the ADR itself, sequencing in
   ADR §6 and §9. Multiple sources are correct for cross-checking;
   they are a drift hazard if updated independently.
+- **`LaunchedEffect` (and `DisposableEffect`, `SideEffect`) bodies run
+  on `Dispatchers.Main`.** Any blocking I/O — `HttpClient.get` /
+  `postJson`, `SecureStorage` Keystore reads, file I/O — must be
+  wrapped in `withContext(Dispatchers.IO)`. Failure mode: Session O-2
+  shipped a matrix-fetch effect that called `MatrixApi.fetch` directly;
+  debug build threw `NetworkOnMainThreadException` on every
+  `Authenticated` entry, crashing the app. `catch` clauses for domain
+  exceptions (`MatrixApiException`) do not catch
+  `NetworkOnMainThreadException` (a `RuntimeException`) — the crash
+  escapes the try and the app dies. `IdentityChangeController.refresh()`
+  KDoc is the reference pattern (internal `withContext(IO)`). Fix is a
+  one-line wrap; the diagnostic is `adb logcat -b crash`.
+- **`docker compose up -d --build backend` before CLIENT testing, not
+  just before curl.** KI-002's rule says "before curl testing"; the
+  same failure re-hit in Session O-2 as a client-visible 404 because
+  curl was not the diagnostic step — emulator logcat was. Route source
+  `98fee5c` (`GET /me/matrix`) landed but the container was stale;
+  the app's `MatrixApi.fetch` hit `Route GET:/me/matrix not found` in
+  the backend log; five minutes lost. Extended rule: any commit
+  touching `backend/src/routes/*.ts` or `backend/migrations/*.sql`
+  requires the rebuild step before ANY testing that uses the running
+  backend — emulator verification included, not just curl.
 
-Current verified state: **169 Android JVM tests** (2026-10-17),
+Current verified state: **174 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
 and **247 backend tests** (2026-10-17, 16 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
