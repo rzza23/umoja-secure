@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-16 (Session C — TASK-P1-030 3a done: backend org matrix version tracking; next: 3b)
+Last updated: 2026-10-16 (Session D — TASK-P1-030 3b and 3c done: server-side trio complete; next: 3d — Android floor-aware MatrixStore.accept)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -512,6 +512,64 @@ resolved.
 6/6. `admin.test.ts` alone 17/17. Unauthenticated curl to
 `/admin/matrix-version` returns 401 (route live, correctly gated).
 
+### Session D — TASK-P1-030 3b and 3c landed (2026-10-16)
+
+Server-side floor plumbing complete. Two commits:
+
+- `3dded33` — 030b: migration 014
+  (`014_enrollment_tokens_matrix_version_floor.sql` — note: longer
+  filename than the plan's `014_enrollment_matrix_version_floor.sql`,
+  already applied to both DBs, do not rename) adds nullable INTEGER
+  column with `CHECK (NULL OR >= 1)`. `createEnrollmentToken` reads
+  `org_matrix_versions.current_version` inside its existing
+  transaction and stamps on INSERT. `CreateTokenResult`,
+  `ListTokenResult`, and the `enrollment_token.created` audit payload
+  all carry the floor. 5 route-level tests in `admin.test.ts`.
+- `420d71f` — 030c: `consumeEnrollmentToken`'s SELECT gains
+  `enrollment_matrix_version_floor`; `EnrollmentResult` surfaces it.
+  Route's `reply.send(result)` picks it up — no `enrollment.ts`
+  change. 3 tests in `enrollment.test.ts`.
+
+**Floor semantics: stamped at issuance, frozen.** The floor is read
+from the token row at enrollment time, not re-read from
+`org_matrix_versions`. If the org asserted v5 at issuance and moved to
+v7 before the device actually enrolls, the token still carries
+floor=5. `TEST-TOKEN-FLOOR-FROZEN` (030b) proves stamping doesn't move
+with org state; `TEST-ENROLL-FLOOR-FROZEN` (030c) proves consumption
+returns the stamped value, not the current one. Together they pin the
+§3.7 step 1 reading of "the current matrix version at the time of
+token issuance."
+
+**Server-side flow now end-to-end:**
+1. `POST /admin/matrix-version` → sets `org_matrix_versions.current_version`
+2. `POST /admin/enrollment-tokens` → reads current version, stamps floor
+3. `POST /enrollment` → returns token's stamped floor to client
+
+Client receives the floor and stores it. Nothing on the client reads
+it until 030d.
+
+**One traceback worth recording.** During 030c's `consume.ts` edit,
+the read-back assert expected 3 occurrences of
+`enrollment_matrix_version_floor`; actual was 4. My assert was
+miscalibrated — the return expression contains both the object key
+*and* the property reference, so 4 is correct. The write had already
+happened (`p.write_text(src)` precedes the assert); the traceback
+fired on verification, not the edit. File was correct, tests passed.
+New §7 convention covers this class of confusion.
+
+**Migration 014 got the longer filename.** The plan called for
+`014_enrollment_matrix_version_floor.sql`; the file landed as
+`014_enrollment_tokens_matrix_version_floor.sql`. This is now baked
+into `schema_migrations` on both `umoja_test` and `umoja`. Do not
+rename — `runMigrations` would see the shorter name as unapplied and
+fail re-adding the column.
+
+**Verification.** Typecheck clean. Full suite 210/210 (15 files) on
+two consecutive runs. `enrollment.test.ts` 14/14 (11 existing + 3
+new), `admin.test.ts` 22/22 (17 existing + 5 new). Migration 014
+applied to dev DB; container rebuilt; `curl /admin/matrix-version`
+returns 401.
+
 ---
 
 ## 4. Known issues
@@ -959,8 +1017,9 @@ provisioning key set; enforce `highest_seen_version`
 contacts from `permitted_contacts[]`.
 
 **7. TASK-P1-030 — replacement-device flow (integrated test per
-Build Master §3.7). 3a DONE 2026-10-16 — commits `6013077`
-(backend) + `c79d7f8` (registry v0.5). Next sub-task: 030b.**
+Build Master §3.7). 3a DONE 2026-10-16 (commits `6013077` backend +
+`c79d7f8` registry v0.5). 3b DONE (`3dded33`). 3c DONE (`420d71f`).
+Next sub-task: 030d — Android floor-aware `MatrixStore.accept`.**
 
 **After Session A:**
 
@@ -1225,10 +1284,20 @@ Rebuild after flipping — read at HttpClient construction time.
   backend` before curl testing.** KI-002 re-hit in Session C: route
   added, tests passed, curl returned 404 because the container was
   still running the old image.
+- **Read-back asserts fire after `write_text`.** A traceback from a
+  read-back assert means the verification failed, **not** that the
+  write failed. Inspect the file before assuming the edit didn't land.
+  Session D: `consume.ts` read-back expected 3 occurrences, actual
+  was 4 — because the return expression contains both the object key
+  *and* the property reference. The write succeeded, tests passed,
+  the traceback was purely calibration error. Calibrate count asserts
+  against the actual intended content; when uncertain about whether
+  related content adds incidental occurrences, use `>= N` where N is
+  the number of intentional insertions.
 
 Current verified state: **110 Android JVM tests** (2026-10-16),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
-and **202 backend tests** (2026-10-16, 15 files), all from runner output.
+and **210 backend tests** (2026-10-16, 15 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
 infrastructure (Mac vs emulator) and must not be summed.
 
