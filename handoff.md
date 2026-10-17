@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-17 (Session F — TASK-P1-030 030e-a done: replacement-notice schema + signing, both languages. Next: 030e-b — backend identity-change endpoints)
+Last updated: 2026-10-17 (Session G — TASK-P1-030 030e-b ADR + migration landed. Next: 030e-b service modules, routes, tests.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -703,6 +703,80 @@ signature for the same input.
 never decrypts, never signs. Independent of any client work. Can be
 done in one session.
 
+### Session G — TASK-P1-030 030e-b ADR + migration landed (2026-10-17)
+
+Design-first session: ADR before any code, migration verified against
+the ADR, no service or route code yet. Two commits:
+
+- `21677a9` — `docs/architecture/ADR-IDENTITY-CHANGE-001.md` (401
+  lines). Resolves the three 030e-b design questions recorded end of
+  Session F: (1) ack domain is `umoja.identity-change-ack.v1`,
+  distinct from the replacement-notice; (2) backend DOES verify acks
+  server-side using `devices.public_key` from enrollment, reusing
+  `@noble/ed25519.verifyAsync` — the same primitive
+  `verifyChallenge` in `auth/verify.ts` already uses; (3) peer
+  discovery is Option C — backend returns all org notices, client
+  filters by its own accepted matrix.
+- `00f31df` — `backend/migrations/015_identity_change.sql` (69 lines).
+  `identity_change_notices` + `identity_change_acks` per ADR §6. PK
+  `(notice_hash, acking_device_id)` for replay idempotence. BYTEA
+  canonical_bytes (not JSONB — byte identity with the signed artifact
+  is the trust property).
+
+**Two corrections landed during Session G.** Both found by reading
+`auth/verify.ts` and `migrations/002_devices.sql` before writing the
+ADR, rather than assuming:
+
+1. **"Backend has not verified a device-signed artifact before"** was
+   wrong in Session F's note. `POST /auth/verify` does exactly that —
+   device signs a challenge with its Ed25519 device auth key, backend
+   verifies against `devices.public_key`. The ack verification reuses
+   this exact pattern, not a new trust boundary.
+2. **"Backend can filter GET /identity-change-notices by
+   permitted_contacts"** was wrong in Session F's note. The backend
+   never stores the matrix — matrix verification is client-side
+   (P1-026). Peer discovery had to be a genuine design decision, not
+   "reuse existing state." ADR §5 resolves it as Option C, with the
+   alternative rejections (A: backend stores matrices; B: client
+   POSTs contact set) documented and rejected with named reasoning.
+
+Both corrections are recorded here because the next session should
+see the delta between Session F's guess and the actual code. Reading
+before writing the ADR cost 15 minutes; discovering the wrong
+assumption during implementation would have cost a session.
+
+**Deliberate asymmetric trust boundaries (ADR §4).** Notices are a
+relay — backend stores verbatim, does not verify provisioning
+signature, because that key is client-pinned only (server-blind per
+ADR-PROVISIONING-001 §2 Q3). Acks are verified — backend has the
+device auth public key. The asymmetry is dictated by which keys the
+backend holds, not by any design preference. Both defenses at the
+correct layer.
+
+**Schema additions beyond ADR §6 sketch.** `signature_base64url`
+length CHECK (86 chars = 64 bytes Ed25519 base64url no-pad),
+defense-in-depth beyond route validation, matching the pattern of
+`audit_events.event_hash` and `enrollment_tokens.token_hash`. Cross-
+org consistency (from_device, to_device, org_id all in the same org)
+is route-validated not DB-constrained, matching the
+`enrollment_tokens.org_id` pattern (bare UUID, no orgs table) —
+documented in the migration comment so a future reviewer knows it is
+intentional.
+
+**Verification.** Full suite 217/217 (global-setup applies 015 in
+the test DB; no test references the new tables yet, but SQL is
+proven). Dev DB migrated. Both tables verified via \d — constraints,
+indexes, FKs all present as designed.
+
+**Next: 030e-b service modules + routes + tests.** Per ADR §7 four
+endpoints and §8 seventeen named failure-mode tests. Route-level
+tests in `backend/test/identity-change.test.ts`, `TEST_ORG_ID =
+'00000000-0000-0000-0000-0000000000b1'` (per §7 convention: distinct
+from existing org IDs — currently 011, 044, 055, 066, 077, 088,
+099, 0a1, 0a2). File cleanup order in afterAll:
+`identity_change_acks` → `identity_change_notices` → `devices` (FK
+dependencies).
+
 ---
 
 ## 4. Known issues
@@ -1153,12 +1227,25 @@ contacts from `permitted_contacts[]`.
 Build Master §3.7). 3a DONE 2026-10-16 (`6013077` backend +
 `c79d7f8` registry v0.5). 3b DONE (`3dded33`). 3c DONE (`420d71f`).
 3d DONE (`71e06c7`). 030e-a DONE 2026-10-17 (`d28c631` TS +
-`f257e03` Kotlin). Next: 030e-b — backend identity-change endpoints
-(tables + routes + ack verification). Not blocked.**
+`f257e03` Kotlin). 030e-b ADR + schema DONE 2026-10-17 (`21677a9`
+ADR + `00f31df` migration 015). Next: 030e-b service modules +
+routes + tests.**
 
-**030e-b design questions** — non-obvious points the next session
-should decide, not inherit. Recorded here because they did not survive
-into the registry or the code:
+**030e-b design questions** — RESOLVED in ADR-IDENTITY-CHANGE-001
+(`21677a9`, design), backed by migration 015 (`00f31df`, schema).
+Do NOT re-open these; the ADR is the authoritative ruling.
+
+- Q1 ack signature domain → ADR §3: `umoja.identity-change-ack.v1`,
+  distinct from `umoja.replacement-notice.v1`.
+- Q2 backend verifies device-signed artifacts → ADR §4: yes, reuses
+  `@noble/ed25519.verifyAsync` per `auth/verify.ts`. Session F's note
+  that backend had not done this before was wrong — that is exactly
+  what session auth does.
+- Q3 peer discovery → ADR §5: Option C (backend returns all org
+  notices, client filters by accepted matrix). Options A and B
+  rejected with named reasoning.
+
+Original phrasing preserved below for history:
 
 1. **Ack signature domain.** The peer signs "I have seen notice H and
    accept it." Is that a new domain (`umoja.identity-change-ack.v1`),
@@ -1494,6 +1581,21 @@ Rebuild after flipping — read at HttpClient construction time.
   updates `generated_at`. Verify with the `MATRIX_VECTORS_IDENTICAL`
   python check that `expected_*` fields are unchanged; commit the
   timestamp refresh in the same commit as the generator change.
+- **Session workflow — accumulated discipline (Sessions C–F, applied
+  cleanly in G).** Four practices, each earned by a specific failure,
+  together preventing the failure classes seen across Sessions C–F.
+  (a) Compile between edits, not after — Session F Round 1 shipped
+  three files with type errors that a mid-script compile would have
+  caught one edit earlier. (b) Grep `test/*.ts` for existing fixture
+  IDs before picking a new one — Session C's cross-test org collision
+  cost a full session of debugging; the pre-flight grep is 30 seconds.
+  (c) Pre-flight every edit block: cwd, target file exists, anchor
+  unique — Session C's first edit failed on cwd, and its read-back
+  pass-through compounded to a doubled file. (d) Before `git commit`,
+  verify the staged set matches what the message describes — Session
+  C's `8adde6b` message described half its content because `git add`
+  swept in an already-staged file. Session G applied all four from
+  the first edit; no mid-session correction required.
 
 Current verified state: **122 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
