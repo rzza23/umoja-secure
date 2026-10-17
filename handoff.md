@@ -2459,6 +2459,23 @@ Rebuild after flipping — read at HttpClient construction time.
   returns zero lines, widen the grep before concluding anything.
   If it returns many but irrelevant lines, tighten it to a
   specific tag you know exists in the code.
+- **Multi-source statements must be updated atomically across files.**
+  Three places state "the next task": handoff.md line 3, handoff.md
+  §5 item 16, ADR-HARDENING-001 §6 Order line. Any commit that changes
+  one must change all three, in the same commit. Failure mode:
+  `d133878` updated §5 but not the header; the header contradicted §5
+  for two commits until `eeee151`. Consistency check after any
+  'next task' change:
+
+      sed -n '3p' handoff.md | grep -oE "Next: TASK-P1-0[0-9]{2}"
+      grep "Next session opens on" handoff.md | grep -oE "TASK-P1-0[0-9]{2}"
+      grep "Order (v0.2 correction)" docs/architecture/ADR-HARDENING-001.md
+
+  All three must print the same task ID. Same principle applies to any
+  statement duplicated across the doc set — test counts in §2 and §7,
+  ADR versions in the handoff §1 and the ADR itself, sequencing in
+  ADR §6 and §9. Multiple sources are correct for cross-checking;
+  they are a drift hazard if updated independently.
 
 Current verified state: **169 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
