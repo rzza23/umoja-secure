@@ -47,6 +47,7 @@ import com.umoja.secure.ui.theme.UmojaSecureTheme
 import com.umoja.secure.crypto.DeviceIdStore
 import com.umoja.secure.crypto.DeviceIdentity
 import com.umoja.secure.crypto.DeviceKeyManager
+import com.umoja.secure.crypto.MatrixStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -337,6 +338,7 @@ private suspend fun enrollDevice(
         storage.put("device_id", response.deviceId)
         storage.put("org_id", response.orgId)
         storage.put("role", response.role)
+        MatrixStore(storage).setEnrollmentFloor(response.enrollmentMatrixVersionFloor)
 
         EnrollUiOutcome.Success(response.deviceId)
     } catch (e: EnrollmentException) {

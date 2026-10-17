@@ -45,6 +45,10 @@ class MatrixStore(private val store: KeyValueStore) {
     companion object {
         /** SecureStorage key holding the JSON envelope. */
         const val KEY: String = "provisioning.matrix.envelope"
+
+        /** SecureStorage key holding the enrollment floor (if any). */
+        const val KEY_ENROLLMENT_FLOOR: String =
+            "provisioning.matrix.enrollment_floor"
     }
 
     /** Raw canonical bytes plus signature, plus the parsed form. */
@@ -65,8 +69,10 @@ class MatrixStore(private val store: KeyValueStore) {
      *
      * Returns [AcceptResult.Rejected] with reason `"signature"` if
      * verification fails, `"malformed"` if the signed content does not
-     * parse, `"rollback"` if the version is not strictly greater than
-     * the highest already stored. Persists only on acceptance.
+     * parse, `"rollback"` if a matrix is already stored and the new
+     * version is not strictly greater, `"below_floor"` if no matrix is
+     * yet stored and the new version is below the enrollment floor.
+     * Persists only on acceptance.
      */
     fun accept(
         canonical: ByteArray,
@@ -82,8 +88,15 @@ class MatrixStore(private val store: KeyValueStore) {
             return AcceptResult.Rejected("malformed")
         }
         val current = highestSeenVersion()
-        if (current != null && parsed.matrix.version <= current) {
-            return AcceptResult.Rejected("rollback")
+        if (current != null) {
+            if (parsed.matrix.version <= current) {
+                return AcceptResult.Rejected("rollback")
+            }
+        } else {
+            val floor = enrollmentFloor()
+            if (floor != null && parsed.matrix.version < floor) {
+                return AcceptResult.Rejected("below_floor")
+            }
         }
         store.put(KEY, encodeEnvelope(canonical, signatureBase64url))
         return AcceptResult.Accepted(parsed.matrix.version)
@@ -111,9 +124,44 @@ class MatrixStore(private val store: KeyValueStore) {
     /** The stored matrix's permitted contacts, or null if none stored. */
     fun permittedContacts(): List<String>? = load()?.signed?.matrix?.permittedContacts
 
-    /** Remove the stored matrix. Only the duress-wipe flow should call. */
+    /**
+     * Set the enrollment floor for the next [accept] on this device.
+     *
+     * Floor is store-owned policy, not a caller-supplied argument, so
+     * the floor cannot be bypassed by an [accept] caller that fails to
+     * pass it. Called by the enrollment flow (MainActivity.enrollDevice)
+     * with the value from the 030c enrollment response.
+     *
+     * A null floor means "no floor": accept any valid version. This is
+     * the bootstrap case for the first device in a fresh org.
+     *
+     * Per §3.7 step 1, the floor is inclusive: a matrix with
+     * `version == floor` is accepted. See [accept].
+     */
+    fun setEnrollmentFloor(floor: Int?) {
+        if (floor == null) {
+            store.remove(KEY_ENROLLMENT_FLOOR)
+        } else {
+            store.put(KEY_ENROLLMENT_FLOOR, floor.toString())
+        }
+    }
+
+    /**
+     * Read the stored enrollment floor, if any. Consumed by the first
+     * [accept] only; subsequent accepts use [highestSeenVersion].
+     */
+    fun enrollmentFloor(): Int? =
+        store.get(KEY_ENROLLMENT_FLOOR)?.toIntOrNull()
+
+    /**
+     * Remove the stored matrix and enrollment floor. Only the
+     * duress-wipe flow should call. The floor is part of the wipe — a
+     * wiped device re-enrolls and receives a fresh floor via
+     * [setEnrollmentFloor].
+     */
     fun clear() {
         store.remove(KEY)
+        store.remove(KEY_ENROLLMENT_FLOOR)
     }
 
     // ---------- envelope encoding ----------

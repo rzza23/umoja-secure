@@ -1,6 +1,7 @@
 package com.umoja.secure.crypto
 
 import com.umoja.secure.storage.KeyValueStore
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -10,6 +11,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.security.KeyPairGenerator
+import java.security.PrivateKey
 import java.security.PublicKey
 import java.util.Base64
 
@@ -204,5 +206,138 @@ class MatrixStoreTest {
         assertNull(store.load())
         assertNull(store.highestSeenVersion())
         assertNull(store.permittedContacts())
+    }
+
+    // ---------- enrollment floor (TASK-P1-030 3d) ----------
+
+    private fun jsonObjectToPlainMap(jo: JSONObject): Map<String, Any?> {
+        val out = linkedMapOf<String, Any?>()
+        for (key in jo.keys()) {
+            out[key] = jsonValueToPlain(jo.get(key))
+        }
+        return out
+    }
+
+    private fun jsonValueToPlain(v: Any?): Any? = when (v) {
+        null, JSONObject.NULL -> null
+        is JSONObject -> jsonObjectToPlainMap(v)
+        is JSONArray -> (0 until v.length()).map { jsonValueToPlain(v.get(it)) }
+        else -> v
+    }
+
+    /**
+     * Build a signed matrix at an arbitrary version, using W-001's
+     * canonical bytes as the template. The template's version field is
+     * overwritten and the wrapper is re-canonicalized and re-signed
+     * with [privateKey]. Test-only — production never re-canonicalizes
+     * or re-signs; the store's trust path is bytes-in, verify-then-store.
+     */
+    private fun buildSignedMatrixAtVersion(
+        version: Int,
+        privateKey: PrivateKey,
+    ): Pair<ByteArray, String> {
+        val template = loadSignedVectors().first()
+        val plain = jsonObjectToPlainMap(
+            JSONObject(String(canonicalOf(template), Charsets.UTF_8)),
+        )
+        val parsed = SignedMatrix.fromJsonMap(plain)
+        val wrapper = parsed.toJsonMap().toMutableMap()
+        @Suppress("UNCHECKED_CAST")
+        val matrix = (wrapper["matrix"] as Map<String, Any?>).toMutableMap()
+        matrix["version"] = version
+        wrapper["matrix"] = matrix
+        val rebuilt = SignedMatrix.fromJsonMap(wrapper)
+        val canonical = jcsCanonicalizeString(rebuilt.toJsonMap()).toByteArray(Charsets.UTF_8)
+        val sig = MatrixSigner.sign(rebuilt, privateKey)
+        return canonical to sig
+    }
+
+    private fun freshKeypair() = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
+
+    @Test
+    fun `TEST-MATRIX-FLOOR-INCLUSIVE accepts version equal to floor`() {
+        val kp = freshKeypair()
+        val trusted = setOf<PublicKey>(kp.public)
+        val store = MatrixStore(InMemoryStore())
+        store.setEnrollmentFloor(5)
+
+        val (canonical, sig) = buildSignedMatrixAtVersion(5, kp.private)
+        val result = store.accept(canonical, sig, trusted)
+        assertTrue("expected accepted, got $result", result is MatrixStore.AcceptResult.Accepted)
+        assertEquals(5, store.highestSeenVersion())
+    }
+
+    @Test
+    fun `TEST-MATRIX-FLOOR-BELOW-REJECTED rejects version below floor`() {
+        val kp = freshKeypair()
+        val trusted = setOf<PublicKey>(kp.public)
+        val store = MatrixStore(InMemoryStore())
+        store.setEnrollmentFloor(6)
+
+        val (canonical, sig) = buildSignedMatrixAtVersion(5, kp.private)
+        val result = store.accept(canonical, sig, trusted)
+        assertTrue("expected rejected, got $result", result is MatrixStore.AcceptResult.Rejected)
+        assertEquals(
+            "below_floor",
+            (result as MatrixStore.AcceptResult.Rejected).reason,
+        )
+        assertNull(store.load())
+    }
+
+    @Test
+    fun `TEST-MATRIX-FLOOR-NULL-ACCEPTS-ANY no floor accepts any version`() {
+        val kp = freshKeypair()
+        val trusted = setOf<PublicKey>(kp.public)
+        val store = MatrixStore(InMemoryStore())
+        // No setEnrollmentFloor call — bootstrap case.
+
+        val (canonical, sig) = buildSignedMatrixAtVersion(1, kp.private)
+        val result = store.accept(canonical, sig, trusted)
+        assertTrue("expected accepted, got $result", result is MatrixStore.AcceptResult.Accepted)
+        assertEquals(1, store.highestSeenVersion())
+    }
+
+    @Test
+    fun `TEST-MATRIX-FLOOR-NOT-CONSULTED-AFTER-FIRST-ACCEPT floor ignored after first accept`() {
+        val kp = freshKeypair()
+        val trusted = setOf<PublicKey>(kp.public)
+        val store = MatrixStore(InMemoryStore())
+        store.setEnrollmentFloor(5)
+
+        // First accept at version 5.
+        val (c1, s1) = buildSignedMatrixAtVersion(5, kp.private)
+        assertTrue(store.accept(c1, s1, trusted) is MatrixStore.AcceptResult.Accepted)
+
+        // Set an absurd floor. Subsequent accept must ignore it.
+        store.setEnrollmentFloor(999)
+        val (c2, s2) = buildSignedMatrixAtVersion(6, kp.private)
+        val result = store.accept(c2, s2, trusted)
+        assertTrue(
+            "expected accepted despite floor=999, got $result",
+            result is MatrixStore.AcceptResult.Accepted,
+        )
+        assertEquals(6, store.highestSeenVersion())
+    }
+
+    @Test
+    fun `TEST-MATRIX-FLOOR-CLEARED-ON-WIPE clear removes floor and matrix`() {
+        val kp = freshKeypair()
+        val trusted = setOf<PublicKey>(kp.public)
+        val store = MatrixStore(InMemoryStore())
+        store.setEnrollmentFloor(5)
+
+        val (c1, s1) = buildSignedMatrixAtVersion(5, kp.private)
+        assertTrue(store.accept(c1, s1, trusted) is MatrixStore.AcceptResult.Accepted)
+        assertNotNull(store.enrollmentFloor())
+
+        store.clear()
+        assertNull(store.enrollmentFloor())
+        assertNull(store.highestSeenVersion())
+
+        // After wipe, v1 should be accepted (floor is gone).
+        val (c2, s2) = buildSignedMatrixAtVersion(1, kp.private)
+        val result = store.accept(c2, s2, trusted)
+        assertTrue("expected accepted post-wipe, got $result",
+            result is MatrixStore.AcceptResult.Accepted)
     }
 }

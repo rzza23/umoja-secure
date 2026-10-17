@@ -13,6 +13,7 @@ data class EnrollmentResponse(
     val deviceId: String,
     val orgId: String,
     val role: String,
+    val enrollmentMatrixVersionFloor: Int?,
 )
 
 class EnrollmentApi(private val http: HttpClient) {
@@ -43,6 +44,9 @@ class EnrollmentApi(private val http: HttpClient) {
                     deviceId = json.getString("device_id"),
                     orgId = json.getString("org_id"),
                     role = json.getString("role"),
+                    enrollmentMatrixVersionFloor =
+                        if (json.isNull("enrollment_matrix_version_floor")) null
+                        else json.getInt("enrollment_matrix_version_floor"),
                 )
             } catch (e: Exception) {
                 throw EnrollmentException("invalid_response", e)
