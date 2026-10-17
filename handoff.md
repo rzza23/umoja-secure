@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-16 (Session D — TASK-P1-030 3b and 3c done: server-side trio complete; next: 3d — Android floor-aware MatrixStore.accept)
+Last updated: 2026-10-16 (Session E — TASK-P1-030 3d done: floor-aware MatrixStore.accept on Android; 030c client half closed. Next: 030e — peer identity-change notification, BLOCKED on channel decision)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -570,6 +570,74 @@ new), `admin.test.ts` 22/22 (17 existing + 5 new). Migration 014
 applied to dev DB; container rebuilt; `curl /admin/matrix-version`
 returns 401.
 
+### Session E — TASK-P1-030 3d landed (2026-10-16)
+
+Floor-aware `MatrixStore.accept` on Android. Closes 030c's client
+half (store the floor from the enrollment response) and 030d
+(floor-aware accept). One commit:
+
+- `71e06c7` — 030c client half + 030d. `MatrixStore` gains
+  `setEnrollmentFloor(Int?)`, `enrollmentFloor()`, and
+  `KEY_ENROLLMENT_FLOOR` (prefs key). `accept()` branches:
+  first-accept consults floor (`version < floor` →
+  `Rejected("below_floor")`); subsequent accepts use
+  `highestSeenVersion` only. `clear()` removes both keys.
+  `EnrollmentResponse` gains `enrollmentMatrixVersionFloor: Int?`;
+  `MainActivity.enrollDevice` calls `setEnrollmentFloor` after
+  storing identity. 5 floor tests appended to `MatrixStoreTest`.
+
+**Design: floor is store-owned state, not an `accept()` parameter.**
+The P1-026 KDoc is explicit that anti-rollback lives in
+`MatrixStore.accept` so callers cannot bypass the policy by calling
+`MatrixVerifier` directly. A `floor` argument on `accept()` would
+reopen that bypass. `setEnrollmentFloor` is the injection point,
+called once by the enrollment flow with the value from
+`POST /enrollment`.
+
+**Floor semantics.** First-accept-only. Once any matrix is stored,
+`highestSeenVersion` IS the floor — a new matrix's version must
+strictly exceed it. The enrollment floor is never consulted on
+subsequent accepts. `TEST-MATRIX-FLOOR-NOT-CONSULTED-AFTER-FIRST-ACCEPT`
+proves this by setting floor=999 after a v5 accept and successfully
+accepting v6.
+
+**MatrixStoreTest pre-existed.** It was created in P1-026 with 9
+tests (accept/load round-trip, tampered reject, wrong-key reject,
+rollback, clear, empty state). Session E extended it to 14. The
+handoff §2 "110 JVM" count already included the 9 — no correction.
+
+**Traceback in Block 1 was calibration error again.** The read-back
+assert on `MatrixStore.kt` expected 4 `KEY_ENROLLMENT_FLOOR`
+occurrences; actual was 5 (`const val` + two branches in
+`setEnrollmentFloor` + `enrollmentFloor()` + `clear()`). Same class
+as Session D's `consume.ts` — multi-branch methods and multiple
+references to the same constant defeat a "one per method" estimate.
+Write count from actual code. §7 bullet refined.
+
+**Verification.** Android JVM 110 → 115 (aggregate from XML). The
+scoped `--tests "MatrixStoreTest"` run printed `BUILD SUCCESSFUL`
+with no test-count line — the gradle scoping trap already in §7;
+aggregate from `TEST-*.xml` is authoritative. Backend unchanged
+at 210.
+
+**Next: 030e is BLOCKED on a channel decision.** Peer
+identity-change notification + ack state. Options:
+- **A: Backend envelopes** (`/envelopes`). Device sends the
+  notification through the existing ciphertext-routing path; peers
+  receive it in their pending queue, acknowledge via another
+  envelope. Server-blind is preserved — backend routes ciphertext,
+  never learns key material. Reuses existing infrastructure.
+  **Recommended.**
+- **B: Backend-pushed over WS.** Backend learns about key changes
+  and pushes them. **Violates server-blind.** Rejected on
+  architecture grounds.
+- **C: Out-of-band via admin.** Admin provisions the notification
+  via signed matrix or QR. Works but requires admin online at
+  replacement time; defeats the automated-ack intent of 030e.
+
+Per Build Master §0, escalated rather than guessed. Next session
+opens on this ruling.
+
 ---
 
 ## 4. Known issues
@@ -1019,7 +1087,9 @@ contacts from `permitted_contacts[]`.
 **7. TASK-P1-030 — replacement-device flow (integrated test per
 Build Master §3.7). 3a DONE 2026-10-16 (commits `6013077` backend +
 `c79d7f8` registry v0.5). 3b DONE (`3dded33`). 3c DONE (`420d71f`).
-Next sub-task: 030d — Android floor-aware `MatrixStore.accept`.**
+3d DONE (`71e06c7`). Next: 030e — peer identity-change notification
++ ack state. **BLOCKED on channel decision** — see Session E entry
+for options A/B/C and the recommendation.**
 
 **After Session A:**
 
@@ -1293,9 +1363,15 @@ Rebuild after flipping — read at HttpClient construction time.
   the traceback was purely calibration error. Calibrate count asserts
   against the actual intended content; when uncertain about whether
   related content adds incidental occurrences, use `>= N` where N is
-  the number of intentional insertions.
+  the number of intentional insertions. Session E repeated the
+  pattern on `MatrixStore.kt`: expected 4 `KEY_ENROLLMENT_FLOOR`
+  occurrences, actual 5 (`const val` + two branches in
+  `setEnrollmentFloor` + `enrollmentFloor()` + `clear()`).
+  Multi-branch methods and multiple references to the same constant
+  defeat a "one per method" estimate. Count from actual code, or use
+  `>= N` for intentional insertions only.
 
-Current verified state: **110 Android JVM tests** (2026-10-16),
+Current verified state: **115 Android JVM tests** (2026-10-16),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
 and **210 backend tests** (2026-10-16, 15 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
