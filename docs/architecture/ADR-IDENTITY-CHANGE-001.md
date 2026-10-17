@@ -1,7 +1,7 @@
 # ADR-IDENTITY-CHANGE-001 — Peer identity-change notification and ack
 
 Document ID: ADR-IDENTITY-CHANGE-001
-Version: 0.1
+Version: 0.2
 Date: 2026-10-17
 Status: Proposed
 Task: TASK-P1-030 sub-task 030e-b
@@ -305,9 +305,12 @@ as `umoja.identity-change-ack.v1`.
    `umoja.identity-change-ack.v1`.
 2. `ack.acking_device_id === req.device.device_id` — cannot ack as
    someone else.
-3. `ack.notice_hash === SHA-256(canonical_utf8 bytes)` — the ack's
-   claimed notice_hash must match the actual bytes.
-4. `notice_hash` exists in `identity_change_notices`.
+3. `ack.notice_hash` is a valid base64url-32 value (enforced by the
+   schema validator in step 1). Notice existence is step 4. (In v0.1
+   this step read "compare notice_hash against SHA-256 of the ack's
+   own bytes", which is unsatisfiable — see §10 v0.2.)
+4. A notice with `notice_hash = ack.notice_hash` exists in
+   `identity_change_notices`.
 5. `notice.org_id === req.device.org_id` — cross-org rejection.
 6. Look up `acking_device` row in `devices` — status must be `active`.
    (Revoked or suspended device cannot ack.)
@@ -353,7 +356,7 @@ it pins, not the code path it exercises.
     TEST-NOTICE-STORED-VERBATIM           canonical_bytes and signature byte-identical to input
     TEST-ACK-INVALID-SIGNATURE            bad signature → 400 invalid_signature, no row
     TEST-ACK-WRONG-DEVICE                 ack claims different acking_device_id → 400
-    TEST-ACK-HASH-MISMATCH                canonical_utf8 hash ≠ provided notice_hash → 400
+    TEST-ACK-INVALID-DECISION             decision not in {accept,reject} → 400 invalid_request, no row
     TEST-ACK-UNKNOWN-NOTICE               notice_hash not in table → 400 unknown_notice
     TEST-ACK-CROSS-ORG-REJECTED           acking device org ≠ notice org → 403
     TEST-ACK-REVOKED-DEVICE               revoked device cannot ack → 403 device_revoked
@@ -363,7 +366,14 @@ it pins, not the code path it exercises.
     TEST-ACK-LIST-BY-NOTICE               acks returned for a notice, scoped to notice org
     TEST-ACK-LIST-CROSS-ORG-FORBIDDEN     caller org ≠ notice org → 403
 
-17 tests. All in `backend/test/identity-change.test.ts`. Route-level
+17 tests. All in `backend/test/identity-change.test.ts`.
+
+Note on TEST-ACK-INVALID-DECISION: the route-level validator is the
+first line of defense; the DB CHECK (decision IN ('accept','reject'),
+migration 015) is the last. This test asserts the route rejects an
+out-of-vocabulary decision *before* any DB write — confirming the
+pre-write validation discipline, not merely that the DB constraint
+exists. Route-level
 (`app.inject`) matching admin.test.ts style. Each test uses
 `TEST_ORG_ID = '00000000-0000-0000-0000-0000000000b1'` (distinct from
 existing test orgs per §7 convention).
@@ -388,6 +398,42 @@ existing test orgs per §7 convention).
 ---
 
 ## §10 Open questions
+
+### v0.2 (2026-10-17) — §7 step 3 fix, §8 test rename
+
+**§7 step 3 was unsatisfiable in v0.1.** Original: `ack.notice_hash
+=== SHA-256(canonical_utf8 bytes)` — but `ack.notice_hash` is a field
+*inside* `canonical_utf8`, so this compares a hash against the hash
+of the bytes containing it. No fixed point exists. §3's independent
+description ("SHA-256 of the canonical bytes of the replacement-
+notice wrapper") confirms the intent: `ack.notice_hash` is the
+*notice's* hash, a pointer, not a self-hash. Fixed: step 3 is schema
+validation only; step 4 does the notice-existence check.
+
+**§8 test rename.** `TEST-ACK-HASH-MISMATCH` described the
+unsatisfiable comparison. Replaced with `TEST-ACK-INVALID-DECISION`
+(decision not in {accept, reject} → 400 invalid_request before any
+DB write). `decision` is the load-bearing value for the sender's
+state machine; route-level rejection before DB CHECK is the
+discipline being tested. Same count (17).
+
+**Signing protocol: prehash, not direct.** ADR §3 states Ed25519
+over SHA-256 of JCS-canonical bytes — the **prehash** path. This is
+distinct from `verifyChallenge` (auth/verify.ts), which signs the
+message directly with no prehash. The ack verifier must compute the
+SHA-256 digest and pass *that* to `ed.verifyAsync`, not the
+canonical bytes. Caught by the implementation session before writing
+any code; the divergence from auth/verify.ts would have produced a
+100%-failure ack test suite that looked like a cryptography bug.
+Recorded here so the code comment in identityChange/acks.ts can cite
+it.
+
+**Process working as intended.** Both the §7 bug and the §8 test
+rename surfaced before any code, via the read-the-ADR-before-writing-
+tests gate established in Session G. Third consecutive session where
+pre-code design review caught a real defect.
+
+### Non-blocking
 
 None blocking. Any that arise during implementation get resolved in
 this ADR (§10 gains entries, version bumps) rather than in code
