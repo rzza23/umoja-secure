@@ -23,6 +23,7 @@ export interface EnrollmentResult {
   device_id: string;
   org_id: string;
   role: string;
+  enrollment_matrix_version_floor: number | null;
 }
 
 export async function consumeEnrollmentToken(
@@ -37,7 +38,8 @@ export async function consumeEnrollmentToken(
 
   return withTransaction(async (tx) => {
     const tok = await tx.query(
-      `SELECT token_id, org_id, role, expires_at, used_at, revoked_at
+      `SELECT token_id, org_id, role, expires_at, used_at, revoked_at,
+              enrollment_matrix_version_floor
        FROM enrollment_tokens
        WHERE token_hash = $1 AND bound_public_key = $2
        FOR UPDATE`,
@@ -79,6 +81,8 @@ export async function consumeEnrollmentToken(
       device_id: deviceId,
       org_id: row.org_id,
       role: row.role,
+      enrollment_matrix_version_floor:
+        (row.enrollment_matrix_version_floor as number | null) ?? null,
     };
   });
 }

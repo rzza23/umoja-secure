@@ -13,13 +13,15 @@ async function insertToken(opts: {
   role?: string;
   used?: boolean;
   revoked?: boolean;
+  floor?: number | null;
 }): Promise<void> {
   const tokenHash = createHash('sha256').update(opts.tokenPlaintext).digest();
   const boundKey = Buffer.from(opts.boundPublicKey, 'base64url');
   await pool.query(
     `INSERT INTO enrollment_tokens
-       (token_hash, org_id, role, expires_at, created_at, created_by, used_at, revoked_at, bound_public_key)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+       (token_hash, org_id, role, expires_at, created_at, created_by, used_at,
+        revoked_at, bound_public_key, enrollment_matrix_version_floor)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
     [
       tokenHash,
       TEST_ORG_ID,
@@ -30,6 +32,7 @@ async function insertToken(opts: {
       opts.used ? new Date() : null,
       opts.revoked ? new Date() : null,
       boundKey,
+      opts.floor ?? null,
     ],
   );
 }
@@ -48,6 +51,7 @@ describe('POST /enrollment', () => {
 
   afterAll(async () => {
     await pool.query('DELETE FROM enrollment_tokens WHERE org_id = $1', [TEST_ORG_ID]);
+    await pool.query('DELETE FROM org_matrix_versions WHERE org_id = $1', [TEST_ORG_ID]);
     await pool.query('DELETE FROM devices WHERE org_id = $1', [TEST_ORG_ID]);
     await app.close();
     await pool.end();
@@ -333,5 +337,96 @@ describe('POST /enrollment', () => {
       [createHash('sha256').update(token).digest()],
     );
     expect(tokenRow.rows[0].used_at).toBeNull();
+  });
+
+  it('TEST-ENROLL-FLOOR-ECHO echoes token floor in enrollment response', async () => {
+    const token = randomBytes(32).toString('base64url');
+    const deviceKey = makePublicKey();
+    await insertToken({
+      tokenPlaintext: token,
+      boundPublicKey: deviceKey,
+      expiresAt: new Date(Date.now() + 3600_000),
+      floor: 5,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/enrollment',
+      payload: {
+        token,
+        device_id: randomUUID(),
+        device_public_key: deviceKey,
+        label: 'floor-echo',
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().enrollment_matrix_version_floor).toBe(5);
+  });
+
+  it('TEST-ENROLL-FLOOR-NULL null when token had no floor', async () => {
+    const token = randomBytes(32).toString('base64url');
+    const deviceKey = makePublicKey();
+    await insertToken({
+      tokenPlaintext: token,
+      boundPublicKey: deviceKey,
+      expiresAt: new Date(Date.now() + 3600_000),
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/enrollment',
+      payload: {
+        token,
+        device_id: randomUUID(),
+        device_public_key: deviceKey,
+        label: 'floor-null',
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().enrollment_matrix_version_floor).toBeNull();
+  });
+
+  it('TEST-ENROLL-FLOOR-FROZEN floor is from token row, not current org state', async () => {
+    const adminDeviceId = randomUUID();
+    const adminKey = randomBytes(32);
+    await pool.query(
+      `INSERT INTO devices (device_id, org_id, public_key, label, role)
+       VALUES ($1, $2, $3, $4, 'admin')`,
+      [adminDeviceId, TEST_ORG_ID, adminKey, 'floor-frozen-admin'],
+    );
+    await pool.query(
+      `INSERT INTO org_matrix_versions
+         (org_id, current_version, asserted_by_device_id)
+       VALUES ($1, 7, $2)
+       ON CONFLICT (org_id) DO UPDATE
+         SET current_version = 7,
+             asserted_by_device_id = EXCLUDED.asserted_by_device_id,
+             asserted_at = now()`,
+      [TEST_ORG_ID, adminDeviceId],
+    );
+
+    const token = randomBytes(32).toString('base64url');
+    const deviceKey = makePublicKey();
+    await insertToken({
+      tokenPlaintext: token,
+      boundPublicKey: deviceKey,
+      expiresAt: new Date(Date.now() + 3600_000),
+      floor: 3,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/enrollment',
+      payload: {
+        token,
+        device_id: randomUUID(),
+        device_public_key: deviceKey,
+        label: 'floor-frozen',
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().enrollment_matrix_version_floor).toBe(3);
+
+    await pool.query('DELETE FROM org_matrix_versions WHERE org_id = $1', [TEST_ORG_ID]);
   });
 });
