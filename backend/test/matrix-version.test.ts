@@ -7,8 +7,8 @@ import {
   getMatrixVersion,
 } from '../src/admin/matrixVersions.js';
 
-const ORG = '00000000-0000-0000-0000-000000000088';
-const EMPTY_ORG = '00000000-0000-0000-0000-000000000087';
+const ORG = '00000000-0000-0000-0000-0000000000a1';
+const EMPTY_ORG = '00000000-0000-0000-0000-0000000000a2';
 
 async function insertDevice(opts: { role?: string } = {}): Promise<string> {
   const deviceId = randomUUID();
