@@ -1981,6 +1981,33 @@ the hardening pass (item 16). Next task: TASK-P1-038 — send-gate
 verification. The ADR argues it goes first because it is the one task
 that might reveal a hole rather than require new code.**
 
+**030e-d design notes (captured while fresh, deferred not canceled).**
+When 030e-d opens, the analysis is:
+- Backend: nothing new. `GET /identity-change-acks/:notice_hash`
+  exists (Session H `TEST-ACK-LIST-BY-NOTICE`). Response shape
+  `{acks: [{acking_device_id, decision, created_at}]}`.
+- Android API: `IdentityChangeApi.getAcks(noticeHash, sessionToken)`.
+  `dde60f2`'s KDoc records the omission — 030e-d is the consumer
+  that justifies adding it.
+- Controller: `acksFor(noticeHash): Result<List<AckEntry>>` — thin
+  wrapper, same shape as `refresh()` / `ackAndPost()`.
+- UI: `AckDialog` in `ChatScreen.kt` gains a peer-ack section below
+  the notice metadata. Polls on dialog open only — no persistent
+  polling; the section is only shown while the human is looking.
+
+Two open design questions:
+1. **Peer labels.** `acking_device_id` is a UUID. Three options:
+   raw-UUID prefix (`f697b280… accept`), join with `/me/contacts`,
+   or add a label field to the ack-list response server-side (small
+   backend change, but modifies a shipped route). Last is cleanest;
+   needs a ruling before coding.
+2. **"N of M".** `permitted_contacts.size - 1` gives M client-side,
+   null if matrix isn't loaded. Ship without denominator first;
+   add `of M` if friction develops.
+
+Scope: two or three commits, one session. Crypto protocol, transport,
+discovery, gating, lifecycle all proven from 030e-c. Genuinely small.
+
 **030e-b design questions** — RESOLVED in ADR-IDENTITY-CHANGE-001
 (`21677a9`, design), backed by migration 015 (`00f31df`, schema).
 Do NOT re-open these; the ADR is the authoritative ruling.
