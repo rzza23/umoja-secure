@@ -19,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -31,6 +32,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.umoja.secure.auth.SessionManager
 import com.umoja.secure.messaging.MessagingService
 import com.umoja.secure.storage.SecureStorage
@@ -66,7 +69,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             UmojaSecureTheme {
-                AppRoot()
+                AppRoot(lifecycle = lifecycle)
             }
         }
     }
@@ -80,7 +83,7 @@ private sealed class AppScreen {
 }
 
 @Composable
-fun AppRoot() {
+fun AppRoot(lifecycle: Lifecycle) {
     val context = LocalContext.current
     val app = context.applicationContext as UmojaApplication
 
@@ -93,6 +96,7 @@ fun AppRoot() {
     var openEnrollmentQr by remember { mutableStateOf(false) }
 
     val wsState by app.webSocketClient.state.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
 
     // Identity-change controller. Constructed once per deviceId;
     // null pre-enrollment, non-null after. One HttpClient per
@@ -119,6 +123,34 @@ fun AppRoot() {
                 trustedKeys = setOf(provisioningPublicKey()),
             )
         }
+    }
+
+    // Foreground lifecycle polling: refresh notices whenever the app
+    // becomes visible. ON_START fires on screen-on, return-from-other-
+    // app, and activity restart. ChatScreen's LaunchedEffect covers
+    // the chat-open case; this covers "the app is open, a notice
+    // arrived while I was elsewhere."
+    //
+    // Keyed on identityChangeController so the effect re-runs when
+    // deviceId transitions null -> non-null (post-enrollment). The
+    // observer must capture the current controller, not the null one
+    // present at first composition. The immediate refresh covers the
+    // window where ON_START has already fired before the controller
+    // existed -- a fresh observer registration does not replay past
+    // events.
+    DisposableEffect(lifecycle, identityChangeController) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                identityChangeController?.let { ctrl ->
+                    coroutineScope.launch { ctrl.refresh() }
+                }
+            }
+        }
+        lifecycle.addObserver(observer)
+        identityChangeController?.let { ctrl ->
+            coroutineScope.launch { ctrl.refresh() }
+        }
+        onDispose { lifecycle.removeObserver(observer) }
     }
 
     // Initial state load
