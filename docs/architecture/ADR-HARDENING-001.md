@@ -1,7 +1,7 @@
 # ADR-HARDENING-001 — Session lifecycle & release-build hardening
 
 Document ID: ADR-HARDENING-001
-Version: 0.1
+Version: 0.2
 Date: 2026-10-17
 Status: Proposed
 Tasks: TASK-P1-038, TASK-P1-039, TASK-P1-040, TASK-P1-041
@@ -235,7 +235,7 @@ Named so a future session does not expand this into a larger rewrite:
 
 ## §6 Sequencing rationale
 
-**Order:** TASK-P1-038 → TASK-P1-039 → TASK-P1-040 → TASK-P1-041.
+**Order (v0.2 correction): TASK-P1-037 → TASK-P1-038 → TASK-P1-039 → TASK-P1-040 → TASK-P1-041.**
 
 **038 first.** The one task that might reveal a hole rather than require
 new code. If it does, the hole is a security gap that changes what else
@@ -287,5 +287,88 @@ this design. Amendments require version bump and rationale in §9.
 
 ## §9 Open questions
 
+### v0.2 (2026-10-17) — read findings, sequencing correction
+
+A v0.2 session executed the six code reads the v0.1 §7 marked
+`[VERIFY AT IMPLEMENTATION]`. Findings are recorded here. The v0.1
+§2-§4 body text above preserves the design-time assumptions; the
+[VERIFY] annotations in that body are now historical — this entry
+supersedes each with a confirmed result.
+
+**Read findings (four of five v0.1 [VERIFY] items resolved):**
+
+1. **Send gate absent.** `MessagingService.sendMessage` performs
+   prekey fetch → SessionBuilder → SessionCipher.encrypt →
+   EnvelopeApi.submit. No `MatrixStore` import, no `/me/contacts`
+   check, no authorization of any kind. Any enrolled device can send
+   to any peer device ID. TASK-P1-038 is implementation, not
+   verification. §4's two-outcome framing collapses to "the second
+   outcome is the real one."
+
+2. **`lookupSession` does not differentiate.** auth/sessions.ts runs
+   a single query joining `devices` with `d.status = 'active'`; on
+   any failure the row count is 0; the function returns `null`;
+   middleware collapses to 401 `unauthorized`. Client cannot
+   distinguish expired session from revoked device from bad token.
+   §2's backend change is confirmed needed: add a `device_revoked`
+   code on the 401 path when the session row would have matched but
+   device status is not `active`. Two queries in the
+   revoked-or-expired path, one in the success path.
+
+3. **`AppRoot` routing incomplete.** MainActivity.kt lines 163-165
+   route `deviceId == null -> Enrollment`,
+   `sessionExpiresAt == null -> Enrollment`, else `Authenticated`.
+   `sessionExpiresAt < now()` is never checked. A session expired
+   while the app was closed lands on `Authenticated`; first API call
+   401s; user has no re-auth path. §2's gap is confirmed.
+   TASK-P1-040 replaces this dispatch with the state machine's
+   `Authenticated` entry transition.
+
+4. **Backup flags already set.** `allowBackup="false"` and
+   `fullBackupContent="false"` both present in
+   `AndroidManifest.xml`. §3's backup criterion satisfied on
+   evidence, not to be re-added.
+
+5. **`FLAG_SECURE` absent everywhere.** `grep -rn FLAG_SECURE
+   android/app/src/main/java/` returns zero matches. None of the
+   three target screens — nor any other — set the flag. Three
+   additions, not audit-confirmations.
+
+6. **`TransportConfig.useTor` is `var`.** `var useTor: Boolean =
+   true` in TransportConfig.kt. Conversion to `val` required. But
+   `buildFeatures { compose = true }` is the only entry;
+   `buildConfig` is NOT enabled; `BuildConfig.DEBUG` is unavailable.
+   TASK-P1-039 adds `buildConfig = true`, then:
+
+       val useTor: Boolean = !BuildConfig.DEBUG
+
+   Startup assertion in `UmojaApplication` fails closed if
+   `!BuildConfig.DEBUG && !useTor`.
+
+7. **AGP 9.4.1, not 8.x.** Release block is `optimization { enable
+   = false }` — AGP 9.x DSL, not `minifyEnabled`. `enable = false`
+   ships unoptimized (no R8, no shrinking). `proguard-rules.pro`
+   exists but is not applied. **Still open:** exact semantics of
+   `optimization.enable = true` (R8 minification vs. broader
+   optimization pipeline vs. resource shrinking) is a docs read,
+   deferred to TASK-P1-039's opening. Getting this wrong risks
+   breaking libsignal's JNI reflection contract or silently
+   disabling minification while appearing to enable it.
+
+**Sequencing correction (§6).** V0.1's order assumed P1-038 could
+close on evidence. It cannot — the gate is absent. Fail-closed is
+the correct ruling: falling back to `/me/contacts` when
+`permittedContacts()` is null re-trusts the compromised-server
+surface the matrix exists to replace. Fail-closed means no user can
+send until matrix transport (P1-037) ships. Sequencing becomes
+**037 → 038 → 039 → 040 → 041**.
+
+The alternative — ship 038's gate without 037 — is rejected because
+it produces green tests and a gate that never fires in production.
+That is worse than no gate: it hides the known hole behind green CI.
+
+### Non-blocking
+
 None blocking. Any that arise during implementation get resolved in
+this ADR rather than in code comments or chat. Any that arise during implementation get resolved in
 this ADR rather than in code comments or chat.
