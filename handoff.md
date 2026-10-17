@@ -1535,30 +1535,27 @@ Rebuild after flipping — read at HttpClient construction time.
   backend` before curl testing.** KI-002 re-hit in Session C: route
   added, tests passed, curl returned 404 because the container was
   still running the old image.
-- **Read-back asserts fire after `write_text`.** A traceback from a
-  read-back assert means the verification failed, **not** that the
-  write failed. Inspect the file before assuming the edit didn't land.
-  Session D: `consume.ts` read-back expected 3 occurrences, actual
-  was 4 — because the return expression contains both the object key
-  *and* the property reference. The write succeeded, tests passed,
-  the traceback was purely calibration error. Calibrate count asserts
-  against the actual intended content; when uncertain about whether
-  related content adds incidental occurrences, use `>= N` where N is
-  the number of intentional insertions. Session E repeated the
-  pattern on `MatrixStore.kt`: expected 4 `KEY_ENROLLMENT_FLOOR`
-  occurrences, actual 5 (`const val` + two branches in
-  `setEnrollmentFloor` + `enrollmentFloor()` + `clear()`).
-  Multi-branch methods and multiple references to the same constant
-  defeat a "one per method" estimate. Count from actual code, or use
-  `>= N` for intentional insertions only.
-- **Read-back must check absence of stale patterns, not just presence
-  of new ones.** Session F: `ReplacementNotice.kt` declared
-  `RN_ISO8601_UTC_RE` but the call site still used `ISO8601_UTC_RE`,
-  which resolved to `AuthorizationMatrix.kt`'s file-private val and
-  failed compile. The presence checks passed. An ad-hoc
-  absence-of-stale-pattern regex caught it. Every edit script that
-  renames an identifier should assert `old_name not in back` at the
-  end, alongside `new_name in back`.
+- **Read-back is `git diff`, not content asserts in the edit
+  script.** Four consecutive sessions (D, E, F, G) had a read-back
+  assert fire on my own miscalibration — never on an actual edit
+  failure. The pattern is predictable: exact-count asserts fire when
+  the final file has more references to an identifier than the number
+  of intentional insertions (D: expected 3, actual 4 — return
+  expression has both key and property ref; E: expected 4, actual 5 —
+  const val plus two branches plus getter plus clear). Presence checks
+  miss rename bugs when old and new coexist in different files (F:
+  `ISO8601_UTC_RE` vs `RN_ISO8601_UTC_RE` in a second file; presence
+  passed, compile failed). Absence checks fire when the new content
+  intentionally cites the old name for historical documentation (G:
+  §10's v0.2 entry says "TEST-ACK-HASH-MISMATCH described the
+  unsatisfiable comparison" — a legitimate historical reference; the
+  `not in back` assert fired anyway, expected count 1 vs actual 2).
+  **Replace content asserts entirely.** The edit script does its
+  write and exits. `git diff` before commit is the authoritative
+  read-back — it shows exactly what changed, whether the old
+  identifier was removed or retained, and whether the shape matches
+  intent. A `git diff` review costs 10 seconds; a wrong count assert
+  costs 30 seconds of confusion and 5 minutes of verification.
 - **File-private helpers with common names get prefixed when a second
   file introduces similar helpers.** `AuthorizationMatrix.kt` and
   `ReplacementNotice.kt` both declare `requireString` and
