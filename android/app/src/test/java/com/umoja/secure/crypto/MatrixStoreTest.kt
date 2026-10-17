@@ -83,13 +83,19 @@ class MatrixStoreTest {
     // ---------- accept / load round-trip ----------
 
     @Test
-    fun `accept stores a valid vector and highestSeenVersion reads back`() {
+    fun `TEST-MATRIX-STORE-ON-VERIFY-SUCCESS accept stores a valid vector and highestSeenVersion reads back`() {
         val v = loadSignedVectors().first()
+        val expectedVersion = JSONObject(String(canonicalOf(v), Charsets.UTF_8))
+            .getJSONObject("matrix")
+            .getInt("version")
         val store = MatrixStore(InMemoryStore())
         val result = store.accept(canonicalOf(v), signatureOf(v), trustedSetOf(v))
         assertTrue("expected accepted, got $result", result is MatrixStore.AcceptResult.Accepted)
-        val version = store.highestSeenVersion()
-        assertNotNull(version)
+        assertEquals(
+            expectedVersion,
+            (result as MatrixStore.AcceptResult.Accepted).version,
+        )
+        assertEquals(expectedVersion, store.highestSeenVersion())
     }
 
     @Test
