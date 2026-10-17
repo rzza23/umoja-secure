@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-17 (Session J — TASK-P1-030 030e-c 3b done: verifier, signer production path, API client, store. Next: 030e-c 3d — UI integration: ChatScreen banner, polling loop, block-send wiring.)
+Last updated: 2026-10-17 (Session K — TASK-P1-030 030e-c 3d-1 done: IdentityChangeController + allNotices() store extension. Next: 030e-c 3d-2+3 — ChatScreen banner, detail dialog, polling triggers.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -48,7 +48,7 @@ Authoritative documents (all exist on disk):
   `npm test`. Sessions C–F added matrix-version, floor stamping,
   replacement-notice. Session H added identity-change services (7
   validator tests) and routes (17 route tests). Session I added the
-  A-001 cross-language ack test. Session J backend unchanged.)
+  A-001 cross-language ack test. Sessions J and K backend unchanged.)
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -87,7 +87,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 157** (verified 2026-10-17 from XML; +5 floor tests Session E, +7 ReplacementNotice Session F, +9 IdentityChangeAck Session I, +3 IdentityChangeAckSigner Session I, +6 ReplacementNoticeVerifier Session J, +3 signWithDeviceKey Session J, +14 ReplacementNoticeStore Session J)
+- **JVM unit tests: 169** (verified 2026-10-17 from XML; +5 floor tests Session E, +7 ReplacementNotice Session F, +9 IdentityChangeAck Session I, +3 IdentityChangeAckSigner Session I, +6 ReplacementNoticeVerifier Session J, +3 signWithDeviceKey Session J, +14 ReplacementNoticeStore Session J, +12 IdentityChangeController Session K)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -1062,6 +1062,136 @@ supply: a `signingFn` (from `DeviceKeyManager`), a `sessionToken` (from
 + chat-open). All three are established patterns elsewhere in the app;
 3d reads them rather than inventing.
 
+### Session K — TASK-P1-030 030e-c 3d-1 landed (2026-10-17)
+
+030e-c 3d-1 DONE. One commit:
+
+- `eea1af7` — `IdentityChangeController.kt` +
+  `IdentityChangeControllerTest.kt` (12 JVM tests), plus
+  `ReplacementNoticeStore.allNotices()` extension. Orchestration layer
+  between `IdentityChangeApi` and `ReplacementNoticeStore`. The UI
+  drives `refresh()` / `ackAndPost()` and reads `version` + `gateFor()`;
+  it never calls the API or store directly.
+
+**Design decisions recorded (for 3d-2 / 3d-3's reference):**
+
+- **`version: StateFlow<Long>` is a write-notification, not a data
+  cache.** UI collects via `collectAsState`, re-derives gate state with
+  `remember(version, peerId)`. Store reads are cheap (encrypted prefs);
+  caching a `StateFlow<List<StoredNotice>>` would invite drift from the
+  store's truth. Any successful write path (refresh completion,
+  ack-post completion) bumps version. This is the seam that makes
+  polling and chat-open agree — a foreground poll from `AppRoot` while
+  chat is open updates the store and bumps version, and the open chat
+  screen re-derives gate state without its own `LaunchedEffect` firing.
+- **`gateFor(peerId)` returns `GateState.Blocked(reason, notice)`** —
+  the `StoredNotice` alongside the reason, not just the reason. The UI
+  needs the notice to render "device X was replaced by device Y" in
+  the banner and to populate the detail dialog (from/to IDs,
+  `issued_at`, `notice_hash`, and the verify-signature affordance if
+  the dialog shows it). `GateState` is deliberately a distinct type
+  from the store's `BlockState` — two `BlockState`s in the same package
+  would invite confusion.
+- **`ackAndPost` order: sign → POST → markAcked.** The order is
+  load-bearing. `store.ack()` signs without persisting; `postAck()`
+  posts to the API; `store.markAcked()` persists only on POST success.
+  Crash between POST and `markAcked` recovers on retry — backend PK
+  `(notice_hash, acking_device_id)` is idempotent, so a second POST
+  returns 201 with the same `ack_hash`. This is the Q2 contract: local
+  state follows confirmed delivery, never precedes it.
+- **API injected as two lambdas** (`listNotices`, `postAck`), not a
+  concrete `IdentityChangeApi`. Production wires method references;
+  tests wire lambdas. Same pattern as `signingFn` in
+  `ReplacementNoticeStore`. Avoids extracting an interface from a
+  just-shipped final class for testability.
+
+**Store extension — `allNotices()`.** `ReplacementNoticeStore`
+(f747e37) exposed `pendingNotices()` (PENDING only). The controller's
+`gateFor()` needs rejected and accepted notices too — a rejected
+notice that isn't in `pendingNotices()` would be invisible, and
+`gateFor` would return `Unblocked` instead of `Blocked(REJECTED)`. The
+store's own `blockStateFor()` uses the private `loadAll()` and
+therefore does not have the gap; the public surface did not expose it.
+`allNotices()` is a one-line delegation to `loadAll()`, with a KDoc
+note on why it exists and a note that trust is unchanged (notices
+were verified at `recordNotice` time, not re-verified on read).
+
+**Hidden bug the test masked.** `gateFor unblocked after acceptance`
+was passing before the fix — but for the wrong reason. The pre-fix
+`gateFor` read `pendingNotices()`; after acceptance the store's pending
+list was empty (accepted notice excluded), so `gateFor` returned
+`Unblocked` coincidentally. After the fix, `allNotices()` includes the
+accepted notice, its state is `ACKED_ACCEPT`, and the same test passes
+via the correct branch. The assertion was right; the code path was
+wrong. Worth remembering: a passing test is not a proof the path it
+exercises is correct.
+
+**Process note — three compile round-trips before this commit.** All
+caught before push, none reached the repo, but the pattern is worth
+recording:
+1. Test file wrote to `android/app/src/main/java/...` (main source
+   set) instead of `test/java/...`. Test-only dependencies (JUnit)
+   are not on the main source set's classpath, so the compile failed
+   with "Unresolved reference 'Test'" and similar.
+2. `IdentityChangeController.kt` contained an import of
+   `ReplacementNoticeStore.GateReasonAlias` — a phantom name from a
+   draft that pivoted to `GateState` mid-write. The import was never
+   removed.
+3. `InMemoryStore` in `IdentityChangeControllerTest.kt` did not
+   implement `KeyValueStore.has()` — drifted from the copy in
+   `ReplacementNoticeStoreTest.kt`, which does.
+
+All three share one root cause: **write without pre-flight mental
+compile.** §7 gains a bullet on this (see below).
+
+**§7 process win.** The commit-message count line ("Android JVM
+157 → 169") was written *after* `git diff` + XML aggregate, not
+before. It matched XML exactly on first try. First session since the
+§7 ordering rule was added where the count did not cost a
+round-trip. The discipline of ordering held; keep it.
+
+**Next: 030e-c 3d-2 + 3d-3** — Compose UI integration. Scope:
+- **3d-2** — `ChatScreen` banner + composer gate + detail dialog +
+  ack flow. Extract `sendNow()` local closure inside the composable
+  (the send path is currently duplicated: IME `onSend` and
+  `IconButton.onClick` are byte-identical; the block gate forces this
+  refactor, and it is the right shape regardless — not a separate
+  commit, part of 3d-2). Query `controller.gateFor(peerId)` keyed on
+  `version`; render inline banner above composer when blocked; disable
+  composer; tap banner → dialog with notice details + Acknowledge /
+  Reject. On ack: `controller.ackAndPost(...)`, banner disappears
+  (accept) or wording changes (reject — Q3: no undo affordance). No
+  JVM test — Compose composition; manual emulator verification.
+- **3d-3** — polling triggers. `AppRoot` (in `MainActivity.kt`)
+  foreground lifecycle observer → `controller.refresh()`. `ChatScreen`
+  `LaunchedEffect(peerId)` → `controller.refresh()`. Manual
+  verification.
+
+3d-2 needs the read of `ChatScreen.kt` (already read once in Session
+J's opening; re-read if any change landed between). 3d-3 needs
+`MainActivity.kt` (`AppRoot` structure, `LaunchedEffect` placement
+pattern) — read at 3d-3 opening, not before.
+
+Design surface 3d-2 must decide that 3d-1 does not supply: **what the
+detail dialog shows about trust.** The banner just shows state; the
+dialog is where the human confirms. Does the dialog display the full
+canonical bytes (long, unreadable), a hash of the canonical bytes
+(`notice_hash` is already available — short, verifiable if the human
+compares), or a "signature verifies against pinned key ✓" affordance
+(meaningful only if the human knows what "pinned key" means)? ADR §3
+does not specify dialog content. This is a 3d-2 design decision, not a
+3d-1 gap.
+
+Three files to read at 3d-2 opening, not guessed:
+- `android/.../ui/chat/ChatScreen.kt` — the send path (extract
+  `sendNow()`), the composer layout (where the banner lands)
+- `android/.../crypto/ProvisioningKeys.kt` — the pinned key the dialog
+  would verify against if the "verify signature" affordance is
+  rendered
+- `android/.../transport/SessionManager.kt` — the token accessor
+  shape; `IdentityChangeController`'s `sessionTokenProvider` closure
+  needs to be wired from here in 3d-2
+
 ---
 
 ## 4. Known issues
@@ -1518,8 +1648,9 @@ Build Master §3.7). 3a DONE 2026-10-16 (`6013077` backend +
 schema + `ed271ac` signer + A-001 + `36f9a94` timestamp refresh).
 030e-c 3b DONE 2026-10-17 (`e905426` verifier + `39898ad`
 production signer + `031a0e5` helper extraction + `dde60f2` API +
-`f747e37` store). Next: 030e-c 3d — UI integration (ChatScreen
-banner, polling loop, block-send wiring).**
+`f747e37` store). 030e-c 3d-1 DONE 2026-10-17 (`eea1af7`
+IdentityChangeController + allNotices() store extension). Next:
+030e-c 3d-2+3 — ChatScreen banner, detail dialog, polling triggers.**
 
 **030e-b design questions** — RESOLVED in ADR-IDENTITY-CHANGE-001
 (`21677a9`, design), backed by migration 015 (`00f31df`, schema).
@@ -1898,8 +2029,22 @@ Rebuild after flipping — read at HttpClient construction time.
   Note: `verifyChallenge` in `auth/verify.ts` uses untyped
   `tx.query()` → `any` → hides this class. Typed parameters surface
   it; do not remove type parameters to silence the error.
+- **Pre-flight mental compile before pasting any edit block.**
+  Session K had three compile round-trips before a single commit
+  could land: (1) test file wrote to `main/java` instead of
+  `test/java` — wrong source set, test deps not on classpath; (2)
+  controller import contained `GateReasonAlias` — leftover from a
+  design pivot to `GateState` mid-draft, never removed; (3) the test's
+  in-memory `KeyValueStore` implementation was missing `has()` —
+  drifted from the copy in `ReplacementNoticeStoreTest`. All three
+  share one root cause: write without pre-flight. Before pasting,
+  read the resulting file with three questions: do the imports
+  resolve, are abstract members implemented, is the path under the
+  correct source set. If any answer is not obvious, `grep` or `ls`
+  first, not after. Cost of the read: thirty seconds. Cost of a
+  compile round-trip: a full turn.
 
-Current verified state: **157 Android JVM tests** (2026-10-17),
+Current verified state: **169 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
 and **242 backend tests** (2026-10-17, 15 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
