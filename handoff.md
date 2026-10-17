@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-17 (Session H — TASK-P1-030 030e-b DONE: services + routes + 17 tests + ADR v0.3. Next: 030e-c — Android ReplacementNoticeStore, block-send on unacked notice.)
+Last updated: 2026-10-17 (Session I — TASK-P1-030 030e-c 3a done: Kotlin ack schema + signer + A-001 cross-language vector. Next: 030e-c 3b — ReplacementNoticeVerifier + ReplacementNoticeStore.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -44,10 +44,11 @@ Authoritative documents (all exist on disk):
 
 - Node.js 24.x, Fastify 5.12.5, PostgreSQL 16
 - Docker-deployable (docker compose up -d --build from repo root)
-- **241 tests passing** (15 files; verified 2026-10-17 via
+- **242 tests passing** (15 files; verified 2026-10-17 via
   `npm test`. Sessions C–F added matrix-version, floor stamping,
   replacement-notice. Session H added identity-change services (7
-  validator tests) and routes (17 route tests).)
+  validator tests) and routes (17 route tests). Session I added the
+  A-001 cross-language ack test.)
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -86,7 +87,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 122** (verified 2026-10-17 from XML; +5 floor tests Session E, +7 ReplacementNotice Session F)
+- **JVM unit tests: 134** (verified 2026-10-17 from XML; +5 floor tests Session E, +7 ReplacementNotice Session F, +9 IdentityChangeAck Session I, +3 IdentityChangeAckSigner Session I)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -856,6 +857,104 @@ Design questions for 030e-c opening (not decided, recorded here):
 - Does a rejected ack count as "acked" for send-unblock, or does
   rejection require admin intervention before any send proceeds?
 
+### Session I — TASK-P1-030 030e-c 3a landed (2026-10-17)
+
+030e-c scoped as four sub-tasks (3a schema+signer, 3b verifier+store,
+3c transport+polling, 3d UI). 3a done end-to-end. Three commits:
+
+- `a178e83` — `IdentityChangeAck.kt` + `IdentityChangeAckTest.kt`.
+  Kotlin schema for `umoja.identity-change-ack.v1`. Mirrors
+  `ReplacementNotice.kt`: `data class` inner + wrapper, companion
+  `const val DOMAIN`, `require()` → `IllegalArgumentException` (no
+  custom exception class — Kotlin crypto convention), `IC_` prefix on
+  both declarations and call sites per §7. No extra-field rejection
+  (signed artifacts — extras fail peer signature check anyway;
+  differs from `ProvisioningBundle.kt`'s pre-signing rejection, which
+  is correct). 9 schema tests.
+- `ed271ac` — `IdentityChangeAckSigner.kt` +
+  `IdentityChangeAckSignerTest.kt` + `canonical-identity-change-ack-
+  test-vectors.json` (A-001) + TS `identity-change-ack.test.ts` A-001
+  cross-language test. Generator extended to process the third
+  vector file. 3 Kotlin signer tests + 1 TS A-001 test. Prehash
+  protocol (§3), not direct-message; reuses
+  `MatrixSigner.matrixDigestRaw` for SHA-256.
+- `36f9a94` — timestamp refresh in matrix + notice vector files
+  (`generated_at` only; `expected_*` byte-identical).
+
+**Q1–Q3 rulings (recorded for 3b–3d implementation).**
+
+- **Q1 — Where does "blocked send" surface?** Inline banner on chat
+  screen, tap-to-expand detail dialog showing full notice (from/to
+  device IDs, `issued_at`, canonical hash, verify signature) with
+  Acknowledge/Reject. Toast is wrong (transient state, not event);
+  dialog-only is wrong (dismissible, state disappears). Banner stays
+  until local ack stored.
+- **Q2 — How does the block lift?** Local ack only. "Until acked" in
+  the registry means the sender's ack — the sender must consciously
+  acknowledge the replacement, not depend on peer timing. Discovery
+  is separate: poll `GET /identity-change-notices` on app foreground
+  and chat-open, filter locally by `permitted_contacts` (ADR §5
+  Option C). WS push for identity-change is a follow-up, not 030e-c.
+  `recordNotice` must be idempotent with respect to already-acked
+  notices — the same `notice_hash` arriving in a later poll returns
+  current local state (Acked/Rejected) without re-prompting. Mirrors
+  backend PK `(notice_hash, acking_device_id)`.
+- **Q3 — Does rejection unblock?** No. Rejection blocks permanently
+  for that specific `notice_hash`. Recovery is a new notice from the
+  admin (new `issued_at`, new hash); the rejected ack is immutable
+  once stored. Walked three alternatives before concluding this is
+  right: unblock-on-reject is wrong (peer said "I don't trust this
+  continuity"); block-forever-admin-without-new-notice is
+  unrecoverable; block-until-permitted_contacts-changes has the
+  paradox that `to_device_id` IS in `permitted_contacts` at the
+  moment of replacement. Immutable-ack + new-notice-recovery avoids
+  all three. Banner wording: "You rejected the replacement of
+  device X. Sending is blocked. Contact your admin to resolve."
+  No UI affordance to undo a rejection.
+
+**Process note — placeholder overwrite.** During Block 6 of commit 2
+(the Kotlin signer heredoc), I wrote a placeholder `... (Block 6
+content from prior message, unchanged)` instead of the literal file
+content. The heredoc executed, overwriting the 74-line signer with
+one line of placeholder text. Caught immediately by the next
+diagnostic (`wc -l` = 1, `git status` showing the file as ` M`).
+Restored via `git checkout HEAD --` from the just-pushed `ed271ac`.
+Zero data loss, zero downstream impact. **Lesson:** every heredoc in
+an edit script is literal content. Placeholders are never typed
+literally — this is already §7 ("Placeholders like `<paste content
+here>` are never typed literally"), violated by my own output.
+Worth re-reading before each multi-block message.
+
+**Bug caught by type system — raw-bytes digest.** First TS A-001 test
+draft called `identityChangeAckDigest(validated)` (the parsed
+object) instead of `identityChangeAckDigest(canonicalBuf)` (raw
+bytes). Typecheck caught both call sites immediately:
+`identityChangeAckDigest` accepts `Buffer | string`, not the wrapper.
+This is exactly the design: adding a `SignedIdentityChangeAck`
+convenience overload would silently re-introduce re-canonicalization
+(the vulnerability the raw-bytes contract exists to prevent).
+Typecheck is the design working, not a nuisance.
+
+**Next: 030e-c 3b** — `ReplacementNoticeVerifier.kt` +
+`ReplacementNoticeStore.kt` + tests. Verifier first (client-side
+signature check of incoming notice against
+`ProvisioningKeys.CURRENT_PROVISIONING_PUBKEY_B64U` — separate from
+the signer, same separation logic as `MatrixVerifier.kt` vs
+`MatrixSigner.kt`). Store after: SecureStorage-backed via
+`KeyValueStore`, public surface `recordNotice` / `pendingNotices` /
+`ack` / `blockStateFor(toDeviceId)`. Store's `ack` writes the ack
+through `IdentityChangeAckSigner` and POSTs via
+`transport/IdentityChangeApi.kt` (new, `ContactsApi` shape).
+Recovery from rejected ack: new notice from admin.
+
+Three files to read at 3b opening, not guessed:
+- `android/.../crypto/MatrixStore.kt` — envelope shape, SecureStorage
+  constructor signature, KeyValueStore usage
+- `android/.../crypto/MatrixVerifier.kt` — the verifier pattern
+  (`Set<PublicKey>` signature)
+- `android/.../transport/ContactsApi.kt` — the HTTP-client pattern for
+  `IdentityChangeApi.kt` to mirror
+
 ---
 
 ## 4. Known issues
@@ -1308,8 +1407,9 @@ Build Master §3.7). 3a DONE 2026-10-16 (`6013077` backend +
 3d DONE (`71e06c7`). 030e-a DONE 2026-10-17 (`d28c631` TS +
 `f257e03` Kotlin). 030e-b DONE 2026-10-17 (`21677a9` ADR v0.1 +
 `00f31df` migration 015 + `d8b2cfc` services/routes + `b26913a`
-17 route tests + ADR v0.3). Next: 030e-c — Android
-ReplacementNoticeStore + block-send on unacked notice.**
+17 route tests + ADR v0.3). 030e-c 3a DONE 2026-10-17 (`a178e83`
+schema + `ed271ac` signer + A-001 + `36f9a94` timestamp refresh).
+Next: 030e-c 3b — ReplacementNoticeVerifier + ReplacementNoticeStore.**
 
 **030e-b design questions** — RESOLVED in ADR-IDENTITY-CHANGE-001
 (`21677a9`, design), backed by migration 015 (`00f31df`, schema).
@@ -1689,9 +1789,9 @@ Rebuild after flipping — read at HttpClient construction time.
   `tx.query()` → `any` → hides this class. Typed parameters surface
   it; do not remove type parameters to silence the error.
 
-Current verified state: **122 Android JVM tests** (2026-10-17),
+Current verified state: **134 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
-and **241 backend tests** (2026-10-17, 15 files), all from runner output.
+and **242 backend tests** (2026-10-17, 15 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
 infrastructure (Mac vs emulator) and must not be summed.
 
