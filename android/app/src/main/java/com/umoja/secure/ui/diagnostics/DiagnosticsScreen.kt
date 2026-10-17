@@ -246,6 +246,23 @@ fun DiagnosticsScreen(
             Text("Matrix (debug)", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
 
+            // Read back the current stored matrix on screen entry, so
+            // TASK-P1-037 O-2 manual verification is "open Diagnostics,
+            // see the version" without a paste+verify cycle. The
+            // Verify-and-store button below still populates
+            // matrixReadBack on success — this LaunchedEffect is the
+            // initial state read. Keyed on Unit so it fires once per
+            // composition (per navigation into Diagnostics).
+            LaunchedEffect(Unit) {
+                matrixReadBack = try {
+                    val store = MatrixStore(SecureStorage(context))
+                    "highestSeenVersion=" + store.highestSeenVersion() +
+                        " contacts=" + (store.permittedContacts()?.size ?: "null")
+                } catch (e: Exception) {
+                    "read-back failed: " + e.message
+                }
+            }
+
             OutlinedTextField(
                 value = matrixCanonicalB64,
                 onValueChange = { matrixCanonicalB64 = it },
