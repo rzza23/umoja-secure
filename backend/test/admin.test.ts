@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { randomBytes, randomUUID } from 'node:crypto';
 import * as ed from '@noble/ed25519';
 import { buildApp } from '../src/app.js';
@@ -60,6 +60,7 @@ describe('admin plane', () => {
       'DELETE FROM enrollment_tokens WHERE org_id = $1',
       [TEST_ORG_ID],
     );
+    await pool.query('DELETE FROM org_matrix_versions WHERE org_id = $1', [TEST_ORG_ID]);
     await pool.query('DELETE FROM devices WHERE org_id = $1', [TEST_ORG_ID]);
     await stopRevocationListener();
     await app.close();
@@ -292,6 +293,107 @@ describe('admin plane', () => {
       expect(res.statusCode).toBe(200);
       expect(res.json().intact).toBe(true);
       expect(res.json().total_events).toBeGreaterThan(0);
+    });
+  });
+
+  describe('GET/POST /admin/matrix-version', () => {
+    beforeEach(async () => {
+      await pool.query('DELETE FROM org_matrix_versions WHERE org_id = $1', [TEST_ORG_ID]);
+    });
+
+    it('TEST-MATRIX-VERSION-ROUTE-USER-FORBIDDEN rejects user role', async () => {
+      const u = await createAuthedDevice('user');
+      const get = await app.inject({
+        method: 'GET',
+        url: '/admin/matrix-version',
+        headers: { authorization: `Bearer ${u.token}` },
+      });
+      expect(get.statusCode).toBe(403);
+
+      const post = await app.inject({
+        method: 'POST',
+        url: '/admin/matrix-version',
+        headers: { authorization: `Bearer ${u.token}` },
+        payload: { version: 1 },
+      });
+      expect(post.statusCode).toBe(403);
+    });
+
+    it('TEST-MATRIX-VERSION-ROUTE-VALIDATION rejects invalid bodies', async () => {
+      const admin = await createAuthedDevice('admin');
+      const invalid = [
+        {},
+        { version: 0 },
+        { version: -1 },
+        { version: 1.5 },
+        { version: 'one' },
+      ];
+      for (const payload of invalid) {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/admin/matrix-version',
+          headers: { authorization: `Bearer ${admin.token}` },
+          payload,
+        });
+        expect(res.statusCode).toBe(400);
+        expect(res.json().error).toBe('invalid_request');
+      }
+    });
+
+    it('TEST-MATRIX-VERSION-ROUTE-OK GET nulls, POST asserts, GET populated', async () => {
+      const admin = await createAuthedDevice('admin');
+
+      const empty = await app.inject({
+        method: 'GET',
+        url: '/admin/matrix-version',
+        headers: { authorization: `Bearer ${admin.token}` },
+      });
+      expect(empty.statusCode).toBe(200);
+      expect(empty.json()).toEqual({
+        current_version: null,
+        asserted_at: null,
+        asserted_by_device_id: null,
+      });
+
+      const assertRes = await app.inject({
+        method: 'POST',
+        url: '/admin/matrix-version',
+        headers: { authorization: `Bearer ${admin.token}` },
+        payload: { version: 3 },
+      });
+      expect(assertRes.statusCode).toBe(200);
+      const body = assertRes.json();
+      expect(body.current_version).toBe(3);
+      expect(body.previous_version).toBeNull();
+      expect(body.changed).toBe(true);
+      expect(body.asserted_by_device_id).toBe(admin.device_id);
+
+      const populated = await app.inject({
+        method: 'GET',
+        url: '/admin/matrix-version',
+        headers: { authorization: `Bearer ${admin.token}` },
+      });
+      expect(populated.json().current_version).toBe(3);
+      expect(populated.json().asserted_by_device_id).toBe(admin.device_id);
+    });
+
+    it('TEST-MATRIX-VERSION-ROUTE-REJECT-LOWER returns 409 on lower version', async () => {
+      const admin = await createAuthedDevice('admin');
+      await app.inject({
+        method: 'POST',
+        url: '/admin/matrix-version',
+        headers: { authorization: `Bearer ${admin.token}` },
+        payload: { version: 5 },
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/admin/matrix-version',
+        headers: { authorization: `Bearer ${admin.token}` },
+        payload: { version: 4 },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error).toBe('version_below_current');
     });
   });
 

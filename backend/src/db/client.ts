@@ -12,7 +12,6 @@ type PoolClient = pg.PoolClient;
 // returned 500s in auth.test.ts (KI-022). 5 × 11 = 55 is safe.
 // Production unchanged.
 const poolMax = process.env.NODE_ENV === 'test' ? 5 : 20;
-console.error('POOLMAX-DEBUG:', poolMax, 'NODE_ENV:', process.env.NODE_ENV);
 
 export const pool = new Pool({
   connectionString: env.DATABASE_URL,
