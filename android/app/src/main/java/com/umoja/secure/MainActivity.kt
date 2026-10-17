@@ -184,23 +184,30 @@ fun AppRoot(lifecycle: Lifecycle) {
     // recovers automatically.
     LaunchedEffect(screen, deviceId) {
         if (screen is AppScreen.Authenticated && deviceId != null) {
-            val token = SessionManager(context).currentSession()?.sessionToken
-            if (token != null) {
-                try {
-                    val api = MatrixApi { t ->
-                        HttpClient(HttpClient.DEV_BASE_URL)
-                            .get("/me/matrix", bearer = t)
+            // LaunchedEffect body runs on Dispatchers.Main by default.
+            // MatrixApi.fetch -> HttpClient.get is a blocking OkHttp call;
+            // must run on IO. Same pattern as enrollDevice's
+            // = withContext(Dispatchers.IO) { ... }. See ADR-HARDENING-001
+            // §9 v0.2 / TASK-P1-037 O-2 acceptance notes.
+            withContext(Dispatchers.IO) {
+                val token = SessionManager(context).currentSession()?.sessionToken
+                if (token != null) {
+                    try {
+                        val api = MatrixApi { t ->
+                            HttpClient(HttpClient.DEV_BASE_URL)
+                                .get("/me/matrix", bearer = t)
+                        }
+                        val remote = api.fetch(token)
+                        if (remote != null) {
+                            MatrixStore(SecureStorage(context)).accept(
+                                canonical = remote.canonicalUtf8.toByteArray(Charsets.UTF_8),
+                                signatureBase64url = remote.signatureBase64url,
+                                trustedKeys = setOf(provisioningPublicKey()),
+                            )
+                        }
+                    } catch (_: MatrixApiException) {
+                        // Silent per registry §B — see KDoc above
                     }
-                    val remote = api.fetch(token)
-                    if (remote != null) {
-                        MatrixStore(SecureStorage(context)).accept(
-                            canonical = remote.canonicalUtf8.toByteArray(Charsets.UTF_8),
-                            signatureBase64url = remote.signatureBase64url,
-                            trustedKeys = setOf(provisioningPublicKey()),
-                        )
-                    }
-                } catch (_: MatrixApiException) {
-                    // Silent per registry §B — see KDoc above
                 }
             }
         }
