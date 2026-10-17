@@ -5,9 +5,18 @@ import { logger } from '../observability/logging.js';
 const { Pool } = pg;
 type PoolClient = pg.PoolClient;
 
+// Per-worker pool cap. Vitest defaults to `forks` with
+// maxWorkers = CPU cores - 1; on a 12-thread Mac that is 11 workers.
+// 20 conns/worker × 11 workers = 220 against Postgres max_connections
+// 100 — under full-suite load, pool.connect() hit the 5s timeout and
+// returned 500s in auth.test.ts (KI-022). 5 × 11 = 55 is safe.
+// Production unchanged.
+const poolMax = process.env.NODE_ENV === 'test' ? 5 : 20;
+console.error('POOLMAX-DEBUG:', poolMax, 'NODE_ENV:', process.env.NODE_ENV);
+
 export const pool = new Pool({
   connectionString: env.DATABASE_URL,
-  max: 20,
+  max: poolMax,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 5_000,
 });
