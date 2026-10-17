@@ -1306,9 +1306,10 @@ contacts from `permitted_contacts[]`.
 Build Master §3.7). 3a DONE 2026-10-16 (`6013077` backend +
 `c79d7f8` registry v0.5). 3b DONE (`3dded33`). 3c DONE (`420d71f`).
 3d DONE (`71e06c7`). 030e-a DONE 2026-10-17 (`d28c631` TS +
-`f257e03` Kotlin). 030e-b ADR + schema DONE 2026-10-17 (`21677a9`
-ADR + `00f31df` migration 015). Next: 030e-b service modules +
-routes + tests.**
+`f257e03` Kotlin). 030e-b DONE 2026-10-17 (`21677a9` ADR v0.1 +
+`00f31df` migration 015 + `d8b2cfc` services/routes + `b26913a`
+17 route tests + ADR v0.3). Next: 030e-c — Android
+ReplacementNoticeStore + block-send on unacked notice.**
 
 **030e-b design questions** — RESOLVED in ADR-IDENTITY-CHANGE-001
 (`21677a9`, design), backed by migration 015 (`00f31df`, schema).
@@ -1672,6 +1673,21 @@ Rebuild after flipping — read at HttpClient construction time.
   C's `8adde6b` message described half its content because `git add`
   swept in an already-staged file. Session G applied all four from
   the first edit; no mid-session correction required.
+
+- **Typed `tx.query<T>()` + `noUncheckedIndexedAccess` = `rows[0]`
+  is `T | undefined`.** The compiler cannot narrow through
+  `rowCount !== 1` checks. Two patterns, both demonstrated in
+  identityChange services (Session H):
+  (a) guard-then-use — extract to a local with explicit undefined
+  check, then use the local; narrowing applies to all subsequent
+  accesses, and multi-branch methods (like the status + alg + key
+  reads on `device`) are covered by one extract.
+  (b) RETURNING-clause `rows[0]!` — for INSERT...RETURNING and
+  SELECT-after-INSERT where row existence is guaranteed by SQL
+  semantics; matches `matrixVersions.ts` Session C precedent.
+  Note: `verifyChallenge` in `auth/verify.ts` uses untyped
+  `tx.query()` → `any` → hides this class. Typed parameters surface
+  it; do not remove type parameters to silence the error.
 
 Current verified state: **122 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
