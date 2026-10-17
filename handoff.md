@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-17 (Session K — TASK-P1-030 030e-c 3d-1 done: IdentityChangeController + allNotices() store extension. Next: 030e-c 3d-2+3 — ChatScreen banner, detail dialog, polling triggers.)
+Last updated: 2026-10-17 (Session L — TASK-P1-030 030e-c 3d-2 done: ChatScreen banner + gate + dialog + ack flow + chat-open polling. Next: 030e-c 3d-3b — AppRoot foreground lifecycle polling, plus the seeding helper for manual acceptance verification.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -48,7 +48,8 @@ Authoritative documents (all exist on disk):
   `npm test`. Sessions C–F added matrix-version, floor stamping,
   replacement-notice. Session H added identity-change services (7
   validator tests) and routes (17 route tests). Session I added the
-  A-001 cross-language ack test. Sessions J and K backend unchanged.)
+  A-001 cross-language ack test. Sessions J, K, and L backend
+  unchanged.)
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -87,7 +88,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 169** (verified 2026-10-17 from XML; +5 floor tests Session E, +7 ReplacementNotice Session F, +9 IdentityChangeAck Session I, +3 IdentityChangeAckSigner Session I, +6 ReplacementNoticeVerifier Session J, +3 signWithDeviceKey Session J, +14 ReplacementNoticeStore Session J, +12 IdentityChangeController Session K)
+- **JVM unit tests: 169** (verified 2026-10-17 from XML; Session K's 12 IdentityChangeController tests are the most recent addition. Session L Compose changes added no JVM tests.)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -1192,6 +1193,92 @@ Three files to read at 3d-2 opening, not guessed:
   shape; `IdentityChangeController`'s `sessionTokenProvider` closure
   needs to be wired from here in 3d-2
 
+### Session L — TASK-P1-030 030e-c 3d-2 landed (2026-10-17)
+
+030e-c 3d-2 DONE. One commit:
+
+- `ec5abf1` — `MainActivity.kt` (controller construction in AppRoot),
+  `MainNavigation.kt` (param threading), `ChatScreen.kt` (full rewrite
+  of the send path + banner + dialog + ack flow + chat-open polling).
+  3 files, +245/-39.
+
+**Design decisions recorded (for 3d-3b and future sessions):**
+
+- **`sendNow()` extracted as a local closure.** The two send sites
+  (IME `onSend` and `IconButton.onClick`) were byte-identical
+  duplicates. The block gate forces the refactor and it is the right
+  shape regardless. Both sites route through `sendNow()`.
+- **Banner tappable only when `PENDING`.** REJECTED banner has no
+  tap affordance — Q3: rejection blocks permanently, admin issues a
+  new notice to recover. The banner text explicitly says "Contact
+  your admin to resolve."
+- **`AckDialog` content: from→to, issuedAt, noticeHash prefix
+  (8 chars), "Signature verified on receipt against pinned
+  provisioning key."** No re-verify affordance (trust anchor is the
+  moment of receipt; re-verify offers nothing but a window where a
+  newer `trustedKeys` set makes an old notice look bad). No canonical
+  bytes display (unreadable; the trust is the provisioning signature,
+  not the human reading bytes).
+- **Ack flow via `rememberCoroutineScope`.** `ackAndPost` is suspend
+  and returns `Result<AckResult>`. ChatScreen holds
+  `ackInProgress` + `ackError` local state. On Success: dialog closes,
+  version bump propagates to a re-derived gateState via
+  `remember(version, peerId)`. On Failure: error code surfaces in
+  dialog, banner stays, composer stays disabled. Q2 contract
+  preserved.
+- **`HttpClient` hoisted: one per controller lifetime.** Constructed
+  inside the `remember(deviceId)` block; `listNotices` and `postAck`
+  are method references on the same `IdentityChangeApi` instance. Per-
+  call HttpClient would rebuild the SOCKS stack on every refresh.
+  `enrollDevice`'s pre-existing HttpClient is untouched.
+- **`provisioningPublicKey()` helper duplicated from
+  `MatrixSigner.SPKI_PREFIX`.** Three-file threshold rule is at three
+  (MatrixSigner, MatrixVerifier, IdentityChangeController) — could
+  extract now, deferred to keep this commit focused on UI. Note in
+  helper KDoc points to the future consolidation.
+- **Chat-open polling included in 3d-2.** `LaunchedEffect(peerDeviceId)
+  { controller.refresh() }`. Without this the banner can never appear
+  for a notice the client hasn't fetched. 3d-2 and chat-open polling
+  are coupled in practice even though the plan split them. Foreground
+  lifecycle polling (3d-3b) remains separate: `DisposableEffect` +
+  `LifecycleEventObserver` in AppRoot, still pending.
+
+**Outstanding verification — manual emulator acceptance NOT RUN.**
+The banner and dialog cannot be exercised on emulator yet: the client
+verifies incoming notices against `ProvisioningKeys.CURRENT_
+PROVISIONING_PUBKEY_B64U`, so a psql-inserted row with random bytes
+would fail signature verification at `recordNotice` and never reach
+the banner. To seed a pending notice the client will accept, you need
+a signed wrapper from the same test key the vector generator uses:
+
+- `HKDF-SHA256(seed="umoja-canonical-matrix-test-vectors-v1-DO-NOT-
+  USE-IN-PRODUCTION", salt=empty, info="ed25519-test-key", 32 bytes)`
+  → Ed25519 private key seed
+- Canonicalize `{"domain":"umoja.replacement-notice.v1","notice":
+  {from_device_id, from_device_auth_key, to_device_id,
+  to_device_auth_key, issued_at}}` (JCS)
+- SHA-256 the canonical bytes, sign with the derived key, base64url
+  the 64-byte signature
+- POST to `/identity-change-notices` as an admin
+
+That's a ~20-line TS helper — not 3d-2's scope. Same helper verifies
+3d-3b's foreground trigger in one pass (poll fires, banner appears).
+Recorded as a follow-up for 3d-3b's session or a dedicated task.
+
+**Count inference — not runner output.** The commit message says
+"Android JVM 169 unchanged (Compose changes have no JVM tests)." That
+was inference from "no test files touched," not verified against
+`TEST-*.xml` this turn. Correct by reasoning (Compose source cannot
+affect JVM unit-test count) but strictly per §7 the count comes from
+runner output, not inference. Nil risk here; naming the pattern so
+it stays honest. §7 refinement below.
+
+**Next: 030e-c 3d-3b** — AppRoot foreground lifecycle polling.
+`DisposableEffect` + `LifecycleEventObserver` on `ON_START` calling
+`controller.refresh()`. Small — one commit. Then 030e-c is
+structurally complete pending the manual verification pass, which
+needs the seeding helper above.
+
 ---
 
 ## 4. Known issues
@@ -1649,8 +1736,11 @@ schema + `ed271ac` signer + A-001 + `36f9a94` timestamp refresh).
 030e-c 3b DONE 2026-10-17 (`e905426` verifier + `39898ad`
 production signer + `031a0e5` helper extraction + `dde60f2` API +
 `f747e37` store). 030e-c 3d-1 DONE 2026-10-17 (`eea1af7`
-IdentityChangeController + allNotices() store extension). Next:
-030e-c 3d-2+3 — ChatScreen banner, detail dialog, polling triggers.**
+IdentityChangeController + allNotices() store extension). 030e-c
+3d-2 DONE 2026-10-17 (`ec5abf1` ChatScreen banner + gate + dialog
++ ack + chat-open polling; manual emulator acceptance pending, see
+Session L). Next: 030e-c 3d-3b — AppRoot foreground lifecycle
+polling + seeding helper for verification.**
 
 **030e-b design questions** — RESOLVED in ADR-IDENTITY-CHANGE-001
 (`21677a9`, design), backed by migration 015 (`00f31df`, schema).
@@ -2043,6 +2133,20 @@ Rebuild after flipping — read at HttpClient construction time.
   correct source set. If any answer is not obvious, `grep` or `ls`
   first, not after. Cost of the read: thirty seconds. Cost of a
   compile round-trip: a full turn.
+- **Count lines reflect runner output from the current commit, not
+  inference from which files changed.** Sessions K and L both had
+  count lines in commit messages. Session K ran `npm test` / gradle
+  and matched the XML aggregate; Session L inferred "169 unchanged"
+  from "no test files touched." Correct by reasoning in that case
+  (Compose source cannot affect JVM unit-test count), but the
+  inference pattern is fragile: a refactor that *looks* like it
+  doesn't touch tests can still change the count, and "no test files
+  touched" is not the same as "no test count changed" when a test
+  file imports the changed code. Rule: run the tests as part of the
+  commit's verification, or say explicitly in the message "count not
+  verified this commit — inferred from no test-file changes."
+  Inference labeled as inference is honest; inference presented as
+  verification is not.
 
 Current verified state: **169 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
