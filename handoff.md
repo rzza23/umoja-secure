@@ -1156,6 +1156,35 @@ Build Master §3.7). 3a DONE 2026-10-16 (`6013077` backend +
 `f257e03` Kotlin). Next: 030e-b — backend identity-change endpoints
 (tables + routes + ack verification). Not blocked.**
 
+**030e-b design questions** — non-obvious points the next session
+should decide, not inherit. Recorded here because they did not survive
+into the registry or the code:
+
+1. **Ack signature domain.** The peer signs "I have seen notice H and
+   accept it." Is that a new domain (`umoja.identity-change-ack.v1`),
+   a distinct artifact with its own schema, or a variant of the
+   replacement-notice shape? Different claim, probably warrants a
+   distinct domain — but the ruling belongs to the session that writes
+   the schema.
+2. **Backend verification of device-signed artifacts is new.** The
+   backend already verifies admin provisioning signatures (matrix
+   verification is client-side, but the admin routes verify sessions
+   and the audit chain verifies HMACs). It has NOT verified a
+   device-signed artifact before. 030e-b's ack endpoint would be the
+   first: `POST /identity-change-acks` receives a peer-signed ack,
+   backend verifies against the peer's device auth key (already on
+   file from enrollment), and stores it only on successful
+   verification. Design carefully — this is a new trust boundary in
+   backend code.
+3. **Peer discovery of the notice.** `GET /identity-change-notices`
+   filters by "notices referencing devices in the caller's
+   `permitted_contacts[]`." The backend can do this without breaking
+   server-blind: the matrix is a signed public authorization artifact,
+   not ciphertext, so reading `permitted_contacts` is allowed.
+   Confirm this boundary explicitly in the code comments — a future
+   reviewer will ask "isn't the backend supposed to be blind?" and the
+   answer needs to be in the file, not in this handoff.
+
 **After Session A:**
 
 8. **KI-020 fix — EnrollmentQrScreen reachable before auth — DONE.**
