@@ -19,6 +19,11 @@ import {
   resumeDevice,
   type AdminActor,
 } from '../admin/devices.js';
+import {
+  MatrixVersionError,
+  assertMatrixVersion,
+  getMatrixVersion,
+} from '../admin/matrixVersions.js';
 
 const CreateTokenBody = z.object({
   role: z.enum(['owner', 'admin', 'user', 'auditor']),
@@ -39,6 +44,10 @@ const ContactPairParams = z.object({
   contact: z.string().uuid(),
 });
 const IdParams = z.object({ id: z.string().uuid() });
+
+const AssertMatrixVersionBody = z.object({
+  version: z.number().int().min(1),
+});
 
 export const adminRoutes: FastifyPluginAsync = async (app) => {
   const requireAdmin = requireSession(['owner', 'admin']);
@@ -106,6 +115,43 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       } catch (err) {
         const e = err as { statusCode?: number };
         if (e.statusCode === 404) return reply.code(404).send({ error: 'not_found' });
+        throw err;
+      }
+    },
+  );
+
+  // ---------- Matrix version ----------
+
+  app.get(
+    '/admin/matrix-version',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      const actor = actorOf(req);
+      const state = await getMatrixVersion(actor.org_id);
+      return reply.send(state);
+    },
+  );
+
+  app.post(
+    '/admin/matrix-version',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      const parse = AssertMatrixVersionBody.safeParse(req.body);
+      if (!parse.success) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      try {
+        const result = await assertMatrixVersion({
+          actor_device_id: req.device!.device_id,
+          actor_role: req.device!.role,
+          org_id: req.device!.org_id,
+          version: parse.data.version,
+        });
+        return reply.code(200).send(result);
+      } catch (err) {
+        if (err instanceof MatrixVersionError) {
+          return reply.code(err.statusCode).send({ error: err.code });
+        }
         throw err;
       }
     },
