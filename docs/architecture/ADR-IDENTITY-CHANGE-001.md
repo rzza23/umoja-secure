@@ -1,7 +1,7 @@
 # ADR-IDENTITY-CHANGE-001 — Peer identity-change notification and ack
 
 Document ID: ADR-IDENTITY-CHANGE-001
-Version: 0.2
+Version: 0.3
 Date: 2026-10-17
 Status: Proposed
 Task: TASK-P1-030 sub-task 030e-b
@@ -359,7 +359,7 @@ it pins, not the code path it exercises.
     TEST-ACK-INVALID-DECISION             decision not in {accept,reject} → 400 invalid_request, no row
     TEST-ACK-UNKNOWN-NOTICE               notice_hash not in table → 400 unknown_notice
     TEST-ACK-CROSS-ORG-REJECTED           acking device org ≠ notice org → 403
-    TEST-ACK-REVOKED-DEVICE               revoked device cannot ack → 403 device_revoked
+    TEST-ACK-REVOKED-DEVICE               revoked device cannot ack → 401 unauthorized (middleware), see §10 v0.3
     TEST-ACK-REPLAY-IDEMPOTENT            same ack twice → one row, 201 both times
     TEST-DISCOVERY-RETURNS-ORG-NOTICES    notices from caller's org, none from other orgs
     TEST-DISCOVERY-CROSS-ORG-ISOLATED     org A notices invisible to org B
@@ -432,6 +432,30 @@ it.
 rename surfaced before any code, via the read-the-ADR-before-writing-
 tests gate established in Session G. Third consecutive session where
 pre-code design review caught a real defect.
+
+### v0.3 (2026-10-17) — §8 TEST-ACK-REVOKED-DEVICE layer correction
+
+§8 specified `TEST-ACK-REVOKED-DEVICE` → 403 `device_revoked`. The
+test as written fails: revoked-device sessions are rejected at the
+middleware with 401, before the ack service runs. `lookupSession`
+(auth/sessions.ts) filters by device status, so `requireSession`
+returns 401 for any request whose device is not active.
+
+The service's `device_revoked` branch in acks.ts is real defense-in-
+depth but unreachable via HTTP in normal operation. It fires only in
+the race window where the session is valid at middleware time and the
+device is revoked before the service's DB query. Testing that requires
+a service-level invocation with a controlled race — fragile to
+reproduce, and does not prove more than code reading does.
+
+Corrected: §8's route-level assertion is 401 `unauthorized` (middleware
+blocks). The service branch remains in code as documented defense for
+the race window. Count unchanged (17).
+
+Surfaced by the test suite, not code review. Third consecutive session
+where a spec-then-code divergence was caught by the test layer rather
+than reaching production — the process is doing what it is designed to
+do.
 
 ### Non-blocking
 
