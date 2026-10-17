@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-17 (Session N + v0.2 correction — registry v0.6, ADR-HARDENING-001 v0.2. Next: TASK-P1-037 — matrix transport, prerequisite for 038's send gate.)
+Last updated: 2026-10-17 (Session O-1 — TASK-P1-037 backend done: migration 016, GET /me/matrix, 5 route tests. Next: TASK-P1-037 O-2 — MatrixApi client, sign-test-matrix.ts, AppRoot wiring, manual verification.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -46,14 +46,15 @@ Authoritative documents (all exist on disk):
 
 - Node.js 24.x, Fastify 5.12.5, PostgreSQL 16
 - Docker-deployable (docker compose up -d --build from repo root)
-- **242 tests passing** (15 files; verified 2026-10-17 via
+- **247 tests passing** (16 files; verified 2026-10-17 via
   `npm test`. Sessions C–F added matrix-version, floor stamping,
   replacement-notice. Session H added identity-change services (7
   validator tests) and routes (17 route tests). Session I added the
   A-001 cross-language ack test. Sessions J, K, and L backend
   unchanged. Session M added the `sign-test-notice.ts` helper script
   (no test coverage, exercised manually). Session N design-only,
-  no backend changes.)
+  no backend changes. Session O-1 added matrix transport: migration
+  016, GET /me/matrix, 5 route tests.)
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -92,7 +93,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 169** (verified 2026-10-17 from XML; Session K's 12 IdentityChangeController tests are the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only, no Android changes.)
+- **JVM unit tests: 169** (verified 2026-10-17 from XML; Session K's 12 IdentityChangeController tests are the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only, no Android changes. Session O-1 backend-only, no Android changes.)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -1514,6 +1515,82 @@ authoritative reference. Not done this session — bigger than a
 handoff edit, and restructuring mid-session risks introducing more
 drift than it removes.
 
+### Session O-1 — TASK-P1-037 backend landed (2026-10-17)
+
+TASK-P1-037 is split across two sessions. O-1 (backend) DONE.
+O-2 (client) pending. Three commits:
+
+- `46a3443` — `backend/migrations/016_matrices.sql` (57 lines).
+  One row per device (`device_id PRIMARY KEY`), Phase 1 shape.
+  Three invariants documented at the schema, not in prose: `version`
+  must equal `parse(canonical_bytes).matrix.version` (denormalized
+  for queries, same pattern as migrations 013/014); `updated_at`
+  must be set explicitly by the write path's UPSERT (`DEFAULT` covers
+  only the initial INSERT); `matrix.device_id == row.device_id` must
+  be enforced client-side — currently absent, filed as
+  ADR-PROVISIONING-001 §7 future-hardening, reachable via P1-033's
+  write path but not via GET (which scopes by
+  `req.device.device_id`). Same `86`-char signature-length CHECK and
+  no-`ON DELETE CASCADE` conventions as migration 015.
+- `98fee5c` — `GET /me/matrix` in `routes/me.ts` (58 lines added).
+  Response `{canonical_utf8, signature_base64url}`. Version lives
+  inside canonical bytes — client derives it by parsing, never trusts
+  a server-reported version. 404 `matrix_not_found` when the caller
+  has no matrix row. Backend does NOT verify the provisioning
+  signature (relay semantics, same as identity-change notices per
+  ADR-IDENTITY-CHANGE-001 §4). JOIN on `devices` is defense-in-depth
+  against a future refactor that bypasses session-derived scoping.
+  Guard-then-use on `rows[0]` per §7's `noUncheckedIndexedAccess`
+  pattern.
+- `a6174ea` — `backend/test/matrix-transport.test.ts` (307 lines,
+  5 tests): `TEST-MATRIX-TRANSPORT-FETCH`,
+  `TEST-MATRIX-CROSS-DEVICE-REJECTED`, `TEST-MATRIX-404-NO-MATRIX`,
+  `TEST-MATRIX-401-UNAUTHENTICATED`,
+  `TEST-MATRIX-VERIFY-ON-RECEIPT-BACKEND`.
+
+**Test-name mapping to registry v0.6 §B TASK-P1-037.** Registry lists
+4; 5 shipped. The extra is `-VERIFY-ON-RECEIPT-BACKEND`, the backend
+half of the registry's `-VERIFY-ON-RECEIPT` — proves the bytes
+returned by the route still verify against the pinned provisioning
+key, so a UTF-8 or buffer-handling regression in the response path
+fails here rather than at the client. Registry's
+`-STORE-ON-VERIFY-SUCCESS` is genuinely client-side; it defers to
+O-2's `MatrixApiTest`. Split is recorded in the test file's KDoc so
+a future reader does not think it went missing.
+
+**Fixture strategy.** W-001 from
+`canonical-matrix-test-vectors.json` — the same fixture Session A's
+vector generator produced. Reconstructing the wrapper or signing
+inline would duplicate `generate-matrix-vectors.ts`'s
+HKDF + PKCS8 + Ed25519 path. `-VERIFY-ON-RECEIPT-BACKEND` uses the
+same primitive that produced the fixture (Node crypto
+`sign(null, digest, key)` over SHA-256 digest) — closing the
+protocol-drift risk that would exist if the verifier used a different
+Ed25519 implementation.
+
+**`TEST_ORG_ID`.** `0c1` (primary) + `0c2` (reserved for cross-org
+isolation if a future matrix test needs it). Next-free past the
+011/044/055/066/077/088/099, `0a1`/`0a2`, `b1`/`b2` set per §7's
+numbering discipline. `beforeEach` cleans `matrices` by
+`device_id IN (SELECT ... WHERE org_id IN (0c1, 0c2))`; devices
+accumulate keyed by random UUID (mirroring identity-change.test.ts).
+
+**Count.** Backend 242 → 247 (+5). Verified from runner output.
+
+**Next — O-2 (client half of TASK-P1-037).** Scope:
+`MatrixApi.kt` (structural mirror of `ContactsApi.kt`;
+`fetch(sessionToken): RemoteMatrix?`, null on 404, exception on 401
+and invalid_response); `MatrixApiTest.kt` (3-4 JVM tests covering
+those paths); `sign-test-matrix.ts` (HKDF derivation self-check from
+`sign-test-notice.ts` + matrix wrapper + INSERT, needed for manual
+emulator verification); `AppRoot` wiring (`LaunchedEffect` keyed on
+`AppScreen.Authenticated`, single fetch, decode → `MatrixStore.accept`,
+silent catch on verify-failure per registry §B — does not crash,
+preserves existing store); manual emulator verification (seed →
+force-stop → reopen → assert `highestSeenVersion`); handoff close.
+ADR-HARDENING-001 §6 sequence is unchanged at task-id level — 037
+must complete (both sessions) before 038 begins.
+
 ---
 
 ## 4. Known issues
@@ -1977,9 +2054,11 @@ IdentityChangeController + allNotices() store extension). 030e-c
 AppRoot foreground lifecycle polling + `3dd8583` sign-test-notice.ts
 helper). All 8 acceptance steps passed on emulator (Session M entry
 records the evidence). 030e-d (peer-ack visibility) DEFERRED behind
-the hardening pass (item 16). Next task: TASK-P1-038 — send-gate
-verification. The ADR argues it goes first because it is the one task
-that might reveal a hole rather than require new code.**
+the hardening pass (item 16). Next: finish **TASK-P1-037** (O-2
+client half), then **TASK-P1-038** — send-gate verification. 038
+goes before 039/040 per ADR-HARDENING-001 §6; the ADR argues it
+runs before the larger state-machine change because it is the one
+task that might reveal a hole rather than require new code.**
 
 **030e-d design notes (captured while fresh, deferred not canceled).**
 When 030e-d opens, the analysis is:
@@ -2094,9 +2173,12 @@ Original phrasing preserved below for history:
     matrix exists on-device; shipping 038 without 037 produces green
     tests and a gate that never fires in production.
 
-    Next session opens on **TASK-P1-037** (matrix transport):
-    `GET /me/matrix` backend route + `MatrixApi.fetch()` client +
-    wire into `Authenticated` state entry. 030e-d deferred behind
+    TASK-P1-037 is split across two sessions. **O-1 backend DONE
+    2026-10-17** — migration 016 (`46a3443`), `GET /me/matrix`
+    (`98fee5c`), 5 route tests (`a6174ea`); see Session O-1 entry in
+    §3. **O-2 next** — `MatrixApi.fetch()` client,
+    `sign-test-matrix.ts`, `AppRoot` wiring into `Authenticated`
+    state entry, manual emulator verification. 030e-d deferred behind
     the whole pass.
 
 **Backlog items (not scheduled):**
@@ -2362,6 +2444,17 @@ Rebuild after flipping — read at HttpClient construction time.
   identifier was removed or retained, and whether the shape matches
   intent. A `git diff` review costs 10 seconds; a wrong count assert
   costs 30 seconds of confusion and 5 minutes of verification.
+- **`git diff` shows unstaged changes; after `git add`, use
+  `git diff --cached`.** Session O-1 lost one round-trip when
+  `git diff --stat <file>` returned empty because the file was
+  already staged. The staged view is `git diff --cached` (alias
+  `--staged`). Two acceptable patterns: review *before* `git add`
+  (historical), or always use `git diff --cached` after staging.
+  Either is fine — the current §7 phrasing ("`git diff` before
+  commit is the authoritative read-back") is ambiguous on which side
+  of `git add` it applies to. Cost of the mistake: one round-trip
+  asking "where is the diff?". A clarity gap, not a discipline
+  failure — the diff review happened, just on the wrong command.
 - **File-private helpers with common names get prefixed when a second
   file introduces similar helpers.** `AuthorizationMatrix.kt` and
   `ReplacementNotice.kt` both declare `requireString` and
@@ -2479,7 +2572,7 @@ Rebuild after flipping — read at HttpClient construction time.
 
 Current verified state: **169 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
-and **242 backend tests** (2026-10-17, 15 files), all from runner output.
+and **247 backend tests** (2026-10-17, 16 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
 infrastructure (Mac vs emulator) and must not be summed.
 
