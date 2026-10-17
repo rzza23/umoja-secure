@@ -242,5 +242,5 @@
     }
   ],
   "stop_condition": "This file is NOT authoritative until generated: true. Until then, no signing code may be committed. Build Master §3.8 makes vectors a precondition for the matrix signing protocol, and §11 prohibits accepting a matrix that has not been canonicalized per RFC 8785.",
-  "generated_at": "2026-10-17T04:07:47.586Z"
+  "generated_at": "2026-10-17T07:14:41.176Z"
 }
