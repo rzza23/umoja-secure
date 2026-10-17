@@ -58,6 +58,8 @@ import com.umoja.secure.crypto.IdentityChangeController
 import com.umoja.secure.crypto.ProvisioningKeys
 import com.umoja.secure.crypto.ReplacementNoticeStore
 import com.umoja.secure.transport.IdentityChangeApi
+import com.umoja.secure.transport.MatrixApi
+import com.umoja.secure.transport.MatrixApiException
 import java.security.KeyFactory
 import java.security.PublicKey
 import java.security.spec.X509EncodedKeySpec
@@ -151,6 +153,57 @@ fun AppRoot(lifecycle: Lifecycle) {
             coroutineScope.launch { ctrl.refresh() }
         }
         onDispose { lifecycle.removeObserver(observer) }
+    }
+
+    // Matrix transport fetch on Authenticated entry (TASK-P1-037 O-2).
+    // Pulls the caller's signed matrix from GET /me/matrix, verifies
+    // against the pinned provisioning key, and feeds MatrixStore.accept.
+    //
+    // Fires on:
+    //   - Enrollment -> Authenticated (first session entry)
+    //   - Admin/Diagnostics -> Authenticated (returning from a
+    //     sub-screen; accepted trade-off per O-2 reviewer note)
+    //   - Session re-auth that lands back on Authenticated
+    //
+    // Does NOT poll. Matrix changes are rare; P1-036 (rotation) will
+    // handle notice-driven updates separately. The trade-off is that
+    // Admin<->Authenticated navigation re-fetches — cheap, matrix
+    // payload is small, and idempotent on the store side (accept
+    // rejects same-version, silent).
+    //
+    // Failure handling per registry §B TASK-P1-037:
+    //   - 404 matrix_not_found -> MatrixApi returns null -> no-op
+    //   - MatrixApiException (network / 401 / invalid_response) ->
+    //     caught silently, MatrixStore unchanged
+    //   - AcceptResult.Rejected (bad signature, rollback, below_floor)
+    //     -> silent per registry §B; logging is P1-041's territory,
+    //     no log surface available pre-041
+    //
+    // A rejected matrix leaves MatrixStore unchanged. The fetch-then-
+    // accept path is idempotent — a later fetch of a valid matrix
+    // recovers automatically.
+    LaunchedEffect(screen, deviceId) {
+        if (screen is AppScreen.Authenticated && deviceId != null) {
+            val token = SessionManager(context).currentSession()?.sessionToken
+            if (token != null) {
+                try {
+                    val api = MatrixApi { t ->
+                        HttpClient(HttpClient.DEV_BASE_URL)
+                            .get("/me/matrix", bearer = t)
+                    }
+                    val remote = api.fetch(token)
+                    if (remote != null) {
+                        MatrixStore(SecureStorage(context)).accept(
+                            canonical = remote.canonicalUtf8.toByteArray(Charsets.UTF_8),
+                            signatureBase64url = remote.signatureBase64url,
+                            trustedKeys = setOf(provisioningPublicKey()),
+                        )
+                    }
+                } catch (_: MatrixApiException) {
+                    // Silent per registry §B — see KDoc above
+                }
+            }
+        }
     }
 
     // Initial state load
