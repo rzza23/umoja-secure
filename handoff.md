@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-17 (Session L — TASK-P1-030 030e-c 3d-2 done: ChatScreen banner + gate + dialog + ack flow + chat-open polling. Next: 030e-c 3d-3b — AppRoot foreground lifecycle polling, plus the seeding helper for manual acceptance verification.)
+Last updated: 2026-10-17 (Session M — TASK-P1-030 030e-c DONE structurally + runtime-verified. Next: 030e-d — peer-ack visibility.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -49,7 +49,8 @@ Authoritative documents (all exist on disk):
   replacement-notice. Session H added identity-change services (7
   validator tests) and routes (17 route tests). Session I added the
   A-001 cross-language ack test. Sessions J, K, and L backend
-  unchanged.)
+  unchanged. Session M added the `sign-test-notice.ts` helper script
+  (no test coverage, exercised manually).)
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -88,7 +89,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 169** (verified 2026-10-17 from XML; Session K's 12 IdentityChangeController tests are the most recent addition. Session L Compose changes added no JVM tests.)
+- **JVM unit tests: 169** (verified 2026-10-17 from XML; Session K's 12 IdentityChangeController tests are the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator.)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -1279,6 +1280,114 @@ it stays honest. §7 refinement below.
 structurally complete pending the manual verification pass, which
 needs the seeding helper above.
 
+### Session M — TASK-P1-030 030e-c 3d-3b + acceptance landed (2026-10-17)
+
+030e-c DONE structurally and runtime-verified. Two commits:
+
+- `3dd8583` — `backend/scripts/sign-test-notice.ts`. Seeds a signed
+  replacement notice directly into `identity_change_notices`, signed
+  with the SAME test key `ProvisioningKeys.CURRENT_PROVISIONING_
+  PUBKEY_B64U` pins. Derivation is HKDF-SHA256 from
+  `generate-matrix-vectors.ts`'s seed (`ed25519-test-key`, empty
+  salt, 32 bytes). **Self-check before any DB touch:** derives the
+  pubkey and refuses to run if it doesn't match the vector file's
+  `expected_provisioning_public_key_base64url`. Session L recorded
+  the HKDF-risk concern; the check makes the failure loud rather
+  than letting a bad-key seed pass silently and surface as a UI
+  bug. Direct DB insert (`withTransaction`), not
+  `POST /identity-change-notices` — that path has 17 route tests;
+  the verification goal is client-side. Idempotent for identical
+  `--issued-at`.
+- `eec0ee6` — AppRoot foreground lifecycle polling (3d-3b). Three
+  design decisions:
+  1. **Lifecycle passed as `AppRoot(lifecycle: Lifecycle)` param**,
+     not fetched via `LocalLifecycleOwner`. AppRoot is already
+     coupled to MainActivity; making it explicit avoids adding
+     `androidx.lifecycle:lifecycle-runtime-compose` for one site.
+  2. **`DisposableEffect` keyed on `(lifecycle,
+     identityChangeController)`.** The controller is null
+     pre-enrollment, non-null after; keying on it re-registers
+     when it transitions. Without the key the observer captures
+     the null value and never sees the controller — the exact
+     failure mode 3d-3b exists to fix.
+  3. **Immediate refresh on effect registration.** A fresh
+     observer does not replay past lifecycle events; if the app
+     is already STARTED when the controller becomes non-null
+     (post-enrollment), `ON_START` won't fire for it. The
+     immediate launch covers that window.
+  `ON_START` over `ON_RESUME` — "visible" is the right threshold
+  for polling; `ON_RESUME` would miss partially-obscured cases.
+
+**Contact-pair bootstrap for the acceptance.** The `contacts` table
+was empty (no bidirectional pair existed, so a chat couldn't be
+opened). Direct SQL insert (two rows, `ON CONFLICT DO UPDATE` to
+handle revival against `contacts_revoke_consistency`),
+`authorized_by` = admin device. Same pattern as the enrollment-token
+bootstrap in Session A. Prerequisite: both devices already enrolled
+in the same org.
+
+**Emulator acceptance — all 8 steps passed.** Recorded as the
+load-bearing evidence; the JVM suite cannot exercise Compose, so
+this is the only proof that 3d-2 + 3d-3b behave at runtime.
+
+Setup: emulator 5554 = admin (`f697b280-91dc-478c-a8eb-58e7f5233751`),
+emulator 5556 = user (`943fbeeb-6bae-41e7-b5e1-5ebcc534ea54`). Seed
+`--from 943fbeeb --to f697b280`. Banner renders on 5556 (chatting
+with `f697b280` = notice's `toDeviceId`).
+
+1. Chat-open on blocked peer → banner appeared (tertiary container,
+   "Device replacement awaiting your acknowledgment", View label),
+   composer placeholder "Sending blocked", send icon greyed.
+   Backend log confirmed `GET /identity-change-notices 200` on the
+   chat-open `LaunchedEffect`. **3d-2 chat-open trigger verified.**
+2. Tap banner → dialog opened. All fields correct:
+   `from=943fbeeb…`, `→ f697b280…`,
+   `Issued: 2026-10-17T15:58:19.558Z` (matches seed),
+   `Notice: 7TrYHYAM…` (first 8 of seed hash
+   `7TrYHYAM9vpkyk97ei6SpVRe6e461Ipdl0tnolPPoSo`),
+   `Signature verified on receipt against pinned provisioning key.`
+   No full canonical bytes, no re-verify button — matches 3d-2 KDoc
+   (confirm continuity, not cryptography).
+3. Tap Acknowledge → dialog dismissed, banner cleared, composer
+   re-enabled, send icon blue. Controller ran sign → POST →
+   markAcked.
+4. Tap Back → re-open chat → **no banner**. `ACKED_ACCEPT` state
+   persisted through chat close/reopen (SecureStorage write +
+   reload verified). **Persistence holds.**
+5. Seed second notice (`y5y0_cKTIAF7zTZ1k8C6RlEwmjK6a_GkW49MwLqOtyk`)
+   while chat open and idle — chat-open `LaunchedEffect` cannot
+   re-fire (peer unchanged).
+6. Background the app (Home) → wait 2s → foreground.
+7. **Banner appeared for the second notice without re-navigation.**
+   Only path is the `DisposableEffect`'s `ON_START` observer →
+   `controller.refresh()`. **3d-3b foreground trigger verified in
+   isolation from chat-open.**
+8. Tap banner → Reject → banner changed to error-container (red),
+   text = "You rejected the replacement of this device. Sending is
+   blocked. Contact your admin to resolve.", View label removed
+   (non-clickable per Q3), composer stays disabled, tapping banner
+   does nothing. **Q3 rejection semantics verified.**
+
+**Pitfall recorded.** During acceptance, the first
+`docker compose logs | grep -iE "identity-change"` returned zero
+lines — not because the call failed, but because 3d-2/3d-3b shipped
+without a client-side log tag. There is no `UmojaIdentity` tag in
+the client, so `adb logcat | grep -i refresh` matches every Android
+system service. Absence of a log line is NOT evidence of absence of
+a call when the code has no log statement. The diagnostic that
+actually worked was unfiltered `docker compose logs backend
+--tail=40` — seeing `GET /me/contacts 200` proved the app was
+active, and the *absence* of `/identity-change-notices` in the same
+window was the signal. §7 bullet added.
+
+**Next: 030e-d** — peer-ack visibility. `GET /identity-change-acks/
+:notice_hash` (backend route exists in `identity-change.test.ts` as
+`TEST-ACK-LIST-BY-NOTICE`; the API client deliberately omitted it
+per `dde60f2`'s KDoc — 030e-d is the consumer that justifies adding
+it). UI: dialog or banner extension showing "N peers acknowledged
+this notice" or similar. Discovery likely shares the same triggers
+(chat-open, `ON_START`) unless a WS extension lands first.
+
 ---
 
 ## 4. Known issues
@@ -1738,9 +1847,10 @@ production signer + `031a0e5` helper extraction + `dde60f2` API +
 `f747e37` store). 030e-c 3d-1 DONE 2026-10-17 (`eea1af7`
 IdentityChangeController + allNotices() store extension). 030e-c
 3d-2 DONE 2026-10-17 (`ec5abf1` ChatScreen banner + gate + dialog
-+ ack + chat-open polling; manual emulator acceptance pending, see
-Session L). Next: 030e-c 3d-3b — AppRoot foreground lifecycle
-polling + seeding helper for verification.**
++ ack + chat-open polling). 030e-c 3d-3b DONE 2026-10-17 (`eec0ee6`
+AppRoot foreground lifecycle polling + `3dd8583` sign-test-notice.ts
+helper). All 8 acceptance steps passed on emulator (Session M entry
+records the evidence). Next: 030e-d — peer-ack visibility.**
 
 **030e-b design questions** — RESOLVED in ADR-IDENTITY-CHANGE-001
 (`21677a9`, design), backed by migration 015 (`00f31df`, schema).
@@ -2147,6 +2257,23 @@ Rebuild after flipping — read at HttpClient construction time.
   verified this commit — inferred from no test-file changes."
   Inference labeled as inference is honest; inference presented as
   verification is not.
+- **Absence of a log line is not evidence of absence of a call when
+  the code has no log statement.** Session M's acceptance debugging
+  started with `docker compose logs | grep identity-change`
+  returning zero lines, which looked like "the app never called."
+  It wasn't — the app called; 3d-2/3d-3b shipped without a
+  client-side log tag (no `UmojaIdentity`), and the backend grep
+  was too narrow. The diagnostic that worked was unfiltered
+  `docker compose logs backend --tail=40` — seeing `/me/contacts
+  200` proved the app was active, and the *absence* of
+  `/identity-change-notices` in the same window was the signal
+  that the call wasn't firing. Same principle applied to logcat:
+  `grep -i refresh` matched every Android system service
+  (DisplayManager, TapAndPay, etc.); a filter that matches
+  everything is equivalent to no filter. Rule: when a debug grep
+  returns zero lines, widen the grep before concluding anything.
+  If it returns many but irrelevant lines, tighten it to a
+  specific tag you know exists in the code.
 
 Current verified state: **169 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
