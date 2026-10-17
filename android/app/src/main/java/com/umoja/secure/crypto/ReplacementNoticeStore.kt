@@ -145,6 +145,18 @@ class ReplacementNoticeStore(
     fun pendingNotices(): List<StoredNotice> = loadAll().filter { it.state == State.PENDING }
 
     /**
+     * All stored notices, any state. Used by consumers that need to
+     * derive policy from the full history — [IdentityChangeController.gateFor]
+     * needs ACKED_REJECT visibility to answer "is this peer's continuity
+     * blocked?", which [pendingNotices] (PENDING only) cannot serve.
+     *
+     * Not a wider trust surface: every returned notice was verified at
+     * [recordNotice] time and has not been re-verified since — same
+     * trust model as [pendingNotices] and [blockStateFor].
+     */
+    fun allNotices(): List<StoredNotice> = loadAll()
+
+    /**
      * Block state for a target device. Newest notice wins (Q3).
      *
      * No matching notice → Unblocked.
