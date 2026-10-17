@@ -150,18 +150,5 @@ class ReplacementNoticeTest {
         error("could not find repo root from ${System.getProperty("user.dir")}")
     }
 
-    private fun jsonObjectToPlainMap(jo: JSONObject): Map<String, Any?> {
-        val out = linkedMapOf<String, Any?>()
-        for (key in jo.keys()) {
-            out[key] = jsonValueToPlain(jo.get(key))
-        }
-        return out
-    }
 
-    private fun jsonValueToPlain(v: Any?): Any? = when (v) {
-        null, JSONObject.NULL -> null
-        is JSONObject -> jsonObjectToPlainMap(v)
-        is JSONArray -> (0 until v.length()).map { jsonValueToPlain(v.get(it)) }
-        else -> v
-    }
 }
