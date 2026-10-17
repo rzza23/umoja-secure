@@ -6,6 +6,7 @@ import org.bouncycastle.crypto.params.HKDFParameters
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
@@ -146,6 +147,72 @@ class IdentityChangeAckSignerTest {
             .decode(v.getString("expected_provisioning_public_key_base64url"))
         val pubKey = MatrixSigner.publicKeyFromRaw(pubRaw)
         assertTrue(IdentityChangeAckSigner.verify(parsed, kotlinSig, pubKey))
+    }
+
+    // ---------- signWithDeviceKey (production entry point) ----------
+
+    private fun bcSigningFn(kp: java.security.KeyPair): (ByteArray) -> ByteArray =
+        { digest ->
+            val s = java.security.Signature.getInstance("Ed25519")
+            s.initSign(kp.private)
+            s.update(digest)
+            s.sign()
+        }
+
+    @Test
+    fun `TEST-ACK-SIGNER-DEVICE-KEY round-trips via BC-backed lambda`() {
+        val kp = java.security.KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
+        val signed = SignedIdentityChangeAck(
+            domain = SignedIdentityChangeAck.DOMAIN,
+            ack = IdentityChangeAck(
+                noticeHash = "A".repeat(43),
+                ackingDeviceId = "11111111-1111-1111-1111-111111111111",
+                decision = "accept",
+                issuedAt = "2026-10-17T00:00:00Z",
+            ),
+        )
+        val sig = IdentityChangeAckSigner.signWithDeviceKey(signed, bcSigningFn(kp))
+        assertTrue(IdentityChangeAckSigner.verify(signed, sig, kp.public))
+    }
+
+    @Test
+    fun `TEST-ACK-SIGNER-DEVICE-KEY matches PrivateKey entry point`() {
+        // Two entry points, same protocol, same key. If signWithDeviceKey
+        // produces a different signature than sign for identical input,
+        // one of the two paths is wrong. Ed25519 is deterministic
+        // (RFC 8032) so byte-identical is the correct expectation.
+        val kp = java.security.KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
+        val signed = SignedIdentityChangeAck(
+            domain = SignedIdentityChangeAck.DOMAIN,
+            ack = IdentityChangeAck(
+                noticeHash = "A".repeat(43),
+                ackingDeviceId = "11111111-1111-1111-1111-111111111111",
+                decision = "accept",
+                issuedAt = "2026-10-17T00:00:00Z",
+            ),
+        )
+        val viaPrivateKey = IdentityChangeAckSigner.sign(signed, kp.private)
+        val viaDeviceKey = IdentityChangeAckSigner.signWithDeviceKey(signed, bcSigningFn(kp))
+        assertEquals(viaPrivateKey, viaDeviceKey)
+    }
+
+    @Test
+    fun `TEST-ACK-SIGNER-DEVICE-KEY rejects wrong-length return from signingFn`() {
+        // Defense-in-depth: a misbehaving signingFn returns something
+        // that isn't a 64-byte Ed25519 signature. require() catches it
+        // before the base64url encode, before it can be stored or sent.
+        val signed = SignedIdentityChangeAck(
+            domain = SignedIdentityChangeAck.DOMAIN,
+            ack = IdentityChangeAck(
+                noticeHash = "A".repeat(43),
+                ackingDeviceId = "11111111-1111-1111-1111-111111111111",
+                decision = "accept",
+                issuedAt = "2026-10-17T00:00:00Z",
+            ),
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            IdentityChangeAckSigner.signWithDeviceKey(signed) { ByteArray(32) }
+        }
     }
 
     // ---------- helpers ----------

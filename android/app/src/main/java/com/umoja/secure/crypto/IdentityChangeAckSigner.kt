@@ -71,4 +71,39 @@ object IdentityChangeAckSigner {
         sig.update(d)
         return sig.verify(sigBytes)
     }
+
+    /**
+     * Sign a [SignedIdentityChangeAck] using a device-held signing
+     * function. **This is the production entry point.**
+     *
+     * [sign] takes a [PrivateKey], which is correct for test
+     * derivation and the offline vector generator, but unusable in
+     * production: the device auth key lives in Android Keystore and
+     * is hardware-backed and non-exportable — there is no PrivateKey
+     * to hand over. [signWithDeviceKey] bridges that by taking a
+     * function that performs the raw signing operation. In production
+     * this is `deviceKeyManager.sign(digest)`; in tests it is any
+     * Ed25519 signing operation over the supplied digest.
+     *
+     * Two entry points, two custody models, no convenience overload
+     * hiding the constraint. The [require] on [sigBytes].size catches
+     * a misbehaving [signingFn] as defense-in-depth, mirroring
+     * [verify]'s malformed-signature guard.
+     *
+     * The caller is responsible for [signingFn] correctness — this
+     * function does not catch exceptions from it. A failed underlying
+     * signing operation propagates; that is the caller's error to
+     * handle, not the store's to swallow.
+     */
+    fun signWithDeviceKey(
+        signed: SignedIdentityChangeAck,
+        signingFn: (ByteArray) -> ByteArray,
+    ): String {
+        val digest = digest(signed)
+        val sigBytes = signingFn(digest)
+        require(sigBytes.size == 64) {
+            "signature: expected 64 bytes, got ${sigBytes.size}"
+        }
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(sigBytes)
+    }
 }
