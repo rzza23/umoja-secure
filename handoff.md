@@ -2069,13 +2069,35 @@ Original phrasing preserved below for history:
     physical hardware.
 15. Hardening: SBOM, Android redaction audit, penetration test,
     independent review.
-16. **P1 hardening pass (TASK-P1-038 → 041)** — ADR-HARDENING-001.
-    Send-gate verification (038), release-build hygiene (039), session
-    lifecycle & revocation UX (040), operator logging (041, deferred).
-    Sequence 038 → 039 → 040 → 041 per ADR §6. 030e-d deferred behind
-    this pass. Six reads at session start: `MessagingService.kt`,
-    `auth/sessions.ts`, `auth/middleware.ts`, `TransportConfig.kt`,
-    `MainActivity.kt`, `AndroidManifest.xml` + `build.gradle.kts`.
+16. **P1 hardening pass (TASK-P1-037 → 041)** — ADR-HARDENING-001
+    v0.2. Read findings from the v0.2 session (six reads executed):
+    - Send gate **absent** in `MessagingService.sendMessage`.
+      TASK-P1-038 is implementation, not verification.
+    - `lookupSession` does **not** differentiate expired from revoked.
+      Backend change confirmed.
+    - `AppRoot` routing **incomplete** — never checks
+      `sessionExpiresAt < now()`.
+    - `FLAG_SECURE` **absent** on all screens.
+    - Backup flags **already set** — `allowBackup="false"` +
+      `fullBackupContent="false"` both present.
+    - `TransportConfig.useTor` is `var`; `buildConfig = false`
+      means `BuildConfig.DEBUG` unavailable — task 039 enables
+      `buildConfig = true`.
+    - **AGP 9.4.1** (not 8.x as v0.1 assumed). Release uses
+      `optimization { enable = false }` (AGP 9 DSL), which currently
+      ships unoptimized. Exact semantics deferred to 039's docs read.
+
+    **Sequencing correction:** v0.1 said `038 → 039 → 040 → 041`.
+    Read findings + fail-closed ruling change this to
+    **`037 → 038 → 039 → 040 → 041`** — matrix transport is 038's
+    hard prerequisite. Fail-closed gate blocks all sends until a
+    matrix exists on-device; shipping 038 without 037 produces green
+    tests and a gate that never fires in production.
+
+    Next session opens on **TASK-P1-037** (matrix transport):
+    `GET /me/matrix` backend route + `MatrixApi.fetch()` client +
+    wire into `Authenticated` state entry. 030e-d deferred behind
+    the whole pass.
 
 **Backlog items (not scheduled):**
 - Instrumented Compose tests for admin flows (no test rule configured;
