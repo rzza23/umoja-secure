@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-17 (Session G — TASK-P1-030 030e-b ADR + migration landed. Next: 030e-b service modules, routes, tests.)
+Last updated: 2026-10-17 (Session H — TASK-P1-030 030e-b DONE: services + routes + 17 tests + ADR v0.3. Next: 030e-c — Android ReplacementNoticeStore, block-send on unacked notice.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -44,9 +44,10 @@ Authoritative documents (all exist on disk):
 
 - Node.js 24.x, Fastify 5.12.5, PostgreSQL 16
 - Docker-deployable (docker compose up -d --build from repo root)
-- **217 tests passing** (15 files; verified 2026-10-17 via
-  `npm test`. Grew through Sessions C–F: matrix-version, token floor,
-  enrollment floor echo, replacement-notice.)
+- **241 tests passing** (15 files; verified 2026-10-17 via
+  `npm test`. Sessions C–F added matrix-version, floor stamping,
+  replacement-notice. Session H added identity-change services (7
+  validator tests) and routes (17 route tests).)
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -776,6 +777,84 @@ from existing org IDs — currently 011, 044, 055, 066, 077, 088,
 099, 0a1, 0a2). File cleanup order in afterAll:
 `identity_change_acks` → `identity_change_notices` → `devices` (FK
 dependencies).
+
+### Session H — TASK-P1-030 030e-b implementation + tests landed (2026-10-17)
+
+030e-b DONE. Four commits total across Sessions G and H:
+
+- `21677a9` (G) — ADR-IDENTITY-CHANGE-001 v0.1
+- `00f31df` (G) — migration 015
+- `d8b2cfc` (H) — services + routes + wiring, 7 validator tests
+  (backend 217 → 224)
+- `b26913a` (H) — 17 route tests, ADR v0.3 (backend 224 → 241)
+
+Plus two pre-code design commits:
+- `1c217e1` — ADR v0.2: §7 step 3 unsatisfiable fix
+  (`ack.notice_hash === SHA-256(canonical_utf8 bytes)` compared a
+  field against the hash of the bytes containing it);
+  `TEST-ACK-HASH-MISMATCH` → `TEST-ACK-INVALID-DECISION`.
+- `e6e3ecb` — handoff §7 read-back convention replaced with
+  git-diff rule (deletes two accumulated caveat bullets).
+
+**Prehash vs. direct-message protocol — the biggest catch.** ADR §3
+specifies Ed25519 over SHA-256 of JCS-canonical bytes (prehash). This
+diverges from `verifyChallenge` in `auth/verify.ts`, which signs the
+message directly with no prehash. The implementation session caught
+this by reading the ADR before writing the ack verifier — mirroring
+`verifyChallenge` as "reuse the existing primitive" would have
+produced a 100%-failure ack suite that looked like a cryptography
+bug. Recorded in ADR §10 v0.2, ack service KDoc, and validator digest
+KDoc.
+
+**Two digest contracts, deliberately.** `replacementNoticeDigest`
+re-canonicalizes (client verifies a relayed artifact; JSON-equivalence
+is the contract). `identityChangeAckDigest` takes raw bytes (backend
+stores verbatim then verifies byte-identity — migration 015's BYTEA
+property). A reordering attacker who submits JSON-equivalent-but-
+differently-serialized bytes fails at insert with the raw-byte digest;
+with re-canonicalization they would poison the store with a
+self-inconsistent row. Not unified.
+
+**Typed `tx.query<T>()` and `noUncheckedIndexedAccess`.** 9 typecheck
+errors after initial write — `rows[0]` is `T | undefined` and the
+compiler cannot narrow through `rowCount !== 1`. Fix patterns applied:
+guard-then-use (narrow to local for multi-access) and RETURNING `!`
+for single guaranteed rows. Matches `matrixVersions.ts` Session C
+precedent. Worth noting: `verifyChallenge` in `auth/verify.ts` uses
+untyped `tx.query()` → `any` → hides this class. Typed parameters
+surface it, which is a win. §7 addition for next session.
+
+**ADR v0.3 — TEST-ACK-REVOKED-DEVICE layer correction.** §8 specified
+403 `device_revoked`; reality is 401 `unauthorized` because
+`lookupSession` (auth/sessions.ts) filters by device status and blocks
+at the middleware. The service's `device_revoked` branch is real
+defense-in-depth but unreachable via HTTP in normal operation — fires
+only in the race window (session valid at middleware, device revoked
+before service query). Test asserts 401 with layer KDoc; §10 v0.3
+records the reasoning. Count unchanged (17).
+
+**Pattern: third consecutive session where pre-code review or test
+layer caught a real defect before production.** Session F caught the
+ADR §7 step 3 unsatisfiable comparison, Session G caught two wrong
+assumptions in the design note by reading code first, Session H caught
+the prehash-vs-direct divergence and the TEST-ACK-REVOKED-DEVICE layer
+assumption. Not a coincidence — the read-before-write and
+test-as-acceptance-gate disciplines are working.
+
+**Next: 030e-c** — Android `ReplacementNoticeStore` + block-send on
+unacked notice. First client work in the identity-change flow. Per
+registry v0.5:
+> P1-030c — `MatrixStore`-adjacent: `ReplacementNoticeStore` on the
+> client, detects unacked notices affecting accepted matrices, blocks
+> outgoing sends to `to_device_id` until acked.
+
+Design questions for 030e-c opening (not decided, recorded here):
+- Where does "blocked send" surface in the UI? Toast, dialog,
+  inline-on-chat-screen, all three?
+- Does the block lift automatically when the sender learns the peer
+  acked (polling, WS, both), or only on local state change?
+- Does a rejected ack count as "acked" for send-unblock, or does
+  rejection require admin intervention before any send proceeds?
 
 ---
 
@@ -1596,7 +1675,7 @@ Rebuild after flipping — read at HttpClient construction time.
 
 Current verified state: **122 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
-and **217 backend tests** (2026-10-17, 15 files), all from runner output.
+and **241 backend tests** (2026-10-17, 15 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
 infrastructure (Mac vs emulator) and must not be summed.
 
