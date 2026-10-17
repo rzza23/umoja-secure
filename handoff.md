@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-17 (Session M — TASK-P1-030 030e-c DONE structurally + runtime-verified. Next: 030e-d — peer-ack visibility.)
+Last updated: 2026-10-17 (Session N — Hardening design: TASK-P1-036…041 filed in registry v0.6, ADR-HARDENING-001 landed. Next: TASK-P1-038 — send-gate verification, six reads at opening.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -31,10 +31,12 @@ Authoritative documents (all exist on disk):
 - docs/US-ADD-001.md (v0.2)
 - docs/US-MASTER-001.md
 - docs/reference/AUTH-SPEC-001.md, docs/reference/THREAT-MODEL-001.md
-- docs/US-TASK-P1-001.md (task registry, v0.4)
+- docs/US-TASK-P1-001.md (task registry, v0.6)
 - docs/architecture/ADR-PROVISIONING-001.md
+- docs/architecture/ADR-IDENTITY-CHANGE-001.md (v0.3)
+- docs/architecture/ADR-HARDENING-001.md (v0.1)
 - docs/ops/TOR-ONION.md
-- docs/security/DEPENDENCY-EXCEPTIONS.md (new, this session)
+- docs/security/DEPENDENCY-EXCEPTIONS.md (created Session A)
 
 ---
 
@@ -50,7 +52,8 @@ Authoritative documents (all exist on disk):
   validator tests) and routes (17 route tests). Session I added the
   A-001 cross-language ack test. Sessions J, K, and L backend
   unchanged. Session M added the `sign-test-notice.ts` helper script
-  (no test coverage, exercised manually).)
+  (no test coverage, exercised manually). Session N design-only,
+  no backend changes.)
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -89,7 +92,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 169** (verified 2026-10-17 from XML; Session K's 12 IdentityChangeController tests are the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator.)
+- **JVM unit tests: 169** (verified 2026-10-17 from XML; Session K's 12 IdentityChangeController tests are the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only, no Android changes.)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -1388,6 +1391,129 @@ it). UI: dialog or banner extension showing "N peers acknowledged
 this notice" or similar. Discovery likely shares the same triggers
 (chat-open, `ON_START`) unless a WS extension lands first.
 
+### Session N — Hardening design: TASK-P1-036…041 filed, ADR-HARDENING-001 landed (2026-10-17)
+
+Design-only session. No code, no tests run. Two commits:
+
+- `be3f287` — `docs/US-TASK-P1-001.md` v0.5 → v0.6. Filed TASK-P1-036
+  through 041: 036 (rotation notice handling) and 037 (matrix transport)
+  backfilled from prose follow-ups that were never formally registered;
+  038–041 newly filed from the 2026-10-17 hardening review. Total
+  36 → 42.
+- `7a47a30` — `docs/architecture/ADR-HARDENING-001.md` (291 lines).
+  Design rulings for TASK-P1-038 through 041: session state machine,
+  release-build hardening, send-gating verification, out-of-scope list,
+  sequencing, and four [VERIFY AT IMPLEMENTATION] items deferred to the
+  tasks they're contingent on.
+
+**Pre-flight discovery reshaped scope.** Before filing 038–041 the
+session read the registry (§A headers, §C table rows) instead of
+assuming 036/037 existed. Grep showed §A headers jump from 030 to end
+of section; §C table lists 031–035; neither a §A section nor a §C row
+for 036 or 037. The two tasks had been tracked as prose follow-ups
+since Sessions F/G (rotation: ADR-PROVISIONING-001 §3.6; matrix
+transport: ADR-IDENTITY-CHANGE-001 §5 open item) but were never
+formally registered. Filing 038–041 without them would create a
+permanent numbering gap. The fix: file all six in the same amendment.
+This is the same drift the handoff's own §7 warns about — a name
+carried in prose until the registry was actually read.
+
+**Five ADR rulings, each a consequence of §1's invariant** (a fielded
+user must never be unrecoverable):
+
+1. **§2 Session state machine.** 7 states (`Unauthenticated`,
+   `Authenticating`, `Authenticated`, `Reauthenticating`, `Revoked`,
+   `NetworkFailure`, `EnrollmentRequired`). Single-flight mutex so
+   concurrent 401s produce one re-auth (backend challenge consumption
+   would otherwise make 4 of 5 fail for no user-caused reason).
+   Recursion guard so `/auth/challenge` / `/auth/verify` 401s don't
+   recurse. Interceptor retries the original call once. Backend
+   change: `lookupSession`'s 401 gains a `device_revoked` code when
+   device status is not `active`; precedent exists in
+   `auth/verify.ts`'s status filter. App-start routing: expired
+   `sessionExpiresAt` → silent re-auth, not a button tap (the current
+   code routes on `sessionExpiresAt == null`, which misses expiry —
+   the read is in §7 of the ADR).
+
+2. **§3 Release-build hardening.** `FLAG_SECURE` on `ChatScreen`,
+   `AdminScreen`, `DiagnosticsScreen`. Both `allowBackup="false"` and
+   `fullBackupContent="false"` (defense in depth: the Keystore key
+   doesn't transfer through auto-backup, so a restored device has
+   undecryptable prefs; `allowBackup=false` removes the failure mode).
+   `TransportConfig.useTor` becomes a `val` initialized from
+   `BuildConfig.DEBUG`; startup assertion in `UmojaApplication` fails
+   closed if release but `useTor` is false. `minifyEnabled=true` with
+   libsignal keep rules; **the acceptance test is cold-start, not
+   "build succeeds."**
+
+3. **§4 Send-gating: verification-first.** Design is settled by P1-026
+   ("contacts are a projection, matrix is authority"). The task
+   answers whether `MessagingService.sendMessage` implements that.
+   Two outcomes, both valid: gate exists → tests confirm and the task
+   closes on evidence; gate missing → implemented, with UI treatment
+   matching the 030e-c blocked-send banner pattern.
+
+4. **§5 Out of scope, named so a future session doesn't expand:**
+   session token rotation, refresh-token architecture, certificate
+   pinning, APK obfuscation, backend session TTL tuning, penetration
+   testing (TASK-P1-024), SBOM (TASK-P1-027), streaming API retry
+   semantics, APK signing key custody.
+
+5. **§6 Sequencing: 038 → 039 → 040 → 041.** 038 first because it is
+   the one task that might reveal a hole rather than require new
+   code. 039 second because it's mechanical and independent, and
+   because verifying release builds before 040's state-machine
+   changes means manual on-device verification of 040 isn't
+   compounded with minification debugging. 040 last, largest,
+   benefits from 039's release path being proven. 041 deferred.
+
+**Four [VERIFY AT IMPLEMENTATION] items** — not asserted, deferred to
+the task they're contingent on. This is the Session G "read before
+write" discipline applied at the task-design layer, so the task can
+land correctly whether the property already exists or needs adding:
+
+- **`MessagingService.sendMessage`'s gate state** (TASK-P1-038).
+  Session C/D read `MainActivity.kt` but not `MessagingService.kt`;
+  whether the matrix gate is present is a code read, not an
+  inference.
+- **`lookupSession`'s rejection path** (TASK-P1-040). The client
+  cannot distinguish "expired" from "revoked" from a plain 401
+  today. If the code already surfaces device status, both the backend
+  change and the client's terminal-state routing simplify.
+- **`TransportConfig`'s mutability** (TASK-P1-039). Handoff §6
+  records it as `var`, but the current shape is a code read.
+- **`AppRoot`'s current routing** (TASK-P1-040). Session C/D read
+  shows routing on `sessionExpiresAt == null`, not
+  `sessionExpiresAt < now()`. A session that expired while the app
+  was closed lands on `Authenticated`; the first API call 401s. This
+  is the exact failure mode §2 closes.
+
+**Why 030e-d defers.** Before this session's review, the handoff said
+"Next: 030e-d — peer-ack visibility." That was correct before the
+hardening gaps surfaced. After: P1-038 might reveal that
+`MessagingService.sendMessage` doesn't gate on the matrix. If it
+doesn't, adding a peer-ack dialog (030e-d) before closing the
+authorization hole is prioritization in the wrong order. P1-038
+resolves first; 030e-d opens after, or opens immediately if P1-038
+closes on evidence alone (gate exists, tests pass, no code change).
+The deferral is explicit, not forgotten.
+
+**No code, no tests run this session.** Commit messages say so
+explicitly. Counts unchanged: 169 Android JVM / 242 backend.
+Verification of the ADR rulings happens in the task that implements
+each ruling — that is the whole point of the [VERIFY AT
+IMPLEMENTATION] markers.
+
+**§8's title is stale, worth a backlog item.** §8 says "References
+for the matrix implementation session" — accurate as of Session A,
+but Sessions H–M added `identityChange/`, `replacement-notice/`,
+new ADRs, and helpers not reflected in §8's "Current code shape"
+list. §8 is now a partial reference, not a complete one. Filed as a
+backlog item: rename §8 or replace its code-shape list with an
+authoritative reference. Not done this session — bigger than a
+handoff edit, and restructuring mid-session risks introducing more
+drift than it removes.
+
 ---
 
 ## 4. Known issues
@@ -1850,7 +1976,10 @@ IdentityChangeController + allNotices() store extension). 030e-c
 + ack + chat-open polling). 030e-c 3d-3b DONE 2026-10-17 (`eec0ee6`
 AppRoot foreground lifecycle polling + `3dd8583` sign-test-notice.ts
 helper). All 8 acceptance steps passed on emulator (Session M entry
-records the evidence). Next: 030e-d — peer-ack visibility.**
+records the evidence). 030e-d (peer-ack visibility) DEFERRED behind
+the hardening pass (item 16). Next task: TASK-P1-038 — send-gate
+verification. The ADR argues it goes first because it is the one task
+that might reveal a hole rather than require new code.**
 
 **030e-b design questions** — RESOLVED in ADR-IDENTITY-CHANGE-001
 (`21677a9`, design), backed by migration 015 (`00f31df`, schema).
@@ -1913,6 +2042,13 @@ Original phrasing preserved below for history:
     physical hardware.
 15. Hardening: SBOM, Android redaction audit, penetration test,
     independent review.
+16. **P1 hardening pass (TASK-P1-038 → 041)** — ADR-HARDENING-001.
+    Send-gate verification (038), release-build hygiene (039), session
+    lifecycle & revocation UX (040), operator logging (041, deferred).
+    Sequence 038 → 039 → 040 → 041 per ADR §6. 030e-d deferred behind
+    this pass. Six reads at session start: `MessagingService.kt`,
+    `auth/sessions.ts`, `auth/middleware.ts`, `TransportConfig.kt`,
+    `MainActivity.kt`, `AndroidManifest.xml` + `build.gradle.kts`.
 
 **Backlog items (not scheduled):**
 - Instrumented Compose tests for admin flows (no test rule configured;
