@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-16 (Session E — TASK-P1-030 3d done: floor-aware MatrixStore.accept on Android; 030c client half closed. Next: 030e — peer identity-change notification, BLOCKED on channel decision)
+Last updated: 2026-10-17 (Session F — TASK-P1-030 030e-a done: replacement-notice schema + signing, both languages. Next: 030e-b — backend identity-change endpoints)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -44,8 +44,9 @@ Authoritative documents (all exist on disk):
 
 - Node.js 24.x, Fastify 5.12.5, PostgreSQL 16
 - Docker-deployable (docker compose up -d --build from repo root)
-- **192 tests passing** (14 test files; verified 2026-10-15 via
-  `npm test` — +12 deviceId.test.ts, +2 enrollment route tests).
+- **217 tests passing** (15 files; verified 2026-10-17 via
+  `npm test`. Grew through Sessions C–F: matrix-version, token floor,
+  enrollment floor echo, replacement-notice.)
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -84,7 +85,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 110** (verified 2026-10-16 from XML; +12 EnrollmentQrPayloadTest, +21 P1-026 MatrixVerifier/MatrixStore)
+- **JVM unit tests: 122** (verified 2026-10-17 from XML; +5 floor tests Session E, +7 ReplacementNotice Session F)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -638,6 +639,70 @@ identity-change notification + ack state. Options:
 Per Build Master §0, escalated rather than guessed. Next session
 opens on this ruling.
 
+### Session F — TASK-P1-030 030e-a landed (2026-10-17)
+
+Replacement-notice schema + signing. Two commits:
+
+- `d28c631` — TS side. `backend/src/crypto/replacement-notice.ts`
+  (validate, digest, sign, verify); `canonical-replacement-notice-
+  test-vectors.json` (R-001/002/003 populated); generator refactored
+  to process both vector files; 7 tests. Also fixes a latent
+  Buffer-key verification bug in both `replacement-notice.ts` and
+  `matrix-sign.ts`.
+- `f257e03` — Kotlin side. `ReplacementNotice.kt`,
+  `ReplacementNoticeSigner.kt`, `ReplacementNoticeTest.kt` (7 tests
+  incl. R-001 cross-language proof).
+
+**Design ruling: separate signed artifact, not a matrix field.** In
+Session E the assistant proposed embedding `contact_continuity[]` in
+the matrix schema. On opening Session F that design was rejected
+before coding. Three reasons: (a) the registry says "new protocol
+message," not "matrix field"; (b) matrix is authorization
+(machine-verified), notice is continuity (human-confirmed) —
+semantically distinct claims, different trust flows; (c) embedding
+would have forced conditional serialization to preserve W-001..W-006
+canonical bytes, optimizing for test stability rather than
+correctness. The separate artifact leaves the matrix schema untouched,
+W-001..W-006 unchanged, and each claim's trust flow independent.
+
+Signed unit (4-space indented, not a formal schema):
+
+    {"domain":"umoja.replacement-notice.v1","notice":{
+      "from_device_id":"...","from_device_auth_key":"<b64u-32>",
+      "to_device_id":"...","to_device_auth_key":"<b64u-32>",
+      "issued_at":"..."}}
+
+Same protocol as the matrix (§3.8): JCS canonicalize → SHA-256 →
+Ed25519 over the digest → base64url. R-001 vector proves both
+languages produce byte-identical canonical bytes, digest, and
+signature for the same input.
+
+**Two bugs caught during the session, both worth recording:**
+
+1. **`format: 'raw'` is not accepted by `createPublicKey` for Ed25519
+   in this Node version.** `matrix-sign.ts` had a plain-object cast
+   `as unknown as KeyObject` passed to `crypto.verify` — a type-
+   system lie that would have failed at runtime. Matrix tests never
+   exercised the Buffer path (they use KeyObjects from generated
+   keypairs), so the lie survived. The new R-001 test exercised it
+   and failed. Fix: SPKI DER wrapping (`ED25519_SPKI_PREFIX` + raw
+   32 bytes → DER → createPublicKey). Same pattern
+   `MatrixSigner.SPKI_PREFIX` already uses in Kotlin. Applied to both
+   files. Matrix 22/22 still passes.
+
+2. **Missed rename in `ReplacementNotice.kt`.** Declared
+   `RN_ISO8601_UTC_RE` but the call site said `ISO8601_UTC_RE`,
+   resolving to `AuthorizationMatrix.kt`'s file-private val →
+   compile error. Caught by an ad-hoc "absence of stale pattern"
+   regex added to the read-back. The presence-only read-back had
+   passed. §7 bullet updated.
+
+**Next: 030e-b** — backend `/identity-change-notices` +
+`/identity-change-acks` endpoints + `identity_change_notices` /
+`identity_change_acks` tables. Stores and retrieves signed artifacts;
+never decrypts, never signs. Independent of any client work. Can be
+done in one session.
+
 ---
 
 ## 4. Known issues
@@ -1085,11 +1150,11 @@ provisioning key set; enforce `highest_seen_version`
 contacts from `permitted_contacts[]`.
 
 **7. TASK-P1-030 — replacement-device flow (integrated test per
-Build Master §3.7). 3a DONE 2026-10-16 (commits `6013077` backend +
+Build Master §3.7). 3a DONE 2026-10-16 (`6013077` backend +
 `c79d7f8` registry v0.5). 3b DONE (`3dded33`). 3c DONE (`420d71f`).
-3d DONE (`71e06c7`). Next: 030e — peer identity-change notification
-+ ack state. **BLOCKED on channel decision** — see Session E entry
-for options A/B/C and the recommendation.**
+3d DONE (`71e06c7`). 030e-a DONE 2026-10-17 (`d28c631` TS +
+`f257e03` Kotlin). Next: 030e-b — backend identity-change endpoints
+(tables + routes + ack verification). Not blocked.**
 
 **After Session A:**
 
@@ -1370,10 +1435,40 @@ Rebuild after flipping — read at HttpClient construction time.
   Multi-branch methods and multiple references to the same constant
   defeat a "one per method" estimate. Count from actual code, or use
   `>= N` for intentional insertions only.
+- **Read-back must check absence of stale patterns, not just presence
+  of new ones.** Session F: `ReplacementNotice.kt` declared
+  `RN_ISO8601_UTC_RE` but the call site still used `ISO8601_UTC_RE`,
+  which resolved to `AuthorizationMatrix.kt`'s file-private val and
+  failed compile. The presence checks passed. An ad-hoc
+  absence-of-stale-pattern regex caught it. Every edit script that
+  renames an identifier should assert `old_name not in back` at the
+  end, alongside `new_name in back`.
+- **File-private helpers with common names get prefixed when a second
+  file introduces similar helpers.** `AuthorizationMatrix.kt` and
+  `ReplacementNotice.kt` both declare `requireString` and
+  `requireBase64Url32` as file-private. Kotlin resolves them
+  file-locally — fine in principle — but during editing an unprefixed
+  call site silently resolves to the wrong file's copy and fails
+  compile. Prefix the declarations (`RN_` for ReplacementNotice) so
+  wrong-file references fail visibly.
+- **The exact-count-assert pattern keeps failing.** Sessions D, E,
+  F: three consecutive sessions of miscounting (3≠4, 4≠5, 4≠5).
+  Content-count asserts are unreliable for multi-branch methods and
+  repeated references to the same constant. Replace with
+  `assert back.count(X) >= N` where N = intentional insertions. Or
+  drop content-count asserts entirely — typecheck + test already
+  proves correctness, and the read-back was meant to catch
+  edit-script bugs, not validate file content.
+- **`generated_at` timestamp changes in `canonical-matrix-test-
+  vectors.json` are committed as-is.** Running
+  `generate-matrix-vectors.ts` after any change to the generator
+  updates `generated_at`. Verify with the `MATRIX_VECTORS_IDENTICAL`
+  python check that `expected_*` fields are unchanged; commit the
+  timestamp refresh in the same commit as the generator change.
 
-Current verified state: **115 Android JVM tests** (2026-10-16),
+Current verified state: **122 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
-and **210 backend tests** (2026-10-16, 15 files), all from runner output.
+and **217 backend tests** (2026-10-17, 15 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
 infrastructure (Mac vs emulator) and must not be summed.
 
