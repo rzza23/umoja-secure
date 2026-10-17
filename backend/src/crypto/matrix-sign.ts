@@ -20,9 +20,25 @@
  * Build Master: §3.8
  * ADR: §3 (signing protocol)
  */
-import { createHash, sign, verify, type KeyObject } from 'node:crypto';
+import { createHash, sign, verify, createPublicKey, type KeyObject } from 'node:crypto';
 import { jcsCanonicalize } from './jcs.js';
 import { validateSignedMatrix, type SignedMatrix } from './matrix-schema.js';
+
+// Ed25519 SPKI DER header for a 32-byte raw public key. Same wrapper as
+// MatrixSigner.SPKI_PREFIX in Kotlin. Node's createPublicKey does not
+// accept {format: 'raw'} for Ed25519.
+const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
+
+function rawEd25519PublicKey(raw: Buffer): KeyObject {
+  if (raw.length !== 32) {
+    throw new Error(`Ed25519 public key: expected 32 raw bytes, got ${raw.length}`);
+  }
+  return createPublicKey({
+    key: Buffer.concat([ED25519_SPKI_PREFIX, raw]),
+    format: 'der',
+    type: 'spki',
+  });
+}
 
 /**
  * Compute the SHA-256 digest that gets signed.
@@ -67,8 +83,6 @@ export function verifyMatrix(
     throw new Error(`signature: expected 64 bytes, got ${sig.length}`);
   }
   // Node accepts a raw 32-byte public key Buffer directly for Ed25519.
-  const keyObj = publicKey instanceof Buffer
-    ? ({ key: publicKey, format: 'raw' as const, type: 'spki' } as unknown as KeyObject)
-    : publicKey;
+  const keyObj = publicKey instanceof Buffer ? rawEd25519PublicKey(publicKey) : publicKey;
   return verify(null, digest, keyObj, sig);
 }

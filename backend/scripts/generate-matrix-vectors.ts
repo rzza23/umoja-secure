@@ -52,7 +52,8 @@ function findRepoRoot(): string {
 }
 
 const ROOT = findRepoRoot();
-const VECTORS_PATH = join(ROOT, 'docs/reference/canonical-matrix-test-vectors.json');
+const MATRIX_VECTORS_PATH = join(ROOT, 'docs/reference/canonical-matrix-test-vectors.json');
+const NOTICE_VECTORS_PATH = join(ROOT, 'docs/reference/canonical-replacement-notice-test-vectors.json');
 
 const SEED_UTF8 = 'umoja-canonical-matrix-test-vectors-v1-DO-NOT-USE-IN-PRODUCTION';
 // PKCS8 wrapper for a 32-byte Ed25519 seed. RFC 8410.
@@ -87,11 +88,8 @@ interface Doc {
   [k: string]: unknown;
 }
 
-function main(): void {
-  const doc = JSON.parse(readFileSync(VECTORS_PATH, 'utf8')) as Doc;
-  const priv = deriveTestPrivateKey();
-  const pubB64u = rawPublicKey(priv).toString('base64url');
-
+function processDoc(path: string, priv: KeyObject, pubB64u: string): number {
+  const doc = JSON.parse(readFileSync(path, 'utf8')) as Doc;
   let filled = 0;
   for (const v of doc.vectors) {
     if (!('expected_canonical_bytes_utf8' in v)) continue;
@@ -116,15 +114,27 @@ function main(): void {
   }
 
   if (filled === 0) {
-    throw new Error('no vectors were filled — schema mismatch?');
+    throw new Error(`${path}: no vectors were filled — schema mismatch?`);
   }
 
   doc.generated = true;
   doc.generated_at = new Date().toISOString();
 
-  writeFileSync(VECTORS_PATH, JSON.stringify(doc, null, 2) + '\n');
-  console.log(`Filled ${filled} vectors. Public key: ${pubB64u}`);
-  console.log(`Wrote: ${VECTORS_PATH}`);
+  writeFileSync(path, JSON.stringify(doc, null, 2) + '\n');
+  return filled;
+}
+
+function main(): void {
+  const priv = deriveTestPrivateKey();
+  const pubB64u = rawPublicKey(priv).toString('base64url');
+
+  const matrixFilled = processDoc(MATRIX_VECTORS_PATH, priv, pubB64u);
+  console.log(`Matrix vectors filled: ${matrixFilled}`);
+
+  const noticeFilled = processDoc(NOTICE_VECTORS_PATH, priv, pubB64u);
+  console.log(`Notice vectors filled: ${noticeFilled}`);
+
+  console.log(`Public key: ${pubB64u}`);
 }
 
 main();

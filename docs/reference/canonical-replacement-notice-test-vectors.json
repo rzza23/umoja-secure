@@ -1,0 +1,87 @@
+{
+  "document": "canonical-replacement-notice-test-vectors",
+  "version": "0.1",
+  "date": "2026-10-17",
+  "status": "populated",
+  "generated": true,
+  "authority": "UMOJA-SECURE-BUILD-MASTER.md v1.4.2 §3.7 and §3.8",
+  "purpose": "Known-input/known-output pairs for the replacement-notice signing protocol. Same protocol as the authorization matrix: JCS-canonicalize the wrapper, SHA-256 digest, Ed25519 sign the digest. Both the offline signer and the Android verifier must produce byte-identical canonical bytes, digests, and signatures for every vector.",
+  "signed_object_shape": {
+    "description": "The signed unit is the wrapper with domain separation.",
+    "example": {
+      "domain": "umoja.replacement-notice.v1",
+      "notice": {}
+    },
+    "canonicalization": "RFC 8785 JCS",
+    "digest": "SHA-256 over the JCS-canonical bytes of the wrapper",
+    "signature": "Ed25519 over the 32-byte digest (standard Ed25519, NOT Ed25519ph)",
+    "signature_encoding": "base64url, no padding"
+  },
+  "test_only_key_derivation": {
+    "note": "Same test key as canonical-matrix-test-vectors.json. Same seed, same info string.",
+    "seed_utf8": "umoja-canonical-matrix-test-vectors-v1-DO-NOT-USE-IN-PRODUCTION",
+    "info_utf8": "ed25519-test-key",
+    "kdf": "HKDF-SHA256 with empty salt, 32 bytes",
+    "expected_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M"
+  },
+  "vectors": [
+    {
+      "id": "R-001",
+      "description": "Baseline. Single replacement, valid keys.",
+      "type": "positive",
+      "input_wrapper": {
+        "domain": "umoja.replacement-notice.v1",
+        "notice": {
+          "from_device_id": "device-old-001",
+          "from_device_auth_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "to_device_id": "device-new-002",
+          "to_device_auth_key": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "issued_at": "2026-10-17T00:00:00Z"
+        }
+      },
+      "expected_canonical_bytes_utf8": "{\"domain\":\"umoja.replacement-notice.v1\",\"notice\":{\"from_device_auth_key\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"from_device_id\":\"device-old-001\",\"issued_at\":\"2026-10-17T00:00:00Z\",\"to_device_auth_key\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"to_device_id\":\"device-new-002\"}}",
+      "expected_sha256_digest_hex": "e1e8fa2e6d7b3194c8365f175b13003f33c38779ca889c8aab542bc52f38eabd",
+      "expected_ed25519_signature_base64url": "2PVrLw3ft1vdYkzjkRFWzdjLd9OlggDT5rtxrcJeY2UzSygqI6-l_tFQfusPyAiYB11SLwvOR14FwPVY7tl4CQ",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M"
+    },
+    {
+      "id": "R-002",
+      "description": "Single-character device IDs. Minimal field values.",
+      "type": "positive",
+      "input_wrapper": {
+        "domain": "umoja.replacement-notice.v1",
+        "notice": {
+          "from_device_id": "a",
+          "from_device_auth_key": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+          "to_device_id": "b",
+          "to_device_auth_key": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+          "issued_at": "2026-10-17T00:00:00Z"
+        }
+      },
+      "expected_canonical_bytes_utf8": "{\"domain\":\"umoja.replacement-notice.v1\",\"notice\":{\"from_device_auth_key\":\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\",\"from_device_id\":\"a\",\"issued_at\":\"2026-10-17T00:00:00Z\",\"to_device_auth_key\":\"DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD\",\"to_device_id\":\"b\"}}",
+      "expected_sha256_digest_hex": "b59d1ae40db07b86fd6f5d5dd7ebe9d3384041f59f653f9e8ff733aaec9719c4",
+      "expected_ed25519_signature_base64url": "-YUrfwo4d4ne5X9cmLVsrXo7tPgbMld2TzkUTt_XzxBElt8ubCBo_-HYx9pnn-pPoZMGviocqXH-4oJ4bPBoBw",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M"
+    },
+    {
+      "id": "R-003",
+      "description": "Fractional seconds in issued_at, testing ISO 8601 with .NNN.",
+      "type": "positive",
+      "input_wrapper": {
+        "domain": "umoja.replacement-notice.v1",
+        "notice": {
+          "from_device_id": "device-old-003",
+          "from_device_auth_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "to_device_id": "device-new-004",
+          "to_device_auth_key": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "issued_at": "2026-10-17T12:34:56.789Z"
+        }
+      },
+      "expected_canonical_bytes_utf8": "{\"domain\":\"umoja.replacement-notice.v1\",\"notice\":{\"from_device_auth_key\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"from_device_id\":\"device-old-003\",\"issued_at\":\"2026-10-17T12:34:56.789Z\",\"to_device_auth_key\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"to_device_id\":\"device-new-004\"}}",
+      "expected_sha256_digest_hex": "8ecc727a7c75d15d04b61f366733a3ec7c0744ca1a9a0e0d2e9c3eb5a949ebb8",
+      "expected_ed25519_signature_base64url": "5rdvP4XWhChEfYcS0II_3JAnWOlnZu5WTyYmh1MaEaqqJwzCg32mH_nxEpMBpjiRQbnGa8gUtcvVkvr-ZKXDCg",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M"
+    }
+  ],
+  "generated_at": "2026-10-17T04:07:47.588Z"
+}
