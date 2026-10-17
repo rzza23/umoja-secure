@@ -1,9 +1,9 @@
-# US-TASK-P1-001-v0.5 — Phase 1 Task Registry Reconciliation
+# US-TASK-P1-001-v0.6 — Phase 1 Task Registry Reconciliation
 
 Document ID: US-TASK-P1-001
-Version: 0.5
+Version: 0.6
 Date: October 2026
-Supersedes: v0.4
+Supersedes: v0.5
 Purpose: Reconcile the Phase 1 task registry with UMOJA-SECURE-BUILD-MASTER.md v1.4.2.
 Authority: Derived from US-MASTER-001 + US-ADD-001. Cannot override them.
 
@@ -127,6 +127,288 @@ Authority: Derived from US-MASTER-001 + US-ADD-001. Cannot override them.
 - TEST-RECKEY-010: Conflicting same-version notices: second rejected.
 
 **Status:** Proposed
+
+### TASK-P1-036: Provisioning-key rotation and recovery-key revocation notice handling
+
+**Phase:** 1
+**Priority:** Critical
+**Dependencies:** TASK-P1-026, TASK-P1-029, TASK-P1-033, TASK-P1-035
+**Security classification:** Internal
+
+**Objective and non-goals:**
+- Handle two client-side notice types: `key_rotation` and
+  `key_revocation`.
+- `key_rotation`: signed by the current provisioning key. On receipt,
+  store the new key as `previous_provisioning_pubkey` and open the
+  overlap window during which both keys are trusted for matrix
+  verification.
+- `key_revocation`: signed by the recovery key. On receipt, revoke the
+  specified provisioning key; reject matrices signed by it after the
+  revocation is processed.
+- Enforce monotonic `recovery_key_version`: reject notices with
+  `version <= highest_recovery_key_version`.
+- P1-026 shipped the seams: `previous_provisioning_pubkey` and
+  `highest_recovery_key_version` SecureStorage keys exist but are
+  never written; `verifyMatrix` takes `Set<PublicKey>`. This task
+  implements the handlers.
+- Per ADR-PROVISIONING-001 §3.6 (rotation ceremony) and §3.7
+  (recovery-key authorization).
+- Do NOT implement the key custody ceremony (TASK-P1-029,
+  TASK-P1-035 own that). Do NOT implement notice transport.
+
+**Acceptance criteria:**
+- [ ] `key_rotation` handler verifies signature against
+      `current_provisioning_pubkey`; on success, sets
+      `previous_provisioning_pubkey = current_provisioning_pubkey`,
+      `current_provisioning_pubkey = new_key`, opens overlap window of
+      documented duration.
+- [ ] During overlap: matrices signed by either key accepted.
+- [ ] After overlap closes: previous key no longer trusted.
+- [ ] `key_revocation` handler verifies signature against
+      `recovery_pubkey`; on success, records revoked key, rejects
+      matrices signed by it after the revocation is processed.
+- [ ] Monotonic `recovery_key_version`: `version <=
+      highest_recovery_key_version` → reject, no state change.
+- [ ] Overlap window duration documented in ADR or KDoc, not a
+      hardcoded magic number.
+- [ ] Fail-closed: rotation notice arriving before handler exists is
+      ignored; `previous_provisioning_pubkey` stays absent — no silent
+      acceptance.
+
+**Required tests:**
+- TEST-ROTATION-ACCEPT-CURRENT-KEY-MATRIX
+- TEST-ROTATION-ACCEPT-PREVIOUS-KEY-DURING-OVERLAP
+- TEST-ROTATION-REJECT-PREVIOUS-KEY-AFTER-OVERLAP
+- TEST-ROTATION-REJECT-BAD-SIGNATURE
+- TEST-REVOCATION-ACCEPT-AFTER-RECOVERY-KEY-SIGNED-NOTICE
+- TEST-REVOCATION-REJECT-MATRIX-AFTER-REVOCATION
+- TEST-REVOCATION-ROLLBACK-REJECTED
+
+**Status:** Proposed
+
+---
+
+### TASK-P1-037: Matrix transport
+
+**Phase:** 1
+**Priority:** High
+**Dependencies:** TASK-P1-026, TASK-P1-033
+**Security classification:** Internal
+
+**Objective and non-goals:**
+- Implement the delivery channel for signed matrices from the offline
+  signer to enrolled devices.
+- Backend: `GET /me/matrix` returns the current signed matrix for the
+  caller's `device_id` (per-device, since each matrix binds to a
+  specific device).
+- Client: fetch on app start (in `Authenticated` state) and on-demand;
+  verify against pinned provisioning key; feed to
+  `MatrixStore.accept()`.
+- Authority comes from the signature and the pinned key, not the
+  transport (THREAT-MODEL-001 §7, ADR-PROVISIONING-001 §2 Q3). HTTP is
+  chosen for operational simplicity, not security necessity.
+- Blocks TASK-P1-030f (integrated test steps 5 and 7 push a matrix to a
+  device).
+- Do NOT replace the signature-based trust model. Do NOT add
+  push-notification (polling suffices for Phase 1).
+
+**Acceptance criteria:**
+- [ ] Backend `GET /me/matrix` returns
+      `{canonical_utf8, signature_base64url}` for caller's `device_id`
+      only.
+- [ ] Route-level tests: returns caller's matrix, rejects cross-device
+      requests, 404 when no matrix exists for the device.
+- [ ] Client `MatrixApi.fetch(sessionToken)` in `transport/`.
+- [ ] On `Authenticated` state entry: fetch and call
+      `MatrixStore.accept()`.
+- [ ] Verification failure on fetch does NOT crash; logs and continues
+      (existing matrix remains valid).
+- [ ] Unblocks TASK-P1-030f integration test.
+
+**Required tests:**
+- TEST-MATRIX-TRANSPORT-FETCH
+- TEST-MATRIX-TRANSPORT-CROSS-DEVICE-REJECTED
+- TEST-MATRIX-TRANSPORT-VERIFY-ON-RECEIPT
+- TEST-MATRIX-TRANSPORT-STORE-ON-VERIFY-SUCCESS
+
+**Status:** Proposed
+
+---
+
+### TASK-P1-038: Send-path matrix enforcement verification
+
+**Phase:** 1
+**Priority:** Critical
+**Dependencies:** TASK-P1-026, TASK-P1-007
+**Security classification:** Internal
+
+**Objective and non-goals:**
+- Verify that `MessagingService.sendMessage` gates outbound sends on the
+  client-side accepted matrix's `permitted_contacts`. The P1-026 KDoc
+  records the design intent ("contacts are a projection of the verified
+  matrix, not a trust source") but the enforcement path has not been
+  verified. **[VERIFY AT IMPLEMENTATION]** whether the gate exists.
+- If the gate exists: add regression tests proving it holds.
+- If the gate is missing: implement it in `MessagingService.sendMessage`,
+  with a distinct error type and a UI treatment matching the 030e-c
+  blocked-send banner pattern.
+- Do NOT redesign the send path. Do NOT touch `ContactsApi`. Do NOT
+  re-litigate the matrix-as-authority ruling.
+
+**Acceptance criteria:**
+- [ ] Evidence recorded: either "gate exists at [file:line], tests
+      confirm" or "gate missing, implementation applied, tests confirm."
+- [ ] `TEST-SEND-GATE-EXCLUDED-PEER` — peer not in `permitted_contacts`
+      rejected before envelope queuing.
+- [ ] `TEST-SEND-GATE-PERMITTED-PEER` — allowed path still works
+      end-to-end.
+- [ ] No regression in existing send-path behaviour.
+
+**Required tests:**
+- TEST-SEND-GATE-EXCLUDED-PEER
+- TEST-SEND-GATE-PERMITTED-PEER
+
+**Status:** Proposed
+
+---
+
+### TASK-P1-039: Release-build hardening
+
+**Phase:** 1
+**Priority:** Critical
+**Dependencies:** TASK-P1-013, TASK-P1-014
+**Security classification:** Internal
+
+**Objective and non-goals:**
+- Close release-build hygiene gaps that make a fielded APK unsafe or
+  unusable when screenshotted, restored from backup, minified, or run
+  with a misconfigured transport.
+- Each criterion is **verification-first**: read current state, close if
+  open, mark complete if already present. Do NOT add what already
+  exists.
+- Do NOT add obfuscation, certificate pinning, or Play Protect
+  compatibility.
+
+**Acceptance criteria:**
+- [ ] `FLAG_SECURE` set on `ChatScreen`, `AdminScreen`,
+      `DiagnosticsScreen`. **[VERIFY AT IMPLEMENTATION]** — UI audit to
+      confirm the screen set is correct and no additional sensitive
+      surface is missed.
+- [ ] `android:allowBackup="false"` and `android:fullBackupContent="false"`
+      in `AndroidManifest.xml`.
+- [ ] `minifyEnabled=true` in release `buildTypes`, ProGuard rules
+      verified against libsignal cold-start.
+- [ ] `debuggable=false` in release (explicit, not AGP-default assumed).
+- [ ] `TransportConfig.useTor` cannot be `false` in release. If
+      already enforced, verified present. If mutable, converted to
+      `val` initialized from `BuildConfig.DEBUG`. **[VERIFY AT
+      IMPLEMENTATION]**
+- [ ] Release APK built, installed on emulator, completes smoke path:
+      launch, enroll, chat, send, receive.
+
+**Required tests:**
+- TEST-RELEASE-SCREENSHOT-BLOCKED (manual: `adb shell screencap` on a
+  secured screen returns black or fails)
+- TEST-RELEASE-BACKUP-DISABLED (manual: `adb backup` returns no app
+  data)
+- TEST-RELEASE-MINIFIED-SMOKE (manual: install release APK, cold-start,
+  enroll, send)
+- TEST-RELEASE-TOR-MANDATORY (unit: `TransportConfig` with
+  `useTor=false` in release build throws or routes to fatal screen)
+
+**Status:** Proposed
+
+---
+
+### TASK-P1-040: Session lifecycle & revocation UX
+
+**Phase:** 1
+**Priority:** Critical
+**Dependencies:** TASK-P1-014, TASK-P1-020
+**Security classification:** Internal
+
+**Objective and non-goals:**
+- Close the two session-failure paths that strand a fielded user:
+  expired-session 401s with no recovery, and revoked-device 401s
+  indistinguishable from expiry. The two are one state machine, not two
+  fixes.
+- Do NOT add session token rotation. Do NOT add refresh-token
+  architecture. Do NOT change session TTL (16h is a Phase 1 ruling).
+- Do NOT re-review `lookupSession`'s filter (covered by
+  `TEST-ACK-REVOKED-DEVICE`).
+
+**Backend dependency (in scope for this task).**
+- The client cannot distinguish "expired" from "revoked" from a plain
+  401 today. **[VERIFY AT IMPLEMENTATION]** the exact shape of
+  `lookupSession`'s rejection path. Add a distinct error code
+  (`device_revoked`) to 401 responses when `status != 'active'`.
+  Backend change precedes the client state machine in the same session.
+
+**Acceptance criteria (per ADR-HARDENING-001 §2):**
+- [ ] 401 from any API → one challenge-response re-auth, retried once,
+      transparent to the user.
+- [ ] Concurrent 401s → exactly one re-auth attempt (single-flight
+      mutex).
+- [ ] Re-auth rejected with `device_revoked` → `AppScreen.Revoked`,
+      terminal, clear messaging, no retry loop.
+- [ ] Re-auth fails on transport → "connection lost, retry" state, not
+      "auth error."
+- [ ] Re-auth 401 with `active` device status (backend inconsistency,
+      should be impossible) → `AppScreen.EnrollmentRequired`.
+- [ ] App-start: `sessionExpiresAt` in the past → silent re-auth, not a
+      button tap.
+- [ ] Documented state diagram in the ADR shows every terminal and
+      non-terminal state.
+
+**Required tests:**
+- TEST-SESSION-EXPIRED-AUTO-REAUTH (JVM: mock 401, assert challenge →
+  verify → retry)
+- TEST-SESSION-CONCURRENT-401-SINGLE-REAUTH (JVM: 5 parallel 401s,
+  assert 1 re-auth)
+- TEST-SESSION-REVOKED-TERMINAL (JVM: 401 with `device_revoked`,
+  assert Revoked state, no retry)
+- TEST-SESSION-NETWORK-DURING-REAUTH (JVM: re-auth network failure,
+  assert retryable state)
+- TEST-SESSION-APP-START-EXPIRED (manual: force expiry to past, launch
+  app, observe silent re-auth)
+- TEST-SESSION-REVOKED-ON-DEVICE (manual: revoke via admin, wait for
+  next API call, observe terminal screen)
+
+**Status:** Proposed
+
+---
+
+### TASK-P1-041: Failed-verification operator logging
+
+**Phase:** 1
+**Priority:** Medium
+**Dependencies:** TASK-P1-026, TASK-P1-030
+**Security classification:** Internal
+
+**Objective and non-goals:**
+- Local, user-diagnostics-visible log of verification failures (matrix
+  rejected, notice rejected, ack POST rejected). Operator investigating
+  "did my peer receive this" has a client-side signal.
+- Do NOT add backend logs. Do NOT add telemetry. Do NOT extend the
+  server-side audit.
+- Deferred from the initial hardening pass; filed for the
+  operator-facing story, not blocking fieldable.
+
+**Acceptance criteria:**
+- [ ] On signature verification failure, a local entry is recorded:
+      timestamp, artifact type, reason code, truncated canonical bytes.
+- [ ] `DiagnosticsScreen` surfaces the last N entries.
+- [ ] Entries are cleared by the corresponding store's `clear()`
+      (matrix-store wipe clears matrix-failure log; notice-store wipe
+      clears notice-failure log).
+
+**Required tests:**
+- TEST-DIAG-VERIFICATION-FAILURE-LOGGED
+- TEST-DIAG-VERIFICATION-LOG-CLEARED-ON-WIPE
+
+**Status:** Proposed — deferred from initial hardening pass
+
+---
 
 ---
 
@@ -304,7 +586,7 @@ comparison is admin-error-catching, not adversary-catching.
 
 ---
 
-## §C — REGISTRY INDEX (v0.5 FINAL)
+## §C — REGISTRY INDEX (v0.6 FINAL)
 
 | ID | Title | Stage | Status |
 |----|-------|-------|--------|
@@ -344,8 +626,14 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-033 | Offline provisioning-key signing workflow | 3.5 | New |
 | TASK-P1-034 | Hardware-backed Ed25519 Keystore verification | 2 | New |
 | TASK-P1-035 | Organization recovery key | 3.5 | New |
+| TASK-P1-036 | Provisioning-key rotation & recovery-key revocation notices | 3.5 | Proposed |
+| TASK-P1-037 | Matrix transport | 3.5 | Proposed |
+| TASK-P1-038 | Send-path matrix enforcement verification | 1 | Proposed |
+| TASK-P1-039 | Release-build hardening | 1 | Proposed |
+| TASK-P1-040 | Session lifecycle & revocation UX | 1 | Proposed |
+| TASK-P1-041 | Failed-verification operator logging | 1 | Proposed |
 
-**Total Phase 1 task identifiers:** 36 (001–020, 021a, 021b, 022–035).
+**Total Phase 1 task identifiers:** 42 (001–020, 021a, 021b, 022–041).
 
 **Execution order (dependency-respecting):**
 TASK-P1-001 → TASK-P1-002 → TASK-P1-027 → TASK-P1-032 → TASK-P1-003 → TASK-P1-034 → TASK-P1-004 → TASK-P1-005 → TASK-P1-006 → TASK-P1-013 → TASK-P1-007 → TASK-P1-008 → TASK-P1-025 → TASK-P1-026 → TASK-P1-029 → TASK-P1-033 → TASK-P1-035 → TASK-P1-014 → TASK-P1-015 → TASK-P1-016 → TASK-P1-009 → TASK-P1-010 → TASK-P1-011 → TASK-P1-012 → TASK-P1-019 → TASK-P1-020 → TASK-P1-021a → TASK-P1-021b → TASK-P1-030 → TASK-P1-017 → TASK-P1-018 → TASK-P1-022 → TASK-P1-023 → TASK-P1-024 → TASK-P1-028 → TASK-P1-031
