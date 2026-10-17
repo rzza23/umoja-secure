@@ -1,9 +1,9 @@
-# US-TASK-P1-001-v0.4 — Phase 1 Task Registry Reconciliation
+# US-TASK-P1-001-v0.5 — Phase 1 Task Registry Reconciliation
 
 Document ID: US-TASK-P1-001
-Version: 0.4
+Version: 0.5
 Date: October 2026
-Supersedes: v0.3
+Supersedes: v0.4
 Purpose: Reconcile the Phase 1 task registry with UMOJA-SECURE-BUILD-MASTER.md v1.4.2.
 Authority: Derived from US-MASTER-001 + US-ADD-001. Cannot override them.
 
@@ -252,9 +252,59 @@ For each: generation ceremony, storage location, access control (split control f
 - TEST-REPLACE-009: After accepting v2 at enrollment, subsequent push of v2 rejected.
 - TEST-REPLACE-010: After accepting v2 at enrollment, push of v1 rejected.
 
+**Sub-task breakdown (v0.5, 2026-10-16).**
+
+P1-030 is six sessions of work, not one. Sub-tasks are numbered 030a–030f.
+Each lands as its own commit; the integrated test (030f) is the last.
+KI-018 (backend has no current matrix version) was a hard prerequisite
+for 030b and was closed by 030a.
+
+- **P1-030a — Backend tracks current matrix version per org.** Closes KI-018.
+  Migration 013 adds `org_matrix_versions` (one row per org: `current_version`,
+  `asserted_at`, `asserted_by_device_id`). New endpoints `GET /admin/matrix-version`
+  and `POST /admin/matrix-version` (`requireAdmin`); state-changing assertions
+  write `matrix_version.asserted` to the audit chain in the same transaction.
+  Idempotent assertions (same version) write no audit event. **DONE: commit
+  `6013077` (2026-10-16).**
+- **P1-030b — Migration: `enrollment_matrix_version_floor` on
+  `enrollment_tokens`.** Issuance records the current version (030a's state)
+  at the moment the token is created. Column is nullable; floor semantics
+  apply only to tokens issued after this migration.
+- **P1-030c — `POST /enrollment` response carries the floor.** Client stores
+  it alongside the enrolled device identity; it is read once at matrix
+  acceptance time and never re-read.
+- **P1-030d — `MatrixStore.accept` gains floor-aware mode.** Accepts
+  `version >= floor` during initial enrollment (replacement device),
+  strictly-greater thereafter. Current implementation (P1-026) is
+  strictly-greater always. `highest_seen_version` initializes to the
+  accepted version on first acceptance.
+- **P1-030e — Peer identity-change notification + ack state.** New protocol
+  message carrying old and new device keys. Peers block sending to the
+  replacement device until they acknowledge. Channel decision pending
+  (see Transport caveat).
+- **P1-030f — Integrated test per Build Master §3.7.** The 11-step
+  scenario. Depends on 030a–030e being complete.
+
+**Transport caveat (v0.5).** Steps 5 and 7 of the §3.7 integrated test
+push a matrix to a device. No delivery transport exists (TASK-P1-037).
+Interim path for 030f: the P1-026 Diagnostics debug paste field, since
+floor semantics are orthogonal to transport. Steps 8–9 (identity-change
+notification) are peer-to-peer and likely need a real channel; decision
+pending.
+
+**Framing (v0.5, load-bearing).** 030a's endpoint records an admin-asserted,
+unverified claim. The admin app builds the matrix and chooses the version;
+the offline signer signs whatever bytes it's handed. Both the floor and the
+current-version come from the same party in Phase 1. The endpoint is not
+attack-prevention. Its purpose is cross-session and cross-admin audit —
+catching "the new admin doesn't know what the last admin signed." In
+single-admin single-session it catches nothing. Anti-rollback enforcement
+is client-side (`MatrixStore.highestSeenVersion`, P1-026). The server-side
+comparison is admin-error-catching, not adversary-catching.
+
 ---
 
-## §C — REGISTRY INDEX (v0.4 FINAL)
+## §C — REGISTRY INDEX (v0.5 FINAL)
 
 | ID | Title | Stage | Status |
 |----|-------|-------|--------|
