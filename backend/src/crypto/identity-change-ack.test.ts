@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import * as ed from '@noble/ed25519';
 import {
   IDENTITY_CHANGE_ACK_DOMAIN,
   IdentityChangeAckError,
@@ -7,9 +10,21 @@ import {
   validateIdentityChangeAck,
   type SignedIdentityChangeAck,
 } from './identity-change-ack.js';
+import { jcsCanonicalize } from './jcs.js';
 
 const VALID_NOTICE_HASH = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const VALID_DEVICE_ID = '11111111-1111-1111-1111-111111111111';
+
+function findRepoRoot(): string {
+  let dir = process.cwd();
+  for (let i = 0; i < 12; i++) {
+    if (existsSync(join(dir, 'UMOJA-SECURE-BUILD-MASTER.md'))) return dir;
+    const parent = join(dir, '..');
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error('could not find repo root');
+}
 
 function validAck(): SignedIdentityChangeAck {
   return {
@@ -68,5 +83,52 @@ describe('identity-change-ack validator', () => {
     const expected = createHash('sha256').update(raw, 'utf8').digest();
     expect(identityChangeAckDigest(raw).equals(expected)).toBe(true);
     expect(identityChangeAckDigest(Buffer.from(raw, 'utf8')).equals(expected)).toBe(true);
+  });
+});
+
+describe('cross-language vector agreement', () => {
+  it('TEST-ACK-VECTOR-A001 canonical bytes, digest, and signature match TS reference', async () => {
+    const path = join(
+      findRepoRoot(),
+      'docs/reference/canonical-identity-change-ack-test-vectors.json',
+    );
+    const doc = JSON.parse(readFileSync(path, 'utf8')) as {
+      vectors: Array<Record<string, unknown>>;
+    };
+    const v = doc.vectors.find((x) => x.id === 'A-001');
+    expect(v, 'A-001 vector missing').toBeDefined();
+
+    const expected = v!.expected_canonical_bytes_utf8 as string | null;
+    expect(
+      expected,
+      'A-001 expected_canonical_bytes_utf8 not populated — run generate-matrix-vectors.ts',
+    ).not.toBeNull();
+
+    const validated = validateIdentityChangeAck(v!.input_wrapper);
+    const actual = jcsCanonicalize(validated).toString('utf8');
+    expect(actual).toBe(expected);
+
+    const expectedDigest = v!.expected_sha256_digest_hex as string;
+    const canonicalBuf = Buffer.from(actual, 'utf8');
+    const actualDigest = createHash('sha256')
+      .update(canonicalBuf)
+      .digest('hex');
+    expect(actualDigest).toBe(expectedDigest);
+    // identityChangeAckDigest takes RAW bytes (not a parsed object) —
+    // that is the whole point of the ack-vs-notice digest contract:
+    // backend verifies byte-identity against what was signed.
+    expect(identityChangeAckDigest(canonicalBuf).toString('hex')).toBe(expectedDigest);
+
+    const pubRaw = Buffer.from(
+      v!.expected_provisioning_public_key_base64url as string,
+      'base64url',
+    );
+    const sigBytes = Buffer.from(
+      v!.expected_ed25519_signature_base64url as string,
+      'base64url',
+    );
+    const digestBytes = identityChangeAckDigest(canonicalBuf);
+    const ok = await ed.verifyAsync(sigBytes, digestBytes, pubRaw);
+    expect(ok).toBe(true);
   });
 });

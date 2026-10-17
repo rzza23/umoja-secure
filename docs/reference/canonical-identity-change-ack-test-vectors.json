@@ -1,0 +1,48 @@
+{
+  "document": "canonical-identity-change-ack-test-vectors",
+  "version": "0.1",
+  "date": "2026-10-17",
+  "status": "populated",
+  "generated": true,
+  "authority": "UMOJA-SECURE-BUILD-MASTER.md v1.4.2 §3.7, ADR-IDENTITY-CHANGE-001 §3",
+  "purpose": "Known-input/known-output pairs for the identity-change-ack signing protocol. Same protocol as the matrix and replacement-notice: JCS-canonicalize the wrapper, SHA-256 digest, Ed25519 sign the digest. The Kotlin client signer must produce byte-identical canonical bytes, digest, and signature to the TS reference.",
+  "signed_object_shape": {
+    "description": "The signed unit is the wrapper with domain separation.",
+    "example": {
+      "domain": "umoja.identity-change-ack.v1",
+      "ack": {}
+    },
+    "canonicalization": "RFC 8785 JCS",
+    "digest": "SHA-256 over the JCS-canonical bytes of the wrapper",
+    "signature": "Ed25519 over the 32-byte digest (standard Ed25519, NOT Ed25519ph)",
+    "signature_encoding": "base64url, no padding"
+  },
+  "test_only_key_derivation": {
+    "note": "Same test key as canonical-matrix-test-vectors.json and canonical-replacement-notice-test-vectors.json. Same seed, same info string.",
+    "seed_utf8": "umoja-canonical-matrix-test-vectors-v1-DO-NOT-USE-IN-PRODUCTION",
+    "info_utf8": "ed25519-test-key",
+    "kdf": "HKDF-SHA256 with empty salt, 32 bytes",
+    "expected_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M"
+  },
+  "vectors": [
+    {
+      "id": "A-001",
+      "description": "Baseline. Valid ack with accept decision.",
+      "type": "positive",
+      "input_wrapper": {
+        "domain": "umoja.identity-change-ack.v1",
+        "ack": {
+          "notice_hash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "acking_device_id": "11111111-1111-1111-1111-111111111111",
+          "decision": "accept",
+          "issued_at": "2026-10-17T00:00:00Z"
+        }
+      },
+      "expected_canonical_bytes_utf8": "{\"ack\":{\"acking_device_id\":\"11111111-1111-1111-1111-111111111111\",\"decision\":\"accept\",\"issued_at\":\"2026-10-17T00:00:00Z\",\"notice_hash\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"},\"domain\":\"umoja.identity-change-ack.v1\"}",
+      "expected_sha256_digest_hex": "09c3740b30a104562ed43c7b3aba6d8d2772c7f3af9941c5bce74117f33cc1f6",
+      "expected_ed25519_signature_base64url": "HomaTOG_jUh9CeK2uFmH9yH9Pu4qTQGrbEKfQ7g1Es9myaDxnfDNtFQXr8M6NZDQOypXAvWQM_OVm1HAFKskCg",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M"
+    }
+  ],
+  "generated_at": "2026-10-17T07:14:41.180Z"
+}
