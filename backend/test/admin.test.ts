@@ -397,6 +397,164 @@ describe('admin plane', () => {
     });
   });
 
+  describe('enrollment token floor (TASK-P1-030 3b)', () => {
+    beforeEach(async () => {
+      await pool.query('DELETE FROM org_matrix_versions WHERE org_id = $1', [TEST_ORG_ID]);
+    });
+
+    it('TEST-TOKEN-FLOOR-STAMPED stamps current version at issuance', async () => {
+      const admin = await createAuthedDevice('admin');
+
+      const assertRes = await app.inject({
+        method: 'POST',
+        url: '/admin/matrix-version',
+        headers: { authorization: `Bearer ${admin.token}` },
+        payload: { version: 3 },
+      });
+      expect(assertRes.statusCode).toBe(200);
+
+      const tokenRes = await app.inject({
+        method: 'POST',
+        url: '/admin/enrollment-tokens',
+        headers: { authorization: `Bearer ${admin.token}` },
+        payload: {
+          role: 'user',
+          ttl_seconds: 3600,
+          bound_public_key: randomBytes(32).toString('base64url'),
+        },
+      });
+      expect(tokenRes.statusCode).toBe(201);
+      expect(tokenRes.json().enrollment_matrix_version_floor).toBe(3);
+
+      const db = await pool.query(
+        'SELECT enrollment_matrix_version_floor FROM enrollment_tokens WHERE token_id = $1',
+        [tokenRes.json().token_id],
+      );
+      expect(db.rows[0].enrollment_matrix_version_floor).toBe(3);
+    });
+
+    it('TEST-TOKEN-FLOOR-NULL-WHEN-NO-STATE null when org has no assertion', async () => {
+      const admin = await createAuthedDevice('admin');
+
+      const tokenRes = await app.inject({
+        method: 'POST',
+        url: '/admin/enrollment-tokens',
+        headers: { authorization: `Bearer ${admin.token}` },
+        payload: {
+          role: 'user',
+          ttl_seconds: 3600,
+          bound_public_key: randomBytes(32).toString('base64url'),
+        },
+      });
+      expect(tokenRes.statusCode).toBe(201);
+      expect(tokenRes.json().enrollment_matrix_version_floor).toBeNull();
+
+      const db = await pool.query(
+        'SELECT enrollment_matrix_version_floor FROM enrollment_tokens WHERE token_id = $1',
+        [tokenRes.json().token_id],
+      );
+      expect(db.rows[0].enrollment_matrix_version_floor).toBeNull();
+    });
+
+    it('TEST-TOKEN-FLOOR-FROZEN stamps at issuance, not at read', async () => {
+      const admin = await createAuthedDevice('admin');
+
+      await app.inject({
+        method: 'POST',
+        url: '/admin/matrix-version',
+        headers: { authorization: `Bearer ${admin.token}` },
+        payload: { version: 3 },
+      });
+      const tokenA = await app.inject({
+        method: 'POST',
+        url: '/admin/enrollment-tokens',
+        headers: { authorization: `Bearer ${admin.token}` },
+        payload: {
+          role: 'user',
+          ttl_seconds: 3600,
+          bound_public_key: randomBytes(32).toString('base64url'),
+        },
+      });
+      expect(tokenA.json().enrollment_matrix_version_floor).toBe(3);
+
+      await app.inject({
+        method: 'POST',
+        url: '/admin/matrix-version',
+        headers: { authorization: `Bearer ${admin.token}` },
+        payload: { version: 7 },
+      });
+      const tokenB = await app.inject({
+        method: 'POST',
+        url: '/admin/enrollment-tokens',
+        headers: { authorization: `Bearer ${admin.token}` },
+        payload: {
+          role: 'user',
+          ttl_seconds: 3600,
+          bound_public_key: randomBytes(32).toString('base64url'),
+        },
+      });
+      expect(tokenB.json().enrollment_matrix_version_floor).toBe(7);
+
+      const reRead = await pool.query(
+        `SELECT token_id, enrollment_matrix_version_floor FROM enrollment_tokens
+         WHERE token_id = ANY($1)`,
+        [[tokenA.json().token_id, tokenB.json().token_id]],
+      );
+      const byId: Record<string, number | null> = Object.fromEntries(
+        reRead.rows.map((r) => [
+          r.token_id as string,
+          r.enrollment_matrix_version_floor as number | null,
+        ]),
+      );
+      expect(byId[tokenA.json().token_id]).toBe(3);
+      expect(byId[tokenB.json().token_id]).toBe(7);
+    });
+
+    it('TEST-TOKEN-FLOOR-CONSTRAINT rejects floor = 0 at DB level', async () => {
+      await expect(
+        pool.query(
+          `INSERT INTO enrollment_tokens
+             (token_hash, org_id, role, expires_at, created_by,
+              bound_public_key, enrollment_matrix_version_floor)
+           VALUES ($1, $2, 'user', now() + interval '1 hour', $3, $4, 0)`,
+          [randomBytes(32), TEST_ORG_ID, randomUUID(), randomBytes(32)],
+        ),
+      ).rejects.toThrow(/check constraint|enrollment_matrix_version_floor/i);
+    });
+
+    it('TEST-TOKEN-FLOOR-AUDIT floor appears in audit payload', async () => {
+      const admin = await createAuthedDevice('admin');
+
+      await app.inject({
+        method: 'POST',
+        url: '/admin/matrix-version',
+        headers: { authorization: `Bearer ${admin.token}` },
+        payload: { version: 5 },
+      });
+
+      await app.inject({
+        method: 'POST',
+        url: '/admin/enrollment-tokens',
+        headers: { authorization: `Bearer ${admin.token}` },
+        payload: {
+          role: 'user',
+          ttl_seconds: 3600,
+          bound_public_key: randomBytes(32).toString('base64url'),
+        },
+      });
+
+      const audit = await pool.query(
+        `SELECT payload FROM audit_events
+         WHERE event_type = 'enrollment_token.created'
+           AND actor_device_id = $1
+         ORDER BY event_id DESC LIMIT 1`,
+        [admin.device_id],
+      );
+      expect(audit.rowCount).toBe(1);
+      expect(audit.rows[0].payload.enrollment_matrix_version_floor).toBe(5);
+    });
+  });
+
   describe('audit chain integrity', () => {
     it('rejects mutation of audit_events (append-only trigger)', async () => {
       const before = await pool.query('SELECT event_id FROM audit_events LIMIT 1');

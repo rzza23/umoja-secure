@@ -16,6 +16,7 @@ export interface CreateTokenResult {
   token_id: string;
   token: string;
   expires_at: string;
+  enrollment_matrix_version_floor: number | null;
 }
 
 export async function createEnrollmentToken(
@@ -31,10 +32,17 @@ export async function createEnrollmentToken(
   const expiresAt = new Date(Date.now() + input.ttl_seconds * 1000);
 
   return withTransaction(async (tx) => {
+    const floorRes = await tx.query<{ current_version: number | null }>(
+      `SELECT current_version FROM org_matrix_versions WHERE org_id = $1`,
+      [input.org_id],
+    );
+    const floor = floorRes.rows[0]?.current_version ?? null;
+
     const res = await tx.query(
       `INSERT INTO enrollment_tokens
-         (token_hash, org_id, role, label_hint, expires_at, created_by, bound_public_key)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+         (token_hash, org_id, role, label_hint, expires_at, created_by, bound_public_key,
+          enrollment_matrix_version_floor)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING token_id, expires_at`,
       [
         tokenHash,
@@ -44,6 +52,7 @@ export async function createEnrollmentToken(
         expiresAt,
         input.actor_device_id,
         boundKey,
+        floor,
       ],
     );
 
@@ -53,13 +62,18 @@ export async function createEnrollmentToken(
       actor_role: input.actor_role,
       target_type: 'org',
       target_id: input.org_id,
-      payload: { role: input.role, ttl_seconds: input.ttl_seconds },
+      payload: {
+        role: input.role,
+        ttl_seconds: input.ttl_seconds,
+        enrollment_matrix_version_floor: floor,
+      },
     });
 
     return {
       token_id: res.rows[0].token_id as string,
       token,
       expires_at: (res.rows[0].expires_at as Date).toISOString(),
+      enrollment_matrix_version_floor: floor,
     };
   });
 }
