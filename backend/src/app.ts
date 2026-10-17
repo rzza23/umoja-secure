@@ -12,6 +12,7 @@ import { prekeyRoutes } from './routes/prekeys.js';
 import { envelopeRoutes } from './routes/envelopes.js';
 import { adminRoutes } from './routes/admin.js';
 import { contactsRoutes } from './routes/contacts.js';
+import { identityChangeRoutes } from './routes/identityChange.js';
 import { wsRoutes } from './ws/server.js';
 
 export async function buildApp() {
@@ -38,6 +39,7 @@ export async function buildApp() {
   await app.register(envelopeRoutes);
   await app.register(adminRoutes);
   await app.register(contactsRoutes);
+  await app.register(identityChangeRoutes);
   await app.register(wsRoutes);
 
   return app;
