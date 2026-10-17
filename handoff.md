@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-15 (Session B — §5 item 6 done: P1-026 client verification + storage verified end-to-end; next: P1-030 replacement-device flow)
+Last updated: 2026-10-16 (Session C — TASK-P1-030 3a done: backend org matrix version tracking; next: 3b)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -460,6 +460,58 @@ and the device row captured.
 transmission at enrollment time is compile-verified only. The full
 client-side round-trip is blocked by KI-020 (below).
 
+### Session C — TASK-P1-030 3a landed (2026-10-16)
+
+Backend tracks current matrix version per org. Closes KI-018 (hard
+prerequisite for 030b). Five commits:
+
+- `6013077` — 3a backend: migration 013 (`org_matrix_versions`),
+  `matrixVersions.ts` (`assertMatrixVersion`, `getMatrixVersion`),
+  `GET`/`POST /admin/matrix-version`, 6 service tests
+- `c79d7f8` — registry v0.5: P1-030 decomposed into 030a–030f
+- `64f4494` — pool hygiene: 5 conns/worker on `NODE_ENV=test`
+  (precautionary; see KI-022)
+- `4e6e096` — the actual KI-022 fix (unique org in
+  `matrix-version.test.ts`)
+- `8adde6b` — POOLMAX debug removal **and** the 4 matrix-version
+  route tests (`admin.test.ts`). See commit-message caveat.
+
+**Commit-message caveat.** `8adde6b`'s subject describes only the
+debug-line removal, but the same commit contains the 4 route tests
+(`TEST-MATRIX-VERSION-ROUTE-USER-FORBIDDEN`, `-VALIDATION`, `-OK`,
+`-REJECT-LOWER`) because `admin.test.ts` was already staged when the
+commit ran. Content is correct; message is incomplete. If searching
+for route tests via `git log`, search the handoff, not git log.
+
+**Phase 1 framing (load-bearing).** 3a's endpoint is admin-error-
+catching, not adversary-catching. Both the version and (later) the
+floor come from the same party. Purpose is cross-session and cross-
+admin audit. Anti-rollback is client-side (P1-026). Full framing text
+is in `docs/US-TASK-P1-001.md` v0.5 §B TASK-P1-030 and in the KDoc
+of `backend/src/admin/matrixVersions.ts`.
+
+**Honest note on session cost.** Most of Session C went to
+diagnosing a bug introduced *in this session's own test file*:
+`matrix-version.test.ts` used `TEST_ORG_ID = '...088'`, the same
+value `auth.test.ts` uses, and its `beforeEach` deleted devices by
+`org_id`. In parallel runs it deleted auth's devices mid-test.
+Symptom was flaky 500s and 401s in `auth.test.ts`, appearing only
+under full-suite load. Diagnosed by pair-testing: `auth + enrollment`
+passes, `auth + admin` passes, `auth + matrix-version` fails 5/17.
+Fixed by changing to `...0a1` / `...0a2`. KI-022 recorded and
+resolved.
+
+**Environment gaps hit during the session** (both now in §7):
+- Migration 013 applied cleanly to `umoja_test` (auto-rebuilt by
+  `npm test`) but not to dev `umoja` until `npm run migrate` ran.
+- The dev backend container was stale (KI-002 re-hit): route returned
+  404 until `docker compose up -d --build backend`.
+
+**Verification.** Typecheck clean. Full suite 202/202 (15 files).
+`auth + matrix-version` pair 17/17. `matrix-version.test.ts` alone
+6/6. `admin.test.ts` alone 17/17. Unauthenticated curl to
+`/admin/matrix-version` returns 401 (route live, correctly gated).
+
 ---
 
 ## 4. Known issues
@@ -721,6 +773,35 @@ Not verified this session — set aside for Path 1 + 3 verification.
 qemu process surviving a prior crash; a full Mac restart cleared it.
 Next time this symptom appears: try reboot before deeper diagnosis.
 
+### KI-022 (RESOLVED 2026-10-16): auth.test.ts flaky under full-suite load
+
+Two to three tests in `auth.test.ts` intermittently failed with
+`POST /auth/challenge` returning 500 and (once) 401 on "returns
+challenge for active device." Same file passed 11/11 alone. Three
+occurrences across a session.
+
+**Cause.** `matrix-version.test.ts` used
+`TEST_ORG_ID = '00000000-0000-0000-0000-000000000088'` — the same
+constant `auth.test.ts` uses — and its `beforeEach` runs
+`DELETE FROM devices WHERE org_id = '...088'`. Under parallel test
+execution, matrix-version's cleanup deleted auth's devices mid-test.
+
+**Diagnosis path.** Pair-testing isolated it: `auth + enrollment`
+17/17 pass, `auth + admin` 28/28 pass, `auth + matrix-version` 5/17
+fail. A grep across `test/*.ts` for the org constants showed the
+collision.
+
+**Fix.** `matrix-version.test.ts` constants changed to
+`...0a1` / `...0a2`. Commit `4e6e096`.
+
+**Not the cause** (recorded so it isn't re-litigated): pool
+exhaustion. Vitest defaults to maxWorkers = cores - 1; pool max was
+20 per worker; 220 worst-case against Postgres `max_connections: 100`
+is a real risk, so `64f4494` reduced test-mode pool to 5 as
+precautionary hygiene. But it was not the flake's cause — three
+consecutive full-suite runs after the pool change still showed
+failures.
+
 ---
 
 ## 5. Immediate next steps (recommended order)
@@ -878,7 +959,8 @@ provisioning key set; enforce `highest_seen_version`
 contacts from `permitted_contacts[]`.
 
 **7. TASK-P1-030 — replacement-device flow (integrated test per
-Build Master §3.7).**
+Build Master §3.7). 3a DONE 2026-10-16 — commits `6013077`
+(backend) + `c79d7f8` (registry v0.5). Next sub-task: 030b.**
 
 **After Session A:**
 
@@ -1120,10 +1202,33 @@ Rebuild after flipping — read at HttpClient construction time.
 - **`toJSON` rejection is a deliberate deviation.** Both
   implementations reject objects with a `toJSON` method even though
   RFC 8785's reference code calls it. Do not "fix" this.
+- **Edit scripts start with `cd ~/umoja-secure`** and use repo-root-
+  relative paths. A cwd mismatch silently created a failed write and a
+  re-run compounded it to a doubled file. Session C. Do not omit the
+  `cd` prefix on the assumption the shell is already at root.
+- **Edit scripts guard before writing.** `if marker in src: raise
+  SystemExit(...)` at the top. The read-back assert after `write_text`
+  catches corruption *after* the fact; the guard prevents the write
+  in the first place. Session C.
+- **Every test file must use a unique `TEST_ORG_ID`.** Grep
+  `test/*.ts` before picking a value. Currently in use: `011`, `044`,
+  `055`, `066`, `077`, `088`, `099`, `0a1`, `0a2`. Reuse causes
+  cross-file deletion via `beforeEach` cleanup — that's KI-022, a
+  whole session's debugging burned on an org collision.
+- **Every migration commit note includes `npm run migrate` against
+  `umoja`.** `npm test` auto-rebuilds `umoja_test` but never touches
+  dev `umoja`. Migration 013 was applied to test DB by global-setup
+  and to dev DB only when `npm run migrate` was run manually. Session
+  C hit 404 on `/admin/matrix-version` for this reason (compounded by
+  KI-002).
+- **After any backend route change, `docker compose up -d --build
+  backend` before curl testing.** KI-002 re-hit in Session C: route
+  added, tests passed, curl returned 404 because the container was
+  still running the old image.
 
 Current verified state: **110 Android JVM tests** (2026-10-16),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
-and **192 backend tests** (2026-10-15, 14 files), all from runner output.
+and **202 backend tests** (2026-10-16, 15 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
 infrastructure (Mac vs emulator) and must not be summed.
 
