@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-17 (Session I — TASK-P1-030 030e-c 3a done: Kotlin ack schema + signer + A-001 cross-language vector. Next: 030e-c 3b — ReplacementNoticeVerifier + ReplacementNoticeStore.)
+Last updated: 2026-10-17 (Session J — TASK-P1-030 030e-c 3b done: verifier, signer production path, API client, store. Next: 030e-c 3d — UI integration: ChatScreen banner, polling loop, block-send wiring.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -48,7 +48,7 @@ Authoritative documents (all exist on disk):
   `npm test`. Sessions C–F added matrix-version, floor stamping,
   replacement-notice. Session H added identity-change services (7
   validator tests) and routes (17 route tests). Session I added the
-  A-001 cross-language ack test.)
+  A-001 cross-language ack test. Session J backend unchanged.)
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -87,7 +87,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 134** (verified 2026-10-17 from XML; +5 floor tests Session E, +7 ReplacementNotice Session F, +9 IdentityChangeAck Session I, +3 IdentityChangeAckSigner Session I)
+- **JVM unit tests: 157** (verified 2026-10-17 from XML; +5 floor tests Session E, +7 ReplacementNotice Session F, +9 IdentityChangeAck Session I, +3 IdentityChangeAckSigner Session I, +6 ReplacementNoticeVerifier Session J, +3 signWithDeviceKey Session J, +14 ReplacementNoticeStore Session J)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -955,6 +955,113 @@ Three files to read at 3b opening, not guessed:
 - `android/.../transport/ContactsApi.kt` — the HTTP-client pattern for
   `IdentityChangeApi.kt` to mirror
 
+### Session J — TASK-P1-030 030e-c 3b landed (2026-10-17)
+
+030e-c 3b DONE end-to-end. Five commits:
+
+- `e905426` — `ReplacementNoticeVerifier.kt` +
+  `ReplacementNoticeVerifierTest.kt`. Client-side signature check of
+  an incoming notice against `Set<PublicKey>` (Phase 1: singleton from
+  `ProvisioningKeys`). Mirrors `MatrixVerifier.verify` exactly: raw
+  canonical bytes, fails closed on empty set, stateless, delegates the
+  Ed25519 primitive to `MatrixSigner.verifyRaw`. 6 tests.
+- `39898ad` — `IdentityChangeAckSigner.signWithDeviceKey` +
+  `IdentityChangeAckSignerTest` additions. **Production-path gap
+  fix.** `sign(signed, privateKey)` is unusable in production: the
+  device auth key is Keystore-backed and non-exportable. The new entry
+  point takes `(ByteArray) -> ByteArray` — production wires
+  `deviceKeyManager.sign(digest)`, tests wire a BouncyCastle lambda.
+  Two entry points, two custody models, no convenience overload hiding
+  the constraint. 3 tests.
+- `031a0e5` — refactor: extract `jsonObjectToPlainMap` /
+  `jsonValueToPlain` from four private copies
+  (`MatrixStore`, `MatrixStoreTest`, `ReplacementNoticeTest`,
+  `IdentityChangeAckSignerTest`) into `CryptoJsonHelpers.kt`
+  (top-level functions). Refactor-only — 143 → 143 test count
+  unchanged; the extraction touches no behavior.
+- `dde60f2` — `IdentityChangeApi.kt`. Wraps
+  `GET /identity-change-notices` and `POST /identity-change-acks`.
+  Error taxonomy mirrors `AdminApi` / `ContactsApi`
+  (`network_error` / `{error_from_json}` / `invalid_response`).
+  Deliberately omitted: `POST /identity-change-notices` (admin-only,
+  no consumer) and `GET /identity-change-acks/:notice_hash` (peer-ack
+  visibility, 030e-d). 0 tests — exercised in `f747e37`'s store tests
+  via mocked HttpClient.
+- `f747e37` — `ReplacementNoticeStore.kt` +
+  `ReplacementNoticeStoreTest.kt`. The client-side core: verify
+  on write, trust on read; `recordNotice` / `pendingNotices` /
+  `ack` / `markAcked` / `blockStateFor` / `clear`. 14 tests.
+
+**Design decisions recorded in `f747e37`** (for 030e-d's reference):
+
+- Constructor: `(KeyValueStore, signingFn: (ByteArray) -> ByteArray,
+  ackingDeviceId: String)`. `ackingDeviceId` in the constructor (not
+  per-call) prevents accidentally signing an ack for the wrong device.
+  Production call site wires `DeviceIdStore.getOrCreate()` and a
+  lambda `{ digest -> deviceKeyManager.sign(digest) }`.
+- `ack()` returns `SignedAck(wrapper, canonicalUtf8, signatureBase64url)`
+  without persisting. `markAcked()` persists only after the caller's
+  HTTP POST succeeds. Crash between POST and `markAcked` recovers on
+  re-ack — backend PK `(notice_hash, acking_device_id)` is
+  idempotent. This is the Q2 (local-ack-unblock) contract at the store
+  level.
+- `blockStateFor(toDeviceId)` returns the newest notice's state for
+  that device. Unblocked if no notice or newest accepted; Blocked
+  (`PENDING` / `REJECTED`) otherwise. Implements Q3 (rejection blocks
+  permanently for that notice hash; new notice supersedes).
+- Single JSON envelope under `identity_change.notices`. `KeyValueStore`
+  has no `allKeys()`; per-notice keys would need an interface change.
+  Fine for Phase 1 volumes.
+- Verify on write, trust on read. `recordNotice` verifies the
+  signature against `trustedKeys` before parsing; `pendingNotices` /
+  `blockStateFor` do not re-verify. Mirrors `MatrixStore.accept` vs
+  `MatrixStore.load`.
+
+**Count discrepancy in `f747e37`'s commit message.** The message says
+`Android JVM 143 → 156`. Actual was `143 → 157` (14 store tests, not
+13 — miscounted `TEST-NOTICE-STORE-CLEAR` during the tally). Fifth
+consecutive session of exact-count miscalibration. Per §7's current
+rule, `git diff` and test-run output are authoritative; both confirm
+157. Not amended (pushed-commit convention); not fixed by follow-up
+(two-commit noise for a one-digit difference). Handoff, §2, and
+verified-state all show **157**. `git log` shows 156 in `f747e37`
+only — do not trust commit messages for test counts.
+
+**Process note — placeholder-overwrite postmortem widened.** Session
+I's placeholder-overwrite in the Kotlin signer heredoc (`... (Block 6
+content from prior message, unchanged)` executed literally, overwrote
+the 74-line signer with one line) was a distinct class: my *output*
+contained the placeholder, not the edit script. Session J did not
+reproduce it — every heredoc in every block contained literal content.
+The §7 rule ("placeholders are never typed literally") covers both
+cases; re-reading before sending is the discipline.
+
+**Next: 030e-c 3d** — UI integration. The store's contract
+(`pendingNotices()`, `blockStateFor(toDeviceId)`, `ack()`,
+`markAcked()`) is the surface 3d consumes. Remaining pieces:
+
+- Read `android/.../ui/chat/ChatScreen.kt` (not yet read in any
+  session) — the send-path hook and where the banner renders.
+- Q1 ruling: inline banner on chat screen, tap-to-expand detail dialog
+  showing full notice (from/to device IDs, `issued_at`, canonical
+  hash, verify signature) with Acknowledge/Reject. Toast is wrong
+  (transient, state is persistent); dialog-only is wrong (dismissible,
+  state disappears). Banner stays until local ack stored.
+- Q2 ruling: discovery = poll `GET /identity-change-notices` on app
+  foreground and chat-open, filter locally by `permitted_contacts`
+  (ADR §5 Option C). WS push deferred. Unblock = local ack only;
+  does not depend on peer timing.
+- Q3 ruling: rejection blocks permanently for that `notice_hash`.
+  Banner wording: "You rejected the replacement of device X. Sending
+  is blocked. Contact your admin to resolve." No UI affordance to
+  undo. Recovery is a new notice from the admin.
+
+3d wiring needs three production dependencies the store does not
+supply: a `signingFn` (from `DeviceKeyManager`), a `sessionToken` (from
+`SecureStorage` / `SessionManager`), and a polling trigger (foreground
++ chat-open). All three are established patterns elsewhere in the app;
+3d reads them rather than inventing.
+
 ---
 
 ## 4. Known issues
@@ -1409,7 +1516,10 @@ Build Master §3.7). 3a DONE 2026-10-16 (`6013077` backend +
 `00f31df` migration 015 + `d8b2cfc` services/routes + `b26913a`
 17 route tests + ADR v0.3). 030e-c 3a DONE 2026-10-17 (`a178e83`
 schema + `ed271ac` signer + A-001 + `36f9a94` timestamp refresh).
-Next: 030e-c 3b — ReplacementNoticeVerifier + ReplacementNoticeStore.**
+030e-c 3b DONE 2026-10-17 (`e905426` verifier + `39898ad`
+production signer + `031a0e5` helper extraction + `dde60f2` API +
+`f747e37` store). Next: 030e-c 3d — UI integration (ChatScreen
+banner, polling loop, block-send wiring).**
 
 **030e-b design questions** — RESOLVED in ADR-IDENTITY-CHANGE-001
 (`21677a9`, design), backed by migration 015 (`00f31df`, schema).
@@ -1789,7 +1899,7 @@ Rebuild after flipping — read at HttpClient construction time.
   `tx.query()` → `any` → hides this class. Typed parameters surface
   it; do not remove type parameters to silence the error.
 
-Current verified state: **134 Android JVM tests** (2026-10-17),
+Current verified state: **157 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
 and **242 backend tests** (2026-10-17, 15 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
