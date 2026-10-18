@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-17 (Session O-2 — TASK-P1-037 DONE: MatrixApi + AppRoot fetch + seed script + withContext fix; verified highestSeenVersion=1 on emulator. Next: TASK-P1-038 — send gate.)
+Last updated: 2026-10-17 (Session P — TASK-P1-038 DONE: SendGate + MessagingService gate + ChatScreen banner + reactivity fix D-1. Three-case acceptance passed: fail-closed, allow-on-match, re-engage-on-remove. Next: TASK-P1-039 — release-build hardening.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -93,7 +93,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 174** (verified 2026-10-17 from XML; Session K's 12 IdentityChangeController tests, then Session O-2's 5 MatrixApiTest tests as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1).)
+- **JVM unit tests: 178** (verified 2026-10-17 from XML; Session O-2's 5 MatrixApiTest tests, then Session P's 4 SendGateTest tests as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance.)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -1686,6 +1686,97 @@ Confirm and extend at 038's session start.
 unchanged at 247. Both from runner output (XML aggregate for JVM,
 `npm test | tail -4` for backend).
 
+### Session P — TASK-P1-038 DONE (2026-10-17)
+
+Send-path matrix enforcement landed end-to-end. Four commits:
+
+- `78762a3` — **A: SendGate pure predicate + registry-named tests**
+  (`crypto/SendGate.kt` + `SendGateTest.kt`). Fail-closed on null
+  (no matrix) and empty (zero contacts). Registry-named
+  TEST-SEND-GATE-EXCLUDED-PEER + TEST-SEND-GATE-PERMITTED-PEER,
+  plus TEST-SEND-GATE-NULL-MATRIX + -EMPTY-MATRIX. 4 tests, JVM
+  174 → 178.
+- `ab9f22f` — **B: gate wired in MessagingService.sendMessage.**
+  Step 0, before prekey fetch or envelope submit. `MatrixStore`
+  constructed from the same `SecureStorage(context)` already read
+  in `sendMessage` — no ctor arg added, no call-site ripple
+  (registry §B: do not redesign the send path). `SendOutcome`
+  gains `NotAuthorized(peerDeviceId)`, distinct from `Failure`.
+  Sealed-class exhaustiveness forced two `when(outcome)` sites to
+  update (ChatViewModel + DiagnosticsScreen), both in the commit.
+  Grep confirmed no third site.
+- `f1526fd` — **C: ChatScreen authorization banner + matrixStore
+  threading.** Parallel banner to 030e-c's IdentityChangeBanner
+  (distinct trust flows). `AppRoot` gains
+  `remember(deviceId) { MatrixStore(...) }`; MainNavigation +
+  ChatScreen take it as a param. `isBlocked = isIdentityBlocked OR
+  not isAuthorized`. **KDoc claim in this commit was wrong** (see
+  D-1).
+- `475d75b` — **D-1: ChatScreen re-derives on matrix write.**
+  Fix caught in Case 2 emulator acceptance: authorized peer still
+  showed the banner because ChatScreen cached `isAuthorized` at
+  composition time and AppRoot's fetch is async — neither
+  `peerDeviceId` nor the remembered `matrixStore` identity changed
+  when the fetch landed. Commit C's KDoc claimed "the matrix
+  cannot change while ChatScreen is composed"; that claim fired
+  wrong on cold start. Fix (mirrors 030e-c's
+  `IdentityChangeController.version` idiom):
+  - `MatrixStore` gains `private MutableStateFlow _version` +
+    `version: StateFlow<Long>`, bumped after successful `accept`
+    and `clear`. Write-notification, not a cache.
+  - `MainActivity`: AppRoot's fetch calls `matrixStore.accept`
+    instead of a throwaway `MatrixStore(SecureStorage(context))`.
+    **This line is the load-bearing fix** — StateFlow alone is
+    inert without writer-unification; if a future task adds a
+    StateFlow to a store class, the writer must use the remembered
+    instance, not construct a fresh one.
+  - `ChatScreen`: `collectAsState()` on `matrixStore.version`;
+    remember key becomes `(peerDeviceId, matrixVersion)` instead
+    of `(peerDeviceId, matrixStore)`. KDoc corrected to record
+    the actual failure, not the theoretical trade-off.
+
+**Three-case emulator acceptance — all passed.** Two-layer coverage
+per case: ChatScreen proves the UI gate; DiagnosticsScreen bypasses
+it and calls `MessagingService.sendMessage` directly to prove the
+service-layer gate. Evidence per case is the **triple** (logcat +
+DB state + matrix state), not absence-of-error alone.
+
+| Case | Seed | Layer 1 | Layer 2 | Gate behavior |
+|---|---|---|---|---|
+| 1 | v1, `permitted_contacts=[]` | banner shown, composer disabled | `Send blocked: peer not in permitted contacts`; logcat `sendMessage blocked by SendGate`; envelope count 0 | fail-closed ✅ |
+| 2 | v2, `permitted_contacts=[f697b280]` | banner absent (post D-1; before D-1 it was stuck-present — the bug D-1 fixes) | `Sent: 6de567f5...`; logcat `sent envelope`; envelope count 0 → 1 | allow-on-match ✅ |
+| 3 | v3, `permitted_contacts=[00000000-...]` | banner **reappeared** | `Send blocked`; logcat `sendMessage blocked by SendGate`; envelope count stayed 1 | re-engage-on-remove ✅ |
+
+Case 3 is the case that distinguishes a correct gate from a
+sticky-open one. Without it, "gate works" is indistinguishable
+from "gate authorized once and never re-checked."
+
+**O-2 caveat corrected.** Session O-2's "Caveat carried into 038"
+claimed `sign-test-matrix.ts` "needs a `--contacts` arg." Wrong:
+the flag was always wired — `--permitted-contacts` in
+`parseArgs()` (`backend/scripts/sign-test-matrix.ts` line ~158),
+reaching the wrapper at line ~229. No script edit was needed;
+the caveat was speculation about a script that was already
+complete. Same class as Session F/G design assumptions corrected
+by reading actual code (Session G's ADR corrections).
+
+**Counts.** Android JVM 174 → 178 (+4 SendGateTest). Backend
+unchanged at 247. Both from XML aggregate / `npm test` runner
+output. `installDebug` verified on-device via `dumpsys package`
+`lastUpdateTime` — D-1's commit time is before the installed
+APK's update time, so the emulator's observed behavior is
+unambiguously from HEAD.
+
+**Next: TASK-P1-039 — release-build hardening.** Per
+ADR-HARDENING-001 §6 Order: `037 → 038 → 039 → 040 → 041`.
+038 was the one task in the sequence that might have revealed a
+hole rather than required new code — it did reveal one (the D-1
+reactivity race, which is a UI-layer bug not a service-gate bug).
+039 is next because it is mechanical and independent, and because
+verifying release builds before 040's state-machine changes means
+manual on-device verification of 040 isn't compounded with
+minification debugging.
+
 ---
 
 ## 4. Known issues
@@ -2276,13 +2367,17 @@ Original phrasing preserved below for history:
     Verified on emulator: seed → force-stop → relaunch →
     `highestSeenVersion=1 contacts=0`. See Session O-2 entry in §3.
 
-    **Next task: TASK-P1-038 — send gate.** Seeded matrix has
-    `permitted_contacts=[]`, so 038's fail-closed path is the right
-    first test — but acceptance must also cover non-empty
-    permitted_contacts (both matched and unmatched) or "gate works"
-    is indistinguishable from "matrix has no contacts."
-    `sign-test-matrix.ts` needs a contacts arg. 030e-d remains
-    deferred behind the whole 037–041 pass.
+    **TASK-P1-038 DONE 2026-10-17.** Four commits (A/B/C/D-1);
+    three-case acceptance passed end-to-end. See §3 Session P entry.
+    030e-d remains deferred behind the whole 037–041 pass.
+
+    **Next task: TASK-P1-039 — release-build hardening.** Per
+    ADR-HARDENING-001 §3: `FLAG_SECURE` on ChatScreen / AdminScreen
+    / DiagnosticsScreen, `TransportConfig.useTor` becomes `val` from
+    `BuildConfig.DEBUG` with startup assertion, `minifyEnabled=true`
+    with libsignal keep rules. Per ADR-HARDENING-001 §4's "acceptance
+    test is cold-start, not build succeeds" — the task's acceptance
+    is a manual cold-start of the release build, not a compile.
 
 **Backlog items (not scheduled):**
 - Instrumented Compose tests for admin flows (no test rule configured;
@@ -2694,8 +2789,58 @@ Rebuild after flipping — read at HttpClient construction time.
   touching `backend/src/routes/*.ts` or `backend/migrations/*.sql`
   requires the rebuild step before ANY testing that uses the running
   backend — emulator verification included, not just curl.
+- **`!` inside `git commit -m "..."` triggers zsh history expansion
+  and aborts before git runs.** Symptom: `zsh: event not found:
+  <word>.` Same family as §7's `#`-in-shell-block trap. The `!`
+  expands even inside double quotes; `git commit` never runs; the
+  push finds nothing to push. Fix: `git commit -F- <<'EOF' ...
+  EOF` (quoted delimiter prevents all expansion) — not `set +H`
+  (silently changes shell behavior for the rest of the session).
+  Every commit message that quotes Kotlin or TypeScript code
+  containing `!` — `!isAuthorized`, `!authorized`, `!=`, `!!` —
+  needs `-F-` heredoc. Session P.
+- **`cd <subdir>` in a multi-block paste leaks cwd to subsequent
+  blocks.** Same class as Session C's "edit scripts start with
+  `cd ~/umoja-secure`." In Session P, block C did
+  `cd ~/umoja-secure/android` and never returned; block F worked
+  by luck (docker compose finds the parent compose file), block G
+  failed honestly (`grep backend/scripts/sign-test-matrix.ts` from
+  the wrong cwd). Fix: start every command block with
+  `cd ~/umoja-secure`, or use subshells (`( cd subdir && ... )`),
+  or absolute paths. Session P.
+- **`\d <table>` before any ad-hoc psql query — do not guess
+  column names.** Session P guessed `devices.created_at` (actual:
+  `enrolled_at`), `contacts.device_id` (actual:
+  `owner_device_id`), and `contacts.revoked_at`/`status` shape
+  without confirming the actual column set — each guess cost a
+  round-trip and a silent-read failure (the returned `ERROR` went
+  past in a multi-block paste twice before the third block caught
+  it). `\d` costs one line; three wrong guesses cost three
+  round-trips. Rule: first `\d table`, then query. Session P.
+- **Empty logcat is only meaningful paired with state.** Refines
+  Session M's rule. In Session P: Case 1's empty `POST /envelopes`
+  was evidence **because** the `sendMessage blocked by SendGate`
+  logcat line was present and envelope count was 0 — the triple
+  proved the gate fired. Case 3's empty `POST /envelopes` alone
+  was not enough; the present `sendMessage blocked by SendGate`
+  line paired with the stable envelope count is what closed it.
+  Do not infer "gate works" from absence-of-error; pair it with
+  the corroborating DB state. Session P.
+- **`remember` cache keys must include the state-flow trigger, not
+  the object identity, when the underlying state is stored in an
+  unobservable class.** Session P's D-1 bug: `remember(peerDeviceId,
+  matrixStore)` did not re-derive when the matrix changed because
+  `matrixStore` identity is stable — only `matrixStore.version`
+  changes. The pattern from 030e-c (`remember(version,
+  peerDeviceId)`) is the reference; when a class gains a write-
+  notification flow, the remember key switches from object identity
+  to flow value. Additionally, StateFlow alone is inert without
+  writer-unification: the writer (accept) must use the same
+  remembered instance the observer (ChatScreen) collects from, or
+  the bump goes to a throwaway object and the observer never sees
+  it. Session P D-1.
 
-Current verified state: **174 Android JVM tests** (2026-10-17),
+Current verified state: **178 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
 and **247 backend tests** (2026-10-17, 16 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
