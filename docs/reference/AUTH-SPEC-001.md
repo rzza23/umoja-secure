@@ -1,7 +1,7 @@
 # AUTH-SPEC-001 — Device Identity, Sessions, and Revocation
 
 Document ID: AUTH-SPEC-001
-Version: 0.2 (draft for owner review)
+Version: 0.3 (TASK-P1-042 landed 2026-10-18)
 Date: 2026-10-14
 Authority: Derived from UMOJA-SECURE-BUILD-MASTER.md v1.4.2, plus project-owner attestation on the same date.
 Status: Draft. Not yet in force. Subject to revision.
@@ -273,7 +273,7 @@ ADR-PROVISIONING-001 §2.
 |---|---|---|
 | Request rejection after revocation commit | Per-request `devices.status` check | ≤1s |
 | Messaging WebSocket closure after revocation commit — listener healthy | `LISTEN/NOTIFY` on `device_revoked` channel + authoritative check | ≤5s |
-| Messaging WebSocket closure after revocation commit — listener disconnected (v0.2) | 5-minute revalidation cycle backstop | ≤5min |
+| Messaging WebSocket closure after revocation commit — listener disconnected (v0.3) | Reconnect (≤5s fixed interval) + reconcile on every successful connect; 5-min revalidation is independent backstop if reconnect itself repeatedly fails | ≤5s after reconnect fires |
 | No new envelopes delivered | Per-request status check at delivery | Immediate |
 
 Call-signaling WebSocket termination is **not** a Phase 1 guarantee.
@@ -295,8 +295,10 @@ Defenses, in order:
    note: the current code runs this pass only at startup, not on
    mid-run listener reconnect. Mid-run listener disconnection is
    covered by defense (3), the 5-minute revalidation cycle.
-   TASK-P1-042 closes the gap between this defense's intent and
-   the current implementation.)
+   TASK-P1-042 (fixed at commit 07cc2b4) closes the gap: the
+   listener now reconnects on connection loss (5s fixed interval)
+   and re-runs reconciliation on every successful connect, before
+   reporting ready. See §9.2 for the updated timing.)
 3. **Periodic revalidation** as a backstop (5-minute cycle, §6.3).
 
 ### §9.4 What revocation does and does not do
@@ -481,6 +483,7 @@ side.
 |---------|------|--------|
 | 0.1 | 2026-10-14 | Initial draft. Authored from Build Master v1.4.2 + owner attestation. |
 | 0.2 | 2026-10-18 | Conformance sweep vs. code at HEAD (032bc8b). Four amendments to match implementation, one task filed (TASK-P1-042). See §13.1. |
+| 0.3 | 2026-10-18 | TASK-P1-042 fixed at commit 07cc2b4. §9.2 listener-disconnected row updated: reconnect (≤5s fixed interval) + reconcile on every successful connect; 5-min revalidation is now the independent backstop if reconnect itself repeatedly fails. §9.3 defense 2 updated: reconciliation now runs on every successful connect (startup and reconnect alike), before the listener reports ready. Closes the gap this document’s v0.2 amendment named. |
 
 ---
 
@@ -532,4 +535,4 @@ scopes itself to server behavior; `SessionStateManager.kt` and the
 040-era client wiring are documented in the handoff and
 ADR-HARDENING-001 §2, not here.
 
-— end of AUTH-SPEC-001 v0.2 draft —
+— end of AUTH-SPEC-001 v0.3 draft —
