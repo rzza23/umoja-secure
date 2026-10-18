@@ -1,7 +1,7 @@
 # US-MASTER-001 — Umoja Secure Governing Architecture
 
 Document ID: US-MASTER-001
-Version: 0.2 (conformance-swept 2026-10-18)
+Version: 0.3 (TASK-P1-042 landed 2026-10-18)
 Date: 2026-10-14
 Authority: Governing architecture, threat model, phase boundaries. Per UMOJA-SECURE-BUILD-MASTER.md §0, US-ADD-001 wins over this document in any conflict.
 Status: Draft. Not yet in force. Subject to revision.
@@ -127,6 +127,11 @@ covers missed notifications.
 > THREAT-MODEL-001 §8 v0.2 name). Until P1-042 lands: WS-close timing
 > is ≤5s when the listener is healthy, ≤5min when disconnected (via
 > per-connection revalidation timer).
+>
+> *v0.3 fix (2026-10-18):* TASK-P1-042 fixed at commit 07cc2b4.
+> `ws/revocation.ts` now reconnects on connection loss (5s fixed
+> interval) and re-runs reconciliation on every successful connect.
+> Same fix AUTH-SPEC-001 §9.3 and THREAT-MODEL-001 §8 v0.2 name.
 
 Client does **not** enforce revocation in the delivery path. Detail:
 Build Master §3.3, `docs/reference/AUTH-SPEC-001.md` §9, and
@@ -242,7 +247,8 @@ Do not guess.
 |---------|------|--------|
 | 0.1 | 2026-10-14 | Initial draft. Authored from Build Master v1.4.2 + owner attestation. |
 | 0.2 | 2026-10-18 | Conformance sweep (KI-005, Session W-1). §3.5 corrected: v0.1 claimed reconciliation-on-listener-reconnect; actual code runs reconciliation on startup only. Cross-references TASK-P1-042 (same gap AUTH-SPEC-001 §9.3 defense 2 / THREAT-MODEL-001 §8 v0.2). §7 canonical document set adds `USER-ONBOARDING.md` (written Session U-2, referenced by Build Master §2). Ten other architecture claims verified holding (§3.1 tiers, §3.2 four device keys + two org keys, §3.3 matrix, §3.4 messaging, §3.6 ceremony, §4 threat summary, §5 phases, §6 precedence). |
+| 0.3 | 2026-10-18 | TASK-P1-042 fixed at commit 07cc2b4. §3.5 v0.2 correction blockquote appended: the reconnect-and-reconcile gap it named is closed. Same fix AUTH-SPEC-001 §9.3 v0.3 and THREAT-MODEL-001 §8 v0.3 name. |
 
 ---
 
-— end of US-MASTER-001 v0.2 draft —
+— end of US-MASTER-001 v0.3 draft —
