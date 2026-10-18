@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session U-1 — SQLite leak fixed + backlog hygiene: LocalDatabaseHelper singleton (0 leaks after ChatScreen GC vs 2 before), KI-008 canonicalJson extraction, KI-016 crypto validator extraction (3 files → 1 shared), KI-018 marked RESOLVED (already landed Session C). Android JVM 212 unchanged (deduplication preserves behavior). Backend 250 unchanged. Remaining: migration 017, double-fetch dedupe (deferred to U-2). No blocking tasks.)
+Last updated: 2026-10-18 (Session U-2 — backlog finish: migration 017 (enrollment_tokens FK ON DELETE SET NULL) + test, USER-ONBOARDING.md written (closes KI-006), KI-005 marked standing condition, double-fetch dedupe + Compose-test note named as standing deferrals. Backend 250 → 251. Android JVM 212 unchanged. **No blocking work remains; backlog is closed except for standing conditions.** Next: Phase 2 preparation or nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -2654,6 +2654,81 @@ One real defect fixed, three backlog items closed. Three commits.
 behavior; the tests prove it). Backend 250 unchanged. Full-suite
 green after every command.
 
+
+### Session U-2 — backlog finish (2026-10-18)
+
+Two code+doc commits + one handoff. **Backlog closed except for
+standing conditions** -- three items actioned, three named as
+standing, none silently deferred.
+
+- `3b0c33a` -- **Migration 017:
+  `enrollment_tokens.used_by_device_id` FK gains `ON DELETE SET
+  NULL`.** Session R-4's observation became a real fix. Before:
+  deleting a device that had consumed a token failed on the FK
+  (confdeltype 'a' = NO ACTION). Every backend test worked around
+  this by deleting tokens before devices in `afterAll` --
+  load-bearing workaround, not design. After: token row survives
+  with `used_by_device_id` nulled; `used_at` preserved (audit
+  trail intact). New test
+  `TEST-MIGRATION-017-DEVICE-DELETE-PRESERVES-TOKEN` exercises
+  the full lifecycle. TEST_ORG_ID = `0d1` (grep'd first per
+  Session C's discipline). Backend 250 → 251 (+1 test, 20 files).
+
+- `2bb3cf3` -- **`docs/reference/USER-ONBOARDING.md` written.**
+  Referenced by Build Master §2 and §3.4 since before Session A;
+  absent until now. 241 lines, 1430 words, user-facing companion
+  to the implementer-facing specs. Different register, same claims;
+  every major claim carries a `Source:` line. All four recovery
+  states from ADR-HARDENING-001 §1 documented. Cryptographic
+  erasure guarantee preserved verbatim (the "does **not**
+  guarantee physical recovery" caveat is intact -- overclaiming
+  here would be the exact drift the spec exists to prevent).
+  Cross-references to all five authoritative docs verified to
+  resolve on disk. Closes KI-006.
+
+**KI-005 marked STANDING CONDITION** (not closed as a task).
+"Requirements layer authored after code; conformance sweeps have
+been partial" describes project state, not a discrete task. A full
+conformance sweep would be multi-session: re-read four canonical
+docs against code and close gaps. No such sweep is scheduled.
+Standing condition = accepted as the current state of the project,
+not a defect to be closed. If a future session runs the sweep, that
+session replaces this entry with the findings.
+
+**Two items named as standing deferrals:**
+
+- **Double-matrix-fetch dedupe (R-5 §7 observation).** The fix
+  requires a new StateFlow or previous-state tracking on the routing
+  effect; current cost is one saved HTTP round-trip per reauth
+  cycle (2 fetches instead of 1, both succeed, `MatrixStore.accept`
+  rejects same-version). **Cost of fix > payoff.** Revisit only if
+  reauth frequency becomes measurable perf burden.
+
+- **Instrumented Compose tests for admin flows.** Requires adding a
+  Compose test rule to the build config. Belongs in a dedicated
+  test-coverage session, not backlog hygiene. Zero fielded-user
+  impact; the Android JVM suite (212 tests) plus manual emulator
+  acceptance covers the flows.
+
+**No new §7 additions this session** -- U-2 was mechanically
+straightforward. The U-1 §7 additions
+(close()-with-zero-callers, extraction-supersedes-prefix,
+truncation-commands, brace-walk) covered everything U-2 hit.
+Recording that so a future reader doesn't wonder why this
+session's §7 count is zero -- it means the previous additions
+applied cleanly, not that the session was less rigorous.
+
+**Counts.** Backend 250 → 251 (+1 migration-017 test). Android
+JVM 212 unchanged (doc + backend migration; no Android touch).
+
+**Project state at U-2 close:**
+
+No blocking work. The 037-041 hardening chain closed at T-1. The
+one real defect (SQLite leak) fixed at U-1. Three dedup/extraction
+backlog items closed at U-1 and U-2. USER-ONBOARDING.md closed at
+U-2. What remains is Phase 2 preparation (choice, not obligation)
+and standing conditions (KI-005, double-fetch, instrumented tests).
+
 ---
 
 ## 4. Known issues
@@ -2673,12 +2748,28 @@ Shut down emulator cleanly (menu -> Power off). Or accept re-enrollment.
 Resolved by commit `e6eed9b`. File has `generated: true`, all six
 W-series vectors populated.
 
-### KI-005: Requirements layer authored after the code
+### KI-005 (STANDING CONDITION): Requirements layer authored after the code
 The four canonical documents were written 2026-10-14. Conformance
 sweeps have been partial.
 
-### KI-006: USER-ONBOARDING.md still missing
-Referenced by Build Master §2 and §3.4. Not blocking.
+**Standing condition, not a closable task.** A full conformance
+sweep means re-reading every canonical document (US-ADD-001,
+US-MASTER-001, AUTH-SPEC-001, THREAT-MODEL-001) against the current
+codebase and either closing gaps or amending the docs. This has
+never been scheduled as a session; it's a multi-session project.
+Nothing in the current backlog is blocked on it. If a future
+session runs the sweep, that session replaces this entry with its
+findings.
+
+### KI-006 (RESOLVED 2026-10-18, Session U-2): USER-ONBOARDING.md written
+`docs/reference/USER-ONBOARDING.md` written at Session U-2.
+241 lines, 1430 words. User-facing companion to the implementer
+docs; every claim restated from an authoritative source (with
+`Source:` lines); cryptographic erasure guarantee preserved
+verbatim (Build Master §3.4's "does not guarantee every physical
+storage remnant is forensically unrecoverable" caveat intact);
+all four recovery states from ADR-HARDENING-001 §1 documented.
+Absent since before Session A; closed Session U-2.
 
 ### KI-007 (RESOLVED): Kotlin number serialization
 Resolved by `ff15357`.
@@ -4093,7 +4184,7 @@ Rebuild after flipping — read at HttpClient construction time.
 
 Current verified state: **212 Android JVM tests** (2026-10-18),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
-and **250 backend tests** (2026-10-18, 16 files), all from runner output.
+and **251 backend tests** (2026-10-18, 20 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
 infrastructure (Mac vs emulator) and must not be summed.
 
