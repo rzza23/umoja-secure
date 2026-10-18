@@ -163,6 +163,36 @@ fun AppRoot(lifecycle: Lifecycle) {
     }
     val sessionState by sessionStateManager.state.collectAsState()
 
+    // TASK-P1-040-D: wire the HttpClient interceptor to the state
+    // machine. Any API 401 on a non-auth-free path fires the handler,
+    // which calls sessionStateManager.reauthenticate() (single-flight
+    // via 040-B's Mutex+CompletableDeferred) and returns the fresh
+    // bearer on success. The retry then re-issues the original
+    // request with the new bearer.
+    //
+    // Companion-scoped handler rather than constructor-injected: 13
+    // HttpClient construction sites exist; only AppRoot should own
+    // the wiring. Keyed on sessionStateManager so a deviceId change
+    // (post-enrollment, post-logout) re-registers against the new
+    // instance. onDispose clears the handler so a de-composed
+    // AppRoot does not leave a stale lambda retaining the old state
+    // manager.
+    //
+    // The handler returns String? (fresh bearer, or null for terminal
+    // failure). A boolean would suffice for "should retry" but the
+    // retry needs the fresh token -- the buffered request carries the
+    // pre-reauth bearer. Without the fresh token, the retry 401s
+    // again and the state transition to Authenticated goes unused.
+    DisposableEffect(sessionStateManager) {
+        HttpClient.on401Handler = {
+            val state = sessionStateManager.reauthenticate()
+            if (state is SessionStateManager.State.Authenticated) state.token else null
+        }
+        onDispose {
+            HttpClient.on401Handler = null
+        }
+    }
+
     val wsState by app.webSocketClient.state.collectAsState()
     val coroutineScope = rememberCoroutineScope()
 
