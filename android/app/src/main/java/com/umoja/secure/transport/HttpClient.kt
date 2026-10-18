@@ -1,6 +1,7 @@
 package com.umoja.secure.transport
 
 import android.util.Log
+import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -34,6 +35,36 @@ class HttpClient(baseUrl: String) {
         private const val CONNECT_TIMEOUT_SECONDS = 90L
         private const val READ_TIMEOUT_SECONDS = 90L
         private const val WRITE_TIMEOUT_SECONDS = 90L
+
+        /**
+         * Invoked on any 401 from a non-auth-free path. Returns the
+         * fresh bearer token to retry with, or null for terminal
+         * failure (reauth rejected, network failure, enrollment
+         * required). See [shouldRetryAfter401] and [executeWithRetry].
+         *
+         * **Companion-scoped, not constructor-injected** -- 13
+         * HttpClient construction sites exist today, most of them
+         * pre-existing and outside 040-D's scope. Constructor
+         * injection would ripple through all of them for no gain:
+         * the handler is a singleton concern (at most one session
+         * state machine exists at a time; AppRoot's
+         * remember(deviceId) is the sole owner). [@Volatile] for
+         * cross-thread visibility: setter runs on Main (AppRoot's
+         * DisposableEffect), reader runs on whatever dispatcher the
+         * API call used.
+         *
+         * Auth-free paths (`/auth/` prefix, `/enrollment`) skip the handler
+         * entirely via [shouldRetryAfter401] -- this is the ADR §2
+         * recursion guard, structural rather than flag-based.
+         *
+         * Set/cleared by AppRoot's DisposableEffect(sessionStateManager).
+         * A de-composed AppRoot clears the handler so a stale lambda
+         * cannot retain the state manager across composition cycles.
+         *
+         * TASK-P1-040-D, ADR-HARDENING-001 §2 "Retry-the-original-call".
+         */
+        @Volatile
+        var on401Handler: (suspend () -> String?)? = null
     }
 
     private val baseUrl: String = baseUrl.trimEnd('/')
@@ -80,8 +111,41 @@ class HttpClient(baseUrl: String) {
         return execute(request)
     }
 
-    private fun execute(request: Request): HttpResult {
-        return try {
+    private fun execute(request: Request): HttpResult =
+        executeWithRetry(request, retryDepth = 0)
+
+    /**
+     * Synchronous execute with one 401 retry. See [shouldRetryAfter401]
+     * for the predicate. The retry re-issues the *same* request shape
+     * with a **fresh** bearer from the handler -- a key design point
+     * the ADR does not specify. Without the fresh bearer, the retry
+     * re-sends the pre-reauth token and hits 401 again (the state
+     * machine's reauth wrote a new token to storage; the buffered
+     * request still carries the old one).
+     *
+     * **runBlocking bridge.** [execute] is `fun`, not `suspend` --
+     * every API class (AdminApi, ContactsApi, IdentityChangeApi,
+     * EnvelopeApi, PreKeyApi) is sync, and their callers wrap in
+     * `withContext(Dispatchers.IO)` at the API boundary (AppRoot,
+     * MessagingService, SessionManager). The handler is `suspend`
+     * because [SessionStateManager.reauthenticate] uses
+     * `withContext(IO)` internally. Bridging at this single point
+     * is the honest Phase 1 trade-off: the alternative is making
+     * the entire HTTP surface suspend, which ripples into every
+     * API class, every ViewModel, and every LaunchedEffect. Not in
+     * scope for 040-D. Phase 2: HTTP layer becomes suspend; this
+     * bridge disappears.
+     *
+     * The caller thread is already blocking on OkHttp's synchronous
+     * `execute()`. `runBlocking` adds one more block on the same
+     * thread (the reauth round-trip), so no new deadlock class is
+     * introduced. Callers on Main would throw
+     * `NetworkOnMainThreadException` from OkHttp *before* reaching
+     * this bridge -- the interceptor cannot fire on Main in
+     * practice.
+     */
+    private fun executeWithRetry(request: Request, retryDepth: Int): HttpResult {
+        val result = try {
             client.newCall(request).execute().use { response ->
                 HttpResult(
                     code = response.code,
@@ -97,8 +161,54 @@ class HttpClient(baseUrl: String) {
             )
             throw HttpException("network_error", e)
         }
+
+        val handler = on401Handler
+        val path = request.url.encodedPath
+        if (retryDepth == 0 && shouldRetryAfter401(path, result.code, handler != null)) {
+            val freshBearer = try {
+                runBlocking { handler!!.invoke() }
+            } catch (e: Exception) {
+                Log.e(
+                    TAG,
+                    "on401 handler threw: ${e.javaClass.simpleName}: ${e.message}",
+                    e,
+                )
+                null
+            }
+            if (freshBearer != null) {
+                Log.i(TAG, "401 on $path; reauth succeeded, retrying once with fresh bearer")
+                val retried = request.newBuilder()
+                    .header("Authorization", "Bearer $freshBearer")
+                    .build()
+                return executeWithRetry(retried, retryDepth = 1)
+            }
+            Log.w(TAG, "401 on $path; reauth failed or terminal, returning 401 to caller")
+        }
+
+        return result
     }
 }
+
+/**
+ * Pure predicate for the interceptor's retry decision. Extracted
+ * from [HttpClient.executeWithRetry] so the decision logic is
+ * JVM-testable without mocking OkHttp (which would require
+ * okhttp3-mockwebserver on the classpath -- not currently present,
+ * and adding it would be scope creep for 040-D).
+ *
+ * Returns true iff the response is 401 AND a handler is registered
+ * AND the path is not auth-free. Auth-free = `/auth/` prefix (challenge,
+ * verify, logout) or `/enrollment` (pre-auth; a 401 here means an
+ * invalid enrollment token, not a stale session).
+ *
+ * The retry-with-fresh-bearer flow itself (challenge -> verify ->
+ * retry) is verified at the emulator layer; see TASK-P1-040-E.
+ */
+internal fun shouldRetryAfter401(path: String, code: Int, hasHandler: Boolean): Boolean =
+    code == 401 &&
+    hasHandler &&
+    !path.startsWith("/auth/") &&
+    !path.startsWith("/enrollment")
 
 data class HttpResult(val code: Int, val body: String)
 
