@@ -1,7 +1,7 @@
 # THREAT-MODEL-001 — Umoja Secure Phase 1
 
 Document ID: THREAT-MODEL-001
-Version: 0.2 (conformance-swept 2026-10-18)
+Version: 0.3 (TASK-P1-042 landed 2026-10-18)
 Date: 2026-10-14
 Authority: Derived from UMOJA-SECURE-BUILD-MASTER.md v1.4.2, plus project-owner attestation on the same date.
 Status: Draft. Not yet in force. Subject to revision.
@@ -320,6 +320,15 @@ Missed notifications are covered by:
 > AUTH-SPEC-001 §9.3 sweep (Session U-3); P1-042 closes this gap.
 > Until P1-042 lands, the WS-close timing claim in §8 is ≤5s when
 > the listener is healthy, ≤5min when it is disconnected.
+>
+> *v0.3 fix (2026-10-18):* TASK-P1-042 fixed at commit 07cc2b4.
+> `ws/revocation.ts` now reconnects on connection loss (5s fixed
+> interval) and re-runs reconciliation on every successful connect,
+> before the listener reports ready. WS-close timing is ≤5s when
+> the listener is healthy; ≤5s after reconnect fires when the
+> listener was disconnected; the 5-minute revalidation cycle
+> remains the independent backstop if reconnect itself repeatedly
+> fails.
 
 **Consequences for the offline gap:** If Device B is offline and holds a
 stale matrix showing revoked Device A as a contact, then when B returns
@@ -388,8 +397,9 @@ Explicitly not covered by this threat model:
 |---------|------|--------|
 | 0.1 | 2026-10-14 | Initial draft. Authored from Build Master v1.4.2 + owner attestation. |
 | 0.2 | 2026-10-18 | Conformance sweep (KI-005, Session V-1). Eight findings: §6.2 consumption mechanism corrected (matches AUTH-SPEC-001 §10.3 v0.2); §8 reconciliation prose corrected (startup not reconnect, unconditional not incremental query) + P1-042 cross-reference for the reconnect gap; §6.3, §6.4, §6.7 marked **planned-not-shipped** with current-state notes (P1-021b, P1-036); §5 STRIDE precision on P1-031's scope. Ten claims verified as holding (§6.5, §6.6, §7 trust boundaries, §8 per-request check, §9 composition). Three refuted-hypotheses candidates (§6.2 mechanism, §7 pinned-key assertion, §9 composition) confirmed by reading actual code. |
+| 0.3 | 2026-10-18 | TASK-P1-042 fixed at commit 07cc2b4. §8 v0.2 correction blockquote appended: the reconnect-and-reconcile gap it named is closed. Actual `ws/revocation.ts` now reconnects on connection loss (5s fixed interval) and re-runs reconciliation on every successful connect. WS-close timing is ≤5s when listener healthy, ≤5s after reconnect fires when listener was disconnected; 5-min revalidation remains independent backstop. |
 
 
 ---
 
-— end of THREAT-MODEL-001 v0.1 draft —
+— end of THREAT-MODEL-001 v0.3 draft —
