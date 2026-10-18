@@ -324,7 +324,7 @@ private fun NotAuthorizedBanner() {
 }
 
 @Composable
-private fun AckDialog(
+internal fun AckDialog(
     notice: ReplacementNoticeStore.StoredNotice,
     ackInProgress: Boolean,
     ackError: String?,
