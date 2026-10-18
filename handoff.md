@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session R-4 — TASK-P1-040-D DONE: HttpClient 401 interceptor + companion-scoped handler, AppRoot wiring, Revoked-branch preserve-device_id fix, EnrollmentScreen onAuthFailed fix. TEST-SESSION-REVOKED-ON-DEVICE passed end-to-end (detection + recovery). JVM 191 → 198. Next: TASK-P1-040-E — expired-session + network-failure acceptance, then handoff close.)
+Last updated: 2026-10-18 (Session R-5 — TASK-P1-040-E DONE, TASK-P1-040 fully DONE: both manual tests passed — APP-START-EXPIRED (silent reauth) + NETWORK-DURING-REAUTH (NetworkFailure terminal, recovered via Retry). All six registry §B tests accounted for. Nine commits A→D-3 across four sessions. Next: TASK-P1-041 — failed-verification operator logging, deferred non-blocking.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -93,7 +93,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 198** (verified 2026-10-18 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed.)
+- **JVM unit tests: 198** (verified 2026-10-18 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes.)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -2285,6 +2285,84 @@ test (`TEST-SESSION-NETWORK-DURING-REAUTH`) still need manual
 emulator verification; both require the interceptor in place,
 which landed this session. R-5 opens on 040-E.
 
+
+### Session R-5 — TASK-P1-040-E DONE (2026-10-18)
+
+Final acceptance for TASK-P1-040. Two manual emulator tests, both
+passed on the R-4 build with zero code changes. **TASK-P1-040 is
+now fully DONE end-to-end.**
+
+**TEST-SESSION-APP-START-EXPIRED** (Path B — server-side expiry):
+- `UPDATE sessions SET created_at = now() - interval '2 hours',
+  expires_at = now() - interval '1 hour'` on all 3 active sessions
+- Cold launch on expired session → silent reauth
+- Backend: `challenge=1`, `verify=1` (contrast R-4's revoked test
+  where `verify=0` — auth continued past challenge because the
+  device is active, not revoked)
+- Logcat: `401 on /me/matrix; reauth succeeded, retrying once with
+  fresh bearer` ×3 (single-flight collapse of 3 concurrent 401s)
+- Post-reauth: 1 new valid session + 3 expired
+- UI: **Conversations home**, no button tap
+- **Path A (local expiry)** — SecureStorage token past expiry — is
+  JVM-verified in 040-B's `TEST-SESSION-EXPIRED-AUTO-REAUTH` but
+  **not emulator-reproducible without a debug-only "force local
+  expiry" hook**: SecureStorage is AES-GCM encrypted with a
+  Keystore-derived key; no `adb shell` path to mutate it. Both
+  paths invoke the same `performReauth()`. ADR §2's intent
+  ("user shouldn't tap a button because the app has been closed
+  for 16 hours") is satisfied by Path B's emulator evidence.
+
+**TEST-SESSION-NETWORK-DURING-REAUTH** (Path B — session cleared +
+backend down):
+- Log out from Settings → Enrollment with "Device enrolled"
+- `docker compose stop backend` (health=000)
+- Tap **Authenticate** → `onAuthFailed("network_error")` →
+  `reauthenticate()` → network fails → **"Connection lost"
+  terminal screen** with Retry + Log out
+- Screenshot confirms title, message, primary Retry, secondary
+  Log out — matches `TerminalMessageScreen` design
+- Crash buffer empty — NetworkFailure is a normal terminal state
+- `docker compose start backend` (health=200), tap **Retry** →
+  challenge + verify + matrix chain fires → **Conversations home**
+- Backend: `challenge=1`, `verify=1` (Retry-triggered reauth
+  succeeded)
+- Post-reauth: 1 new valid session
+
+**One observation, not a bug:** after a 401-triggered reauth, the
+backend sees two `GET /me/matrix` calls — the interceptor's
+retry-with-fresh-bearer and the routing effect's
+`LaunchedEffect(screen, deviceId)` firing on the
+Reauthenticating → Authenticated transition. Both succeed;
+`MatrixStore.accept` rejects same-version (rollback guard) so no
+duplicate row. Backlogged as a minor optimization (dedupe via a
+flag or by keying the fetch effect on a version that only bumps
+once per reauth cycle), not a defect.
+
+**What R-5 did NOT do:**
+- No code changes — both tests passed first-attempt against the
+  R-4 build
+- No new JVM tests — NetworkFailure's state transition was already
+  JVM-verified in 040-B; only the terminal UI needed manual
+  verification
+
+**Full 040 chain closed** — nine implementation commits (db9fe72 A,
+f9e01ab B, 55513f2 C-1, 11064d6 C-2, ae1c840 D-1, d835821 D-2,
+bfe9fee D-3) plus four handoff commits. Every registry §B
+acceptance criterion and required test now accounted for:
+
+| Test | Layer | Status |
+|---|---|---|
+| TEST-SESSION-EXPIRED-AUTO-REAUTH | JVM (040-B) | pass |
+| TEST-SESSION-CONCURRENT-401-SINGLE-REAUTH | JVM (040-B) | pass |
+| TEST-SESSION-REVOKED-TERMINAL | JVM (040-B) | pass |
+| TEST-SESSION-NETWORK-DURING-REAUTH | JVM 040-B + UI R-5 | pass |
+| TEST-SESSION-APP-START-EXPIRED | Manual R-5 | pass |
+| TEST-SESSION-REVOKED-ON-DEVICE | Manual R-4 | pass |
+
+**ADR-HARDENING-001 §9 gains a v0.3 entry** (this session's
+companion commit) noting 040's completion and the 037-041 chain
+being closed except 041.
+
 ---
 
 ## 4. Known issues
@@ -2926,18 +3004,26 @@ Original phrasing preserved below for history:
     → Authenticate → Conversations) both verified. See §3 Session
     R-4 entry.
 
-    **TASK-P1-040-E next.** Remaining manual acceptance:
-    - `TEST-SESSION-APP-START-EXPIRED` — force session expiry in
-      `sessions` table, cold launch, observe silent reauth
-      (Authenticating → Authenticated with no button tap)
-    - `TEST-SESSION-NETWORK-DURING-REAUTH` — force network failure
-      during reauth (kill docker compose backend mid-flow), observe
-      NetworkFailure terminal screen with Retry button
+    **TASK-P1-040-E DONE 2026-10-18, TASK-P1-040 fully DONE.**
+    Both manual acceptance tests passed on the R-4 build with zero
+    code changes:
+    - TEST-SESSION-APP-START-EXPIRED: cold launch on expired
+      session → silent reauth (challenge=1, verify=1, new session
+      created, Conversations home, no button tap)
+    - TEST-SESSION-NETWORK-DURING-REAUTH: backend stopped, tap
+      Authenticate → NetworkFailure terminal with Retry; backend
+      restarted, tap Retry → Conversations home
+    See §3 Session R-5 entry. All six registry §B tests now
+    accounted for. ADR-HARDENING-001 §9 v0.3 amendment lands
+    with this handoff.
 
-    Both now reachable with 040-D's interceptor in place. After
-    040-E, TASK-P1-040 is fully DONE and R-5 closes with the
-    handoff + ADR-HARDENING-001 amendment noting the 040 chain's
-    completion.
+    **Next task: TASK-P1-041 — failed-verification operator
+    logging.** Deferred per ADR §6 (non-blocking; benefits from
+    040's state manager being in place since 041's log surface
+    sits inside verification failure paths the state manager
+    already touches). Local user-visible log of verification
+    failures; DiagnosticsScreen surfaces last N; entries cleared
+    by corresponding store's clear().
 
 **Backlog items (not scheduled):**
 - Instrumented Compose tests for admin flows (no test rule configured;
@@ -2967,6 +3053,14 @@ Original phrasing preserved below for history:
     field) and the token_hash hex (for post-insert verification).
   - ~40-line Python or shell script. Every ad-hoc psql session
     since Session A is the same 4-query pattern.
+- **Dedupe the double-matrix-fetch after 401-triggered reauth**
+  (Session R-5 observation). Two paths fetch `/me/matrix` on the
+  Reauthenticating → Authenticated transition: the interceptor's
+  retry and the routing effect's `LaunchedEffect(screen, deviceId)`.
+  Both succeed; the second is wasted. Fix option: track "already
+  fetched this reauth cycle" in a `MutableStateFlow<Long>` the
+  routing effect keys on, instead of `screen` directly. Minor
+  optimization; not a defect.
 - **Consider making `enrollment_tokens.used_by_device_id`
   `ON DELETE SET NULL`.** Session R-4's device-row deletion hit
   the `NO ACTION` FK, requiring manual token cleanup. In a test
@@ -3587,6 +3681,16 @@ Rebuild after flipping — read at HttpClient construction time.
   The compile is the acceptance; "OK" is the write-confirmed
   signal. Run the compile in the same turn as the edit, and read
   `^e:` lines (not `tail -4`) when it fails. Session R-4.
+- **Double-matrix-fetch after 401-triggered reauth — harmless but
+  worth knowing.** After the interceptor's retry-with-fresh-bearer
+  succeeds, the routing effect's `LaunchedEffect(screen, deviceId)`
+  also fires because `screen` transitioned Reauthenticating →
+  Authenticated. Both fetch `/me/matrix`; both succeed;
+  `MatrixStore.accept` rejects the second (same-version rollback
+  guard). One extra round-trip per reauth cycle. Not a defect --
+  the guard prevents the duplicate from mattering -- but a future
+  session looking at request logs should expect the pair and not
+  chase a bug. Session R-5.
 
 Current verified state: **198 Android JVM tests** (2026-10-18),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),

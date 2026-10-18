@@ -367,6 +367,49 @@ The alternative — ship 038's gate without 037 — is rejected because
 it produces green tests and a gate that never fires in production.
 That is worse than no gate: it hides the known hole behind green CI.
 
+### v0.3 (2026-10-18) -- TASK-P1-040 DONE, 037-041 chain closed except 041
+
+TASK-P1-040 closed end-to-end across four implementation sessions
+(R, R-2, R-3, R-4) and one acceptance session (R-5). All seven
+registry §B acceptance criteria met, all six required tests
+accounted for (JVM where feasible, manual emulator where the test
+is inherently UI-observable).
+
+**Commits** (chronological): `db9fe72` (040-A backend
+device_revoked disambiguation), `f9e01ab` (040-B
+SessionStateManager + single-flight), `55513f2` (040-C-1 clear()),
+`11064d6` (040-C-2 routing rewrite), `ae1c840` (040-D-1
+HttpClient interceptor), `d835821` (040-D-2 AppRoot wiring),
+`bfe9fee` (040-D-3 terminal-state honesty fixes).
+
+**§2 rulings landed:**
+- 7-state SessionStateManager with the documented transitions
+- Single-flight reauth via Mutex + CompletableDeferred (first in
+  codebase; the "same future" §2 prescribed)
+- Recursion guard via `shouldRetryAfter401` -- `/auth/` prefix
+  excluded from interceptor retry
+- Retry-the-original-call via fresh-bearer refresh. Implementation
+  refines §2's "retry the buffered request" to "retry the buffered
+  request with refreshed credentials" -- necessary because the
+  buffered request carries the pre-reauth bearer; retrying with it
+  would 401 again
+- Revoked-vs-expired disambiguation (040-A backend)
+- App-start expiry check (routing effect handles Unauthenticated
+  → Enrollment silently; expired sessions reauth without a
+  button tap)
+
+**§1 invariant honored:** every 401, 403, and network failure now
+routes to either transparent recovery (successful reauth), a
+retryable state (NetworkFailure with Retry button), or a terminal
+state with a clear next step (Revoked with admin-contact message
+and "Log out and try again" that preserves `device_id`, avoiding
+the `devices_key_unique` dead-end that 040-D-3 fixed).
+
+**TASK-P1-041 remains deferred.** Failed-verification operator
+logging is non-blocking; benefits from 040's state manager being
+in place since 041's log surface sits inside verification failure
+paths the state manager already touches.
+
 ### Non-blocking
 
 None blocking. Any that arise during implementation get resolved in
