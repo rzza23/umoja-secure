@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session Z-4 — Compose refactor arc, session C: ChatViewModel injectable at `bd8a6e7`, 10 JVM tests. **PLAN REVISION, explicit:** Z-2 §4 planned this session as "ChatScreen refactor" (extract ChatScreenState mirroring session A's AdminScreenState). Session C's full-read reconnaissance showed ChatScreen is a composition shell — 6 UI-flag remember vars, 2 derived states that already call pure functions (`gateFor`, `SendGate.authorized`), 2 actions that already delegate to injected holders, zero trapped business logic. The real untested surface is `ChatViewModel` — a `Context`-bound final class with hardcoded `MessageStore`/`MessagingService`. Refactored `ChatViewModel` to inject 2 suspend lambdas + scope; production `create(context)` factory; `MainNavigation.kt` one-line caller change. **ChatScreenState is cancelled** (would add indirection without testability); sessions E/F dropped. Arc: A/B/C done, D = ChatScreen Compose tests pending — now enabled by C. Fire-and-forget property preserved and verified end-to-end (walk + backend log evidence gate — commit is gated on that evidence, not just "tests pass"). Backend 254, Android JVM 234 → 244, androidTest 57. **No blocking work remains.** Next: session D OR nothing — choice, not obligation.)
+Last updated: 2026-10-18 (Session Z-5 — Compose refactor arc, session D and ARC COMPLETE: ChatScreenTest at `9bfdfab`, 14 Compose tests. Arc delivered in four sessions: A (AdminScreenState refactor, `2804427`), B (AdminScreenStateTest, `a6de609`), C (ChatViewModel injectable + test, `bd8a6e7` — **plan revision**: ChatScreenState planned in Z-2, cancelled on C1 evidence; ChatViewModel refactored instead as the actual untested surface), D (ChatScreenTest, `9bfdfab`). All 14 tests pass on `createComposeRule()` (SecureScreen's null-safe cast makes pure composition safe). Fixtures seeded through `KeyValueStore` -- no network, no real crypto. Zero production code changes this session. Measurement diagnosis cost four blocks: three failed grep approaches to reading JUnit XML (parent-sum → 142, first-match → 1, substring-name → 15) before `xml.etree.ElementTree` produced the correct 71. **Three new §7 lessons** on structural data parsing. Backend 254, Android JVM 244, androidTest 57 → 71. **Deferral CLOSED: 5 of 5 sub-deliverables landed.** **No blocking work remains.** Next: Phase 2 OR nothing -- choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -94,10 +94,12 @@ Endpoints:
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
 - **JVM unit tests: 244** (verified 2026-10-18 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests. Session Z-3: AdminScreenStateTest, 22 JVM tests. Session Z-4: ChatViewModelTest, 10 JVM tests.)
-- **androidTest: 7 files, 57 tests** (verified 2026-10-18 from
-  connectedAndroidTest XML; Session Z-1 added `AckDialogTest.kt` with
-  11 Compose tests — first non-crypto androidTest and first Compose
-  test in the project. Prior count 6 files / 46 tests from 2026-10-15;
+- **androidTest: 8 files, 71 tests** (verified 2026-10-18 from
+  connectedAndroidTest XML aggregate `<testsuites tests="71">` -- not
+  grep-summed; see §7 twelfth lesson. Session Z-1 added `AckDialogTest.kt`
+  (11 Compose tests); Session Z-5 added `ChatScreenTest.kt` (14 Compose
+  tests, arc session D, arc complete). Prior count 6 files / 46 tests
+  from 2026-10-15;
   was wrongly recorded as 0 files in an earlier handoff — see KI-013)
 
 Note: a prior handoff claimed 98 Android tests. That was wrong. The
@@ -3477,6 +3479,102 @@ is a practice rather than a new failure-class lesson). Adding lessons for
 methodical sessions dilutes the section's signal — recording the absence
 is honest.
 
+
+### Session Z-5 — Compose refactor arc, session D: ChatScreenTest, ARC COMPLETE (2026-10-18)
+
+Fourth and final session of the Compose test coverage arc. One commit:
+
+- `9bfdfab` — **test(chat): ChatScreenTest -- 14 Compose tests, arc
+  session D complete.** New ChatScreenTest.kt, 363 lines, 14 tests. Zero
+  production code changes. No new dependencies.
+
+**WHAT D DELIVERED.** 14 Compose tests covering ChatScreen's rendering
+paths, with fixtures seeded through the same `KeyValueStore` surface the
+production stores read from:
+
+- 3 unauthorized-peer tests (banner appears, composer placeholder
+  "Sending blocked", send icon disabled when no matrix seeded)
+- 3 authorized-peer tests (banner absent, placeholder "Message...",
+  send enabled after text entry when matrix permits the peer)
+- 4 identity-banner tests (pending renders; pending tap opens dialog;
+  rejected renders error banner; rejected has no View affordance per
+  Session I's Q3 ruling)
+- 1 both-conditions test (unauthorized + pending notice → both banners)
+- 2 message-list tests (empty state, bubbles render)
+- 1 send-action test (tap Send fires sendMessageFn with peer + text)
+
+**`createComposeRule()` BET PAID OFF.** D1's `SecureScreen` read showed
+its `LocalView.current.context as? Activity` cast is null-safe (per its
+own KDoc: "a null activity is a silent no-op"). That made pure
+`createComposeRule()` composition safe for ChatScreen tests -- FLAG_SECURE
+is silently skipped when no host Activity is present. Verified empirically:
+14/14 pass on `createComposeRule()`, no need for
+`createAndroidComposeRule<ComponentActivity>()`. If the bet had been wrong,
+the D4-fix compile would have still passed but D5's instrumentation run
+would have failed all 14 with the same exception -- the fallback was one
+line, but not needed.
+
+**FIXTURES ON FIRST TRY (one constructor exception).** Both seed helpers
+(`seedAuthorizedMatrix`, `seedNotice`) produced valid seed data from the
+D3-read shapes on the first compile. The one fix during the session was
+`ReplacementNoticeStore(kv)` requiring its full constructor
+`(store, signingFn, ackingDeviceId)` -- the D4 compile error was exact
+(line 161, two missing params), the fix was mechanical (identity
+passthrough for `signingFn`, arbitrary string for `ackingDeviceId`; both
+paths are never invoked by these 14 tests).
+
+**THE MEASUREMENT DEBUGGING CHAIN -- the session's actual cost.** Where the
+code went right on the first run, the verification did not. Three failed
+grep approaches to reading JUnit XML before a structural parser worked:
+
+1. **D6:** `grep -o 'tests="[0-9]*"'` summed both the `<testsuites>` outer
+   attribute (71) AND every `<testsuite>` child attribute (sum = 71) = 142.
+   Committed nothing; gate blocked correctly.
+2. **D6-fix:** Python `re.search` (first-match-only) parsed just
+   `ExampleInstrumentedTest` with `tests=1`, reported aggregate 1.
+   Committed nothing; gate blocked correctly.
+3. **D6-retry:** `grep 'name="com.umoja.secure.ui.chat.ChatScreenTest"'`
+   matched both the `<testsuite name="...">` line AND all 14
+   `<testcase classname="...">` lines (substring: `name=` in `classname=`),
+   reported 15 entries where 1 expected. Committed nothing; gate blocked
+   correctly.
+4. **D6-final:** `xml.etree.ElementTree` parsed the file as XML. Correct
+   aggregate (71), correct ChatScreenTest presence (1 suite, tests=14),
+   gate passed. Committed.
+
+The gate blocked a commit three times on measurement bugs. That is the
+correct response: unexplained count → diagnose → change measurement →
+commit. The content was correct every time. Three failures of the same
+measurement class in one block chain is the signal that the **tool** was
+wrong, not the third invocation: structured data needs a structural
+parser. Recorded as three new §7 lessons.
+
+**THE ARC IN RETROSPECT.** Four sessions, two plan revisions on evidence,
+one cancelled sub-session, five landed sub-deliverables:
+
+- A (Z-2, `2804427` + `8da90d7`): AdminScreen → AdminScreenState plain-
+  class refactor. Delivered the pattern. Option C (not androidx ViewModel),
+  matching the codebase's own ChatViewModel precedent.
+- B (Z-3, `a6de609` + `2775367`): AdminScreenStateTest, 22 JVM tests.
+  RunBlocking precedent (kotlinx-coroutines-test not on classpath).
+- C (Z-4, `bd8a6e7` + `b8f0f04`): ChatViewModel injectable + test.
+  **PLAN REVISION:** Z-2 planned a ChatScreenState refactor; C1's full
+  ChatScreen read showed ChatScreen is a composition shell (6 UI-flag
+  remember vars, 2 derived states already calling pure functions, 2
+  actions already delegating to holders, zero trapped logic). The actual
+  untested surface was ChatViewModel. Refactored that instead.
+  ChatScreenState cancelled.
+- D (Z-5, `9bfdfab`): ChatScreenTest, 14 Compose tests. Enabled by C's
+  injectability work.
+
+Total across the arc: +56 tests (22 JVM + 10 JVM + 14 androidTest + 11
+androidTest from Z-1 that this arc closed out as the deferral's first
+sub-deliverable). Zero production behavior changes. Every sub-deliverable
+verified by its own test suite plus (for the behavior-preserving refactors
+in A and C) emulator acceptance.
+
+**Three new §7 lessons earned** (the measurement chain) — see below.
+
 ---
 
 ## 4. Known issues
@@ -4205,19 +4303,27 @@ Original phrasing preserved below for history:
       double-matrix-fetch dedupe (R-5 §7 note).
 
 **Backlog items (not scheduled):**
-- ~~Instrumented Compose tests for admin flows~~ — **4 of 5
-  sub-deliverables landed; 1 remaining in the arc.** Delivered:
-  AckDialog (11 Compose tests, `bf13dcc`), AdminScreen →
-  `AdminScreenState` refactor (`2804427`), AdminScreenStateTest
-  (22 JVM tests, `a6de609`), **ChatViewModel refactor + testability**
-  (`bd8a6e7`, 10 JVM tests). **Z-2's plan called session C "ChatScreen
-  refactor"; the delivered work is ChatViewModel — different target,
-  changed on evidence.** ChatScreen is a composition shell, not a logic
-  container; the actual untested logic was ChatViewModel. **ChatScreenState
-  is cancelled** — a state-holder there would add indirection without
-  testability. Remaining: session D = ChatScreen Compose tests, now
-  enabled by C's injectability work (all three ChatScreen deps can be
-  faked). No further refactor needed; one session left.
+- ~~Instrumented Compose tests for admin flows~~ — **RESOLVED
+  2026-10-18, arc complete. 5 of 5 sub-deliverables landed.**
+  **Delivered across the arc:** AckDialog (`bf13dcc`, 11 Compose
+  tests), AdminScreen → `AdminScreenState` refactor (`2804427`),
+  AdminScreenStateTest (`a6de609`, 22 JVM tests), **ChatViewModel
+  refactor + testability** (`bd8a6e7`, 10 JVM tests), ChatScreenTest
+  (`9bfdfab`, 14 Compose tests).
+  **Plan revisions during the arc, named honestly:** Z-2 §4 planned
+  session C as "ChatScreen refactor" (extract ChatScreenState mirroring
+  session A's AdminScreenState). Session C's C1 reconnaissance showed
+  ChatScreen is a composition shell, not a logic container; the actual
+  untested surface was ChatViewModel. **ChatScreenState is cancelled.**
+  The arc reached 5 of 5 by targeting the right surface, not by
+  executing the Z-2 plan verbatim.
+  **Coverage at arc close:** AckDialog (11 androidTest), AdminScreenState
+  (22 JVM), ChatViewModel (10 JVM), ChatScreen (14 androidTest). All four
+  surfaces are now covered by named tests. Zero production behavior
+  changes across the arc (both refactors were behavior-preserving, A and
+  C each verified by emulator acceptance in addition to unit tests).
+  **Deferral closed.** See §3 Session Z-5 entry for the full arc
+  retrospective.
 - Deduplicate base64url validators (KI-016).
 - `canonicalJson` deduplication between `audit/log.ts` and
   `audit/verify.ts` (KI-008).
@@ -5252,9 +5358,62 @@ Rebuild after flipping — read at HttpClient construction time.
   prefixes) and the seventh (grep returning 0 is ambiguous) -- the
   pattern or the check assumption is not the content.
 
+- **JUnit XML has two aggregate levels; sum only one.** The outer
+  `<testsuites tests="N">` attribute is the authoritative total
+  computed by the test runner. Each `<testsuite tests="M">` child
+  carries its own class's count; the M values partition the run and
+  sum to N. Session Z-5's first reading of the connected-AndroidTest
+  XML summed every `tests=` attribute in the file (parent N + all
+  children M) and reported 142 for a run of 71. The 142 was
+  arithmetically correct as an extraction -- it just answered the
+  wrong question. **Read `<testsuites tests=>` for the total; read
+  each `<testsuite tests=>` only for per-class breakdown.** Do not
+  sum across both levels. When the total looks wrong, `head -2` the
+  raw file to see the `<testsuites>` line before concluding the
+  content is wrong. Same family as the seventh (grep 0 is ambiguous)
+  and eighth (substring anchors) lessons: measurement bugs are not
+  content bugs.
+
+- **Grep on attribute values is fragile because common attribute names
+  are substrings of longer ones.** Session Z-5's D6-retry grep for
+  `name="com.umoja.secure.ui.chat.ChatScreenTest"` matched both the
+  `<testsuite name="...">` line AND all 14 `<testcase
+  classname="...">` lines, because `name=` is a substring of
+  `classname=`. Reported 15 entries where 1 expected. `tests=` is a
+  substring of `testsuite=`; `id=` of `android:id=`; the pattern
+  generalizes. **When measuring structured data by attribute, use a
+  structural parser (`xml.etree`, `json.loads`, DOM), not text
+  matching.** A parser reads the attribute as the data model defines
+  it; grep reads the byte sequence. When the same measurement fails
+  three different ways in one block chain, that is the signal the
+  tool is wrong -- change the tool, not the third invocation. Z-5
+  demonstrated this with three failed grep approaches (parent-sum,
+  first-match, substring) before `xml.etree.ElementTree` produced the
+  correct 71 in one attempt.
+
+- **Verification code is code and gets the same discipline as
+  production code.** Session Z-5's production refactors (ChatScreenTest
+  fixtures) passed compile-check on the first try because `compile`
+  is an unforgiving oracle. The verification blocks (grep-based XML
+  reading) had no compiler guarding them -- a grep for a substring is
+  syntactically valid and produces a plausible number that happens to
+  be wrong. Three measurement blocks in this session produced 142, 1,
+  and 15 for what should have been a single correct answer: 71. Each
+  wrong number was syntactically a successful measurement. **When
+  writing a verification check, read the data format before writing
+  the pattern; if the check fails, verify the check before concluding
+  the content is wrong; when the same class of check fails more than
+  once, the class (not the instance) is wrong.** The evidence gate's
+  refusal to commit on an unexplained count is what made this a
+  productive failure rather than a shipped overclaim: three blocked
+  commits cost a round-trip each and produced a correct final commit,
+  versus a single shipped commit whose verification internally
+  contradicted itself.
+
 Current verified state: **244 Android JVM tests** (2026-10-18),
-**57 androidTest** (2026-10-18, 7 files, from connectedAndroidTest XML),
-and **254 backend tests** (2026-10-18, 20 files), all from runner output.
+**71 androidTest** (2026-10-18, 8 files, from connectedAndroidTest XML
+aggregate `<testsuites tests="71">` -- not grep-summed), and **254
+backend tests** (2026-10-18, 20 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
 infrastructure (Mac vs emulator) and must not be summed.
 
