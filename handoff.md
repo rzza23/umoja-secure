@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session R-2 — TASK-P1-040-B DONE: SessionStateManager 7-state machine + single-flight Mutex+CompletableDeferred + fail-toward-recovery on malformed expiry, 12 JVM tests, 178 -> 190. First-run failure (Deferred.awaitAll does not mutate the list) caught and fixed. Next: TASK-P1-040-C — AppRoot routing rewrite.)
+Last updated: 2026-10-18 (Session R-3 — TASK-P1-040-C DONE: SessionStateManager.clear() + AppRoot routing rewrite (state-driven), 4 new AppScreen branches, SessionScreens.kt, smoke verified (cold launch → Authenticated + /me/matrix; logout → Enrollment + backend logout; authenticate → full auth chain). JVM 190 → 191. Next: TASK-P1-040-D — HttpClient 401 interceptor.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -93,7 +93,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 190** (verified 2026-10-18 from XML; Session P's 4 SendGateTest tests, then Session R-2's 12 SessionStateManagerTest tests as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests.)
+- **JVM unit tests: 191** (verified 2026-10-18 from XML; Session R-2's 12 SessionStateManagerTest tests, then Session R-3's 1 SessionStateManager.clear() test (CLEAR-TRANSITIONS-TO-UNAUTHENTICATED) as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows.)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -2038,6 +2038,146 @@ zero 401 handling, each API catches its own errors via domain
 exceptions) is R-3's second commit. 040-E (emulator acceptance
 for expired/revoked/network paths) is R-3's third.
 
+
+### Session R-3 — TASK-P1-040-C DONE (2026-10-18)
+
+First production integration of the session state machine. AppRoot
+routing now derives `screen` from `SessionStateManager.state`; the
+two old `LaunchedEffect`s that read `SecureStorage` on `deviceId` /
+`sessionExpiresAt` and set `screen` imperatively are gone. Two
+commits:
+
+- `55513f2` — **040-C-1: SessionStateManager.clear() + test.**
+  ~5-line method `_state.value = State.Unauthenticated`, plus
+  `CLEAR-TRANSITIONS-TO-UNAUTHENTICATED` test. JVM 190 → 191.
+  Without `clear()`, `onLogout` would call
+  `SessionManager.clearSession()` and the state machine's
+  `_state` would stay `Authenticated` — the routing effect would
+  keep reporting `Authenticated` with empty storage. The KDoc
+  records the deliberate non-cancellation of `reauthInFlight`
+  (logout is user-initiated, not 401-triggered; the race window
+  is currently unreachable, but the KDoc is the entry point if a
+  future flow allows concurrency).
+
+- `11064d6` — **040-C-2: AppRoot routing rewrite.**
+  `MainActivity.kt` (~+150/−50), new
+  `ui/common/SessionScreens.kt` (~+105). Key changes:
+  - `sessionExpiresAt` compose var removed (6 use sites, all
+    routing-related; safe per the read).
+  - `sessionStateManager = remember(deviceId) { ... }` with
+    `AuthOutcome → ReauthOutcome` mapping ruled inline.
+  - Three routing effects replace two old ones:
+    `LaunchedEffect(deviceId, sessionStateManager)` calls
+    `initialize()`; `LaunchedEffect(sessionState, deviceId)`
+    derives `screen` from state; `role` is re-read inside the
+    Authenticated branch.
+  - Four new `AppScreen` objects: `Loading`, `Revoked`,
+    `NetworkFailure`, `EnrollmentRequired`.
+  - `onLogout` wraps `clearSession() → clear()` in
+    `coroutineScope.launch` — fixes the pre-existing
+    `CoroutineScope(Dispatchers.IO)` fire-and-forget leak
+    (unbounded scope survived navigation past the composable).
+  - `onAuthenticated` delegates to
+    `sessionStateManager.initialize()` — the state-driven effect
+    then routes.
+  - `onEnrolled` only updates `deviceId`; the `remember(deviceId)`
+    blocks reconstruct and `LaunchedEffect(deviceId)` re-fires
+    `initialize()`.
+
+**Design rulings encoded** (documented in commit message and KDoc,
+so R-4/R-5 cannot accidentally undo them):
+
+1. **`role` stays compose state, re-read on Authenticated.**
+   Extending `State.Authenticated` with role would be scope creep
+   on 040-B (state manager's job is session lifecycle, not user
+   metadata). The routing effect re-reads `session_role` from
+   `SecureStorage` on every Authenticated emission.
+
+2. **State-driven routing preserves Admin/Diagnostics
+   sub-navigation.** The Authenticated branch retains the
+   pre-existing guard (`if screen !is Admin && !is Diagnostics`)
+   so a reauth cycle does not kick the user out of a sub-screen
+   mid-flow. All other state branches (terminal, loading,
+   Unauthenticated) intentionally preempt sub-navigation.
+
+3. **`AuthOutcome → ReauthOutcome` mapping:** `Success → Success`;
+   `Failure("device_revoked") → DeviceRevoked`;
+   `Failure("device_key_missing") → EnrollmentRequired`;
+   `NotEnrolled → EnrollmentRequired`; `Failure(other codes) →
+   NetworkFailure`. The "other codes" bucket includes
+   `unauthorized` on purpose — the client cannot distinguish
+   `active + sig-fail` from genuine session invalidation on the
+   wire. Mapping it to `EnrollmentRequired` would strand users
+   for transient issues (clock skew, challenge expiry). Retryable
+   is the safer default; ADR §1's "never strand fielded user"
+   drives the choice.
+
+4. **`onLogout` uses `coroutineScope.launch` (rememberCoroutineScope),
+   not a new unbounded `CoroutineScope(IO)`.** The previous
+   implementation fire-and-forgot `clearSession()` on a scope
+   that survived navigation — a lifecycle leak. Wrapping in the
+   composition-scoped launcher fixes it and lets
+   `clearSession() → clear()` sequence deterministically.
+
+**Empirical verification** (smoke on emulator 5556, three real
+user flows):
+
+- **Cold launch on valid session** (session expires_at
+  2026-10-19T00:56 UTC, device not revoked): app lands
+  **Authenticated home** (Conversations tab with existing
+  conversation). Backend log at `13:00:31 UTC` (6s after
+  `13:00:25` launch) shows `GET /me/matrix` — the state
+  machine's `initialize()` transitioned to `Authenticated`, the
+  routing effect set `screen = Authenticated`, and the matrix-
+  fetch effect fired. **Proves cold-launch path end-to-end.**
+
+- **Log out**: Settings → Log out → **Enrollment screen**
+  showing "Device enrolled" + "Authenticate" button (device_id
+  preserved, session cleared — correct). Sessions table confirms
+  `revoked_at = 2026-10-18 12:55:48` for the pre-logout session
+  — `POST /auth/logout` reached the backend.
+
+- **Authenticate**: Enrollment → tap Authenticate → backend
+  sequence fires in order: `POST /auth/challenge` →
+  `POST /auth/verify` → `GET /me/matrix` all within 1s. State
+  transitions Unauthenticated → Authenticating → Authenticated.
+  **Proves reauth lambda + state machine + routing + fetch all
+  wire correctly.**
+
+**Three diagnostic mistakes during smoke** (recorded so future
+sessions don't repeat them; §7 has the general form):
+
+1. A screenshot from Session Q (status bar 1:47, prior day) was
+   initially misread as evidence that cold launch worked. The
+   timestamps didn't match the diagnostic time.
+
+2. `grep -E "req\."` on backend logs returned empty because the
+   JSON format is `"req":{` (colon), not `req.` (period). Block
+   6's targeted `/me/matrix` grep was the correct check; the
+   "empty block 8" misdiagnosis nearly declared a working app
+   broken.
+
+3. `--since 1m` and `--since 10m` windows truncated before the
+   actual events on two diagnostic runs.
+
+**Pre-existing findings worth follow-ups** (not introduced by
+040-C-2):
+
+- **SQLite connection leak** in logcat during cold launch:
+  `SQLiteConnectionPool: A SQLiteConnection object for database
+  '...umoja_local.db' was leaked!` fires ~dozens/sec.
+  `MessageStore` (or its callers) opens cursors without closing
+  them. Filed as a backlog item.
+
+**Scope honestly stated.** R-3 delivered 040-C end-to-end:
+`clear()` + routing rewrite + smoke verified against three real
+flows. **040-C does NOT exercise 401 → reauthenticate** — that
+requires an API call returning 401, which requires 040-D's
+interceptor to be wired. 040-E's full acceptance (expired
+session, revoked device, network-failure paths) needs both
+040-D and the state machine's triggering chain. R-4 opens on
+040-D.
+
 ---
 
 ## 4. Known issues
@@ -2656,17 +2796,31 @@ Original phrasing preserved below for history:
     it into AppRoot, 040-D wires it into HttpClient. See §3 Session
     R-2 entry.
 
-    **TASK-P1-040-C next.** AppRoot routing rewrite — replace the
-    current `sessionExpiresAt == null → Enrollment` check
-    (`MainActivity.kt` lines ~232-234) with `sessionExpiresAt <
-    now()` → silent reauth via SessionStateManager. This is the
-    first production integration: `AppRoot` constructs a
-    `SessionStateManager` with `reauth = { SessionManager(context)
-    .authenticate() }` (mapped to `ReauthOutcome`) and
-    `sessionProvider = { SessionManager(context).currentSession()
-    }`. Then 040-D interceptor (greenfield — `HttpClient.kt` has
-    zero 401 handling today, so 040-D adds the whole retry layer,
-    not extends one). Then 040-E emulator acceptance.
+    **TASK-P1-040-C DONE 2026-10-18.** AppRoot routing rewrite
+    landed across two commits. `55513f2` adds
+    `SessionStateManager.clear()` + test (JVM 190 → 191).
+    `11064d6` rewires AppRoot: `sessionExpiresAt` compose var
+    removed, state machine wired in with `AuthOutcome →
+    ReauthOutcome` mapping, 4 new AppScreen branches (Loading,
+    Revoked, NetworkFailure, EnrollmentRequired), 3 routing
+    effects replacing 2 old ones, `SessionScreens.kt` new file
+    (~105 lines). Smoke verified on emulator 5556: cold launch →
+    Authenticated home + `/me/matrix` fired; logout → Enrollment
+    + backend logout confirmed in sessions table; authenticate →
+    POST /auth/challenge → POST /auth/verify → GET /me/matrix
+    chain fires. See §3 Session R-3 entry.
+
+    **TASK-P1-040-D next.** HTTP interceptor (greenfield —
+    `HttpClient.kt` has zero 401 handling today, so 040-D adds the
+    whole retry layer, not extends one). Contract per ADR §2's
+    "Retry-the-original-call": buffer failed request → call
+    `sessionStateManager.reauthenticate()` → retry buffer once on
+    success → discard the failed response body (re-execute the
+    buffer, do not resume a response). Recursion guard: exclude
+    `/auth/challenge` and `/auth/verify` by URL prefix, or reauth
+    recursion is possible. Single-flight already in the state
+    manager; interceptor delegates. Then 040-E emulator acceptance
+    (expired session, revoked device, network failure paths).
 
 **Backlog items (not scheduled):**
 - Instrumented Compose tests for admin flows (no test rule configured;
@@ -2679,6 +2833,11 @@ Original phrasing preserved below for history:
   recovery. Reads the device's QR JSON, generates a token, inserts
   the enrollment_tokens row, prints the token. Three occurrences of
   the manual procedure make it worth scripting.
+- **`MessageStore` SQLite connection leak** (Session R-3): logcat
+  shows `SQLiteConnectionPool: A SQLiteConnection object for
+  database '...umoja_local.db' was leaked!` at ~dozens/sec during
+  cold launch. Pre-dates 040-C-2. Cursors opened without closing,
+  or `messagesVersion` bump loop in `ChatScreen`. Not blocking.
 
 ---
 
@@ -3200,8 +3359,29 @@ Rebuild after flipping — read at HttpClient construction time.
   bounded delay still leaves the test flaky, the fix is exposing
   a signal (e.g. a `StateFlow` emitting on entry), not increasing
   the delay. Session R-2.
+- **`grep -E "req\."` on backend JSON logs is always wrong — the
+  format is `"req":{`, not `req.`.** Session R-3's block 8 returned
+  empty (interpreted as "no app requests") while block 6's specific
+  `/me/matrix` grep on the same window showed the request clearly.
+  Two greps on the same data giving different answers is a pattern
+  bug, not an evidence bug. Fix: quote the JSON key literally
+  (`'"req":'`) or grep the specific endpoint. Session R-3.
+- **`docker compose logs --since N` windows truncate before slow
+  events.** Session R-3 hit this twice: `--since 1m` fired 8s after
+  a launch showed "empty" because the fetch landed 4m later at
+  obs 5's reauth; `--since 10m` fired at 08:52 excluded an event
+  at 13:00. When a specific endpoint is under investigation, grep
+  it across a wide window (`--since 30m`) rather than trying to
+  calibrate the window to the event. Session R-3.
+- **A screenshot from a prior session is not current-session
+  evidence.** Session R-3 nearly concluded cold launch worked
+  based on a screenshot whose status bar read `1:47` while the
+  diagnostic ran at `08:49` UTC. Always compare the screenshot's
+  visible time to the current `date -u`. When in doubt, take a
+  fresh screenshot; the acceptance is "proven now," not "proof
+  from earlier still applies." Session R-3.
 
-Current verified state: **190 Android JVM tests** (2026-10-18),
+Current verified state: **191 Android JVM tests** (2026-10-18),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
 and **250 backend tests** (2026-10-18, 16 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
