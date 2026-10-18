@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session Z-3 — Compose refactor arc, session B: `AdminScreenStateTest` at `a6de609`, 22 JVM tests. Covers load, loadBundle, createTokenForScannedDevice, authorize, buildMatrix, setStatusMessage — happy, error, and null-guard paths. `runBlocking` + lambda injection, mirroring MatrixApiTest and IdentityChangeControllerTest. One test-setup fix during the session: `buildMatrix clears prior error` used `clearance = ""` where the success path needs a non-empty string (`MatrixBuilder`'s own contract); fix was `"" -> "SECRET"` on that one test call, class and assertion unchanged. Backend 254, Android JVM 212 -> 234, androidTest 57. **No blocking work remains.** Arc: A + B done; C = ChatScreen refactor, D = ChatScreen test pending. Next: session C OR nothing — choice, not obligation.)
+Last updated: 2026-10-18 (Session Z-4 — Compose refactor arc, session C: ChatViewModel injectable at `bd8a6e7`, 10 JVM tests. **PLAN REVISION, explicit:** Z-2 §4 planned this session as "ChatScreen refactor" (extract ChatScreenState mirroring session A's AdminScreenState). Session C's full-read reconnaissance showed ChatScreen is a composition shell — 6 UI-flag remember vars, 2 derived states that already call pure functions (`gateFor`, `SendGate.authorized`), 2 actions that already delegate to injected holders, zero trapped business logic. The real untested surface is `ChatViewModel` — a `Context`-bound final class with hardcoded `MessageStore`/`MessagingService`. Refactored `ChatViewModel` to inject 2 suspend lambdas + scope; production `create(context)` factory; `MainNavigation.kt` one-line caller change. **ChatScreenState is cancelled** (would add indirection without testability); sessions E/F dropped. Arc: A/B/C done, D = ChatScreen Compose tests pending — now enabled by C. Fire-and-forget property preserved and verified end-to-end (walk + backend log evidence gate — commit is gated on that evidence, not just "tests pass"). Backend 254, Android JVM 234 → 244, androidTest 57. **No blocking work remains.** Next: session D OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -93,7 +93,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 234** (verified 2026-10-18 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests as the next-to-last addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests. Session Z-3: AdminScreenStateTest, 22 JVM tests.)
+- **JVM unit tests: 244** (verified 2026-10-18 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests. Session Z-3: AdminScreenStateTest, 22 JVM tests. Session Z-4: ChatViewModelTest, 10 JVM tests.)
 - **androidTest: 7 files, 57 tests** (verified 2026-10-18 from
   connectedAndroidTest XML; Session Z-1 added `AckDialogTest.kt` with
   11 Compose tests — first non-crypto androidTest and first Compose
@@ -3387,6 +3387,96 @@ Z-2's §3 entry.
 **One §7 lesson earned** (the "already exists?" check must target the
 new entry identifier, not strings the entry references). See §7 below.
 
+
+### Session Z-4 — Compose refactor arc, session C: ChatViewModel testability + tests (2026-10-18)
+
+Third of four planned sessions for the Compose test coverage deferral
+(§4). One commit:
+
+- `bd8a6e7` — **refactor(chat): ChatViewModel injectable + ChatViewModelTest
+  (10 JVM tests).** ChatViewModel 62 → 94 lines. MainNavigation.kt one-line
+  caller change. New ChatViewModelTest.kt 177 lines. No production
+  behavior change to the message-send path or the UI.
+
+**PLAN REVISION, EXPLICIT.** Z-2 §4 planned this session as "ChatScreen
+refactor" — extract ChatScreenState mirroring session A's AdminScreenState.
+Session C's opening reconnaissance (block C1, full 421-line ChatScreen
+read) showed that was the wrong target:
+
+- ChatScreen is a composition shell. 6 UI-flag remember vars (input,
+  sending, status, showDialog, ackInProgress, ackError), 2 derived states
+  that already call pure functions (gateFor, SendGate.authorized), 2
+  actions that already delegate to injected holders (viewModel.send,
+  identityChangeController.ackAndPost). Zero trapped business logic. A
+  ChatScreenState class would wrap, unwrap, and pass through to holders
+  that already exist — indirection without testability.
+- The actual untested logic lives in ChatViewModel: a Context-bound final
+  class with hardcoded MessageStore + MessagingService construction, zero
+  test coverage, and no seam for injection. That is the target.
+
+ChatScreenState is CANCELLED. Sessions E/F (ChatScreenState class) are
+dropped. The arc is A (AdminScreenState refactor) / B (AdminScreenStateTest)
+/ C (ChatViewModel testability + tests, this session) / D (ChatScreen
+Compose tests, enabled by C — pending). Total four sessions, but C and D
+changed target on evidence. Named here because a future reader seeing
+"C = ChatViewModel" will reasonably ask "wasn't C ChatScreen?" — the
+answer is this paragraph.
+
+**WHAT CHANGED.**
+- `ChatViewModel.kt`: constructor now takes `(listMessagesFn,
+  sendMessageFn, scope)`. Two suspend lambdas replace hardcoded
+  MessageStore and MessagingService calls. Scope injected so tests use
+  Unconfined for determinism. Public surface (messages StateFlow, observe,
+  refresh, send) UNCHANGED — ChatScreen's call sites compile unchanged.
+  Companion `create(context)` factory wires the real dependencies + the
+  same scope shape the old constructor used inline.
+- `MainNavigation.kt`: one-line `ChatViewModel(context)` →
+  `ChatViewModel.create(context)`.
+- `ChatViewModelTest.kt` (new): 10 JVM tests. runBlocking + injected
+  Unconfined scope + CompletableDeferred where callbacks need to signal
+  completion. Coverage: observe loads, exactly-one-list-call,
+  refresh-without-observe is no-op, observe switches peer, refresh
+  re-queries; send success → null, failure → code, NotAuthorized →
+  "not_authorized", lambda gets peer+text, sendMessageFn invoked exactly
+  once per call.
+
+**BEHAVIOR PRESERVATION — THE LOAD-BEARING PROPERTY.** The refactor's one
+real risk is losing the FIRE-AND-FORGET property of send(). Currently
+ChatViewModel.send launches on its own scope (previously constructed
+inline; now injected but same shape), independent of ChatScreen's
+composition. If a user hits send and navigates back within ~1 second,
+the message must still complete.
+
+Unit tests structurally cannot verify this — the Unconfined scope is
+always alive in the test process; the property is about the scope
+outliving the composition in production. So the session's commit is gated
+on emulator walk + backend-log evidence, not tests alone:
+
+- Walk (emulator-5556): baseline send → POST /envelopes 201; fire-and-
+  forget send → tap Send then IMMEDIATELY tap Back → wait 5s → reopen
+  chat → message present in history. Proves the coroutine completed
+  after screen exit and persisted via the store, then was picked up on
+  refresh.
+- Backend log evidence (commit gated on this): ≥ 2 POST /envelopes with
+  0 errors during the walk window. C7's evidence gate refused to commit
+  if the walk evidence was missing. This is the practice this session
+  encoded: "the refactor is correct" is a claim made from tests + a
+  documented end-to-end walk, not from tests alone.
+
+**ARC STATUS.** A done (`2804427`, `8da90d7`). B done (`a6de609`,
+`2775367`). C done (this session, `bd8a6e7`). D = ChatScreen Compose
+tests pending — now enabled: ChatViewModel is injectable,
+IdentityChangeController is lambda-injected (session K), MatrixStore is
+KeyValueStore-injected (P1-026), AckDialog is internal (session Z-1).
+All three ChatScreen deps can be faked.
+
+**No new §7 lessons this session.** The session's discipline held
+(preflight caught the correct number of buildMatrix calls; sanity greps
+used ASCII-only patterns per the seventh §7 lesson; the C7 evidence gate
+is a practice rather than a new failure-class lesson). Adding lessons for
+methodical sessions dilutes the section's signal — recording the absence
+is honest.
+
 ---
 
 ## 4. Known issues
@@ -4115,15 +4205,19 @@ Original phrasing preserved below for history:
       double-matrix-fetch dedupe (R-5 §7 note).
 
 **Backlog items (not scheduled):**
-- ~~Instrumented Compose tests for admin flows~~ — **3 of 5
-  sub-deliverables landed; 2 remaining in the arc.** Delivered:
+- ~~Instrumented Compose tests for admin flows~~ — **4 of 5
+  sub-deliverables landed; 1 remaining in the arc.** Delivered:
   AckDialog (11 Compose tests, `bf13dcc`), AdminScreen →
   `AdminScreenState` refactor (`2804427`), AdminScreenStateTest
-  (22 JVM tests, `a6de609`). Remaining: ChatScreen refactor (Option C,
-  same pattern as session A) + ChatScreen Compose test (arc sessions
-  C, D). No blocking work; both remaining items are one session each.
-  Session B's 22 JVM tests brought Android JVM from 212 to 234 (already
-  reflected in §2 and §7 counts).
+  (22 JVM tests, `a6de609`), **ChatViewModel refactor + testability**
+  (`bd8a6e7`, 10 JVM tests). **Z-2's plan called session C "ChatScreen
+  refactor"; the delivered work is ChatViewModel — different target,
+  changed on evidence.** ChatScreen is a composition shell, not a logic
+  container; the actual untested logic was ChatViewModel. **ChatScreenState
+  is cancelled** — a state-holder there would add indirection without
+  testability. Remaining: session D = ChatScreen Compose tests, now
+  enabled by C's injectability work (all three ChatScreen deps can be
+  faked). No further refactor needed; one session left.
 - Deduplicate base64url validators (KI-016).
 - `canonicalJson` deduplication between `audit/log.ts` and
   `audit/verify.ts` (KI-008).
@@ -5158,7 +5252,7 @@ Rebuild after flipping — read at HttpClient construction time.
   prefixes) and the seventh (grep returning 0 is ambiguous) -- the
   pattern or the check assumption is not the content.
 
-Current verified state: **234 Android JVM tests** (2026-10-18),
+Current verified state: **244 Android JVM tests** (2026-10-18),
 **57 androidTest** (2026-10-18, 7 files, from connectedAndroidTest XML),
 and **254 backend tests** (2026-10-18, 20 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
