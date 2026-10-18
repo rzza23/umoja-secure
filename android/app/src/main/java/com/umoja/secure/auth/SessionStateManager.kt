@@ -163,6 +163,32 @@ class SessionStateManager(
     }
 
     /**
+     * Reset to [State.Unauthenticated]. Called by AppRoot after logout
+     * clears local storage; without this, [state] would lie (still
+     * [State.Authenticated]) after the session token is removed from
+     * [SessionManager]. A single unsynchronized [MutableStateFlow]
+     * write because terminal reset has no concurrent-caller semantics
+     * to serialize -- unlike [reauthenticate], there is no network
+     * call to single-flight; the caller (logout handler) drives the
+     * sequencing.
+     *
+     * Does not clear [reauthInFlight] -- if a reauth is racing with a
+     * logout, the reauth's eventual completion will transition state
+     * to whichever outcome it returns. That race is not user-visible
+     * (logout already nulled the token; a subsequent reauth sees no
+     * session and returns NetworkFailure or EnrollmentRequired, not
+     * Authenticated), but the possible stale write is documented here
+     * rather than guarded. 040-C-2 wires logout so a reauth is not in
+     * flight when clear() is called (logout is a deliberate user
+     * action, not a 401 response). If a future flow allows reauth
+     * concurrent with logout, revisit.
+     */
+    suspend fun clear(): State = withContext(Dispatchers.IO) {
+        _state.value = State.Unauthenticated
+        State.Unauthenticated
+    }
+
+    /**
      * Single-flight core. Returns the (possibly cached) outcome.
      * Leader executes [reauth]; followers await the shared deferred.
      * Leader clears [reauthInFlight] in a finally so a crash between

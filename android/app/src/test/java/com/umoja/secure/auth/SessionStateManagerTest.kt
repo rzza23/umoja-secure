@@ -218,6 +218,24 @@ class SessionStateManagerTest {
     }
 
     @Test
+    fun `CLEAR-TRANSITIONS-TO-UNAUTHENTICATED`() = runBlocking {
+        var reauthCalls = 0
+        val mgr = newManager(
+            reauth = { reauthCalls++; successOutcome() },
+            sessionProvider = { validSession },
+        )
+        mgr.initialize()
+        assertEquals(
+            SessionStateManager.State.Authenticated::class,
+            mgr.state.value::class,
+        )
+        val after = mgr.clear()
+        assertEquals(0, reauthCalls)  // clear does not invoke reauth
+        assertEquals(SessionStateManager.State.Unauthenticated, after)
+        assertEquals(SessionStateManager.State.Unauthenticated, mgr.state.value)
+    }
+
+    @Test
     fun `REAUTH-STATE-FLOW-EMITS-TERMINAL-STATE`() = runBlocking {
         val mgr = newManager(
             reauth = { SessionStateManager.ReauthOutcome.DeviceRevoked },
