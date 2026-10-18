@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session X-1 — TASK-P1-042 DONE: WS revocation listener reconnect + re-reconcile. Extracted listener into createRevocationListener(deps) factory; reconnect on 'end' event (5s fixed interval); reconcile on every successful connect; stop() cancels pending reconnect. Three named tests pass. All three sweep-named docs amended to v0.3 cross-referencing commit 07cc2b4. Backend 251 → 254. Android JVM 212, androidTest 46 — unchanged. **The KI-005 sweep's one real gap is closed.** **No blocking work remains.** Next: Phase 2 OR nothing — choice, not obligation.)
+Last updated: 2026-10-18 (Session Y-1 — doc-hygiene pass closing X-1's own last paragraph. Two pending §7 lessons added (set -e + grep -c interaction; regex capture-group failure mode). §2 backend count corrected 247 → 254 / 16 → 20 files. §7 verified state corrected 251 → 254. R-4's `bfe9fee` placeholder filled with `bfe9fee` (two occurrences). Backend 254, Android JVM 212, androidTest 46 — all unchanged (doc-only). **No blocking work remains.** Next: Phase 2 OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -46,7 +46,7 @@ Authoritative documents (all exist on disk):
 
 - Node.js 24.x, Fastify 5.12.5, PostgreSQL 16
 - Docker-deployable (docker compose up -d --build from repo root)
-- **247 tests passing** (16 files; verified 2026-10-17 via
+- **254 tests passing** (20 files; verified 2026-10-18 via
   `npm test`. Sessions C–F added matrix-version, floor stamping,
   replacement-notice. Session H added identity-change services (7
   validator tests) and routes (17 route tests). Session I added the
@@ -2206,7 +2206,7 @@ evidence. Three commits:
   the new instance. During reauth, the state machine's transitions
   fire the routing effect so the UI updates transparently.
 
-- `<040-D-3-hash>` — **040-D-3: terminal-state honesty fixes
+- `bfe9fee` — **040-D-3: terminal-state honesty fixes
   (Revoked branch + EnrollmentScreen onAuthFailed).** Two bugs
   caught during acceptance, both ADR §1 violations:
 
@@ -3128,6 +3128,70 @@ Compose tests, KI-005 re-sweep cadence as needed). No task in
 the registry is `Proposed` for a blocking gap.
 
 
+### Session Y-1 — doc-hygiene pass closing X-1's own last paragraph (2026-10-18)
+
+X-1's close file named two §7 lessons as "belong in §7 at the next
+handoff edit" and left three other documentation staleness items
+unlanded. Y-1 closes all of it in one bounded doc-hygiene commit.
+No code, no tests, no registry changes, no new tasks.
+
+**Fixes in this session:**
+
+1. **Two pending §7 lessons added** — the ones X-1's close
+   explicitly named as still-owed:
+   - `set -e` + `grep -c` returning 0 aborts the shell (the
+     Command 8 failure mode).
+   - Regex capture-group substitutions lie silently when a group's
+     role is misread (the `ad2187d` `DONEProposed` bug, fixed
+     at `bf5faf1`).
+
+2. **§2 backend count corrected** — was "247 tests passing
+   (16 files; verified 2026-10-17)", stale from Session O-1. Now
+   "254 tests passing (20 files; verified 2026-10-18)". §2 is a
+   summary index; §3 session entries are authoritative for what
+   each session added.
+
+3. **§7 Current verified state corrected** — was "251 backend
+   tests (2026-10-18, 20 files)", stale from W-1's close (the
+   three TASK-P1-042 tests added at X-1 weren't reflected). Now
+   "254 backend tests (2026-10-18, 20 files)".
+
+4. **R-4's `bfe9fee` placeholder filled** — two
+   occurrences at §3 Session R-4 entry's commit list (line
+   ~2209) and §5 item 16's cross-reference (line ~3819). Both
+   replaced with `bfe9fee`. A two-character fix per occurrence
+   that removes a fresh-reader stumbling block; the placeholder
+   was correct at write-time (before `bfe9fee` existed) and stale
+   by X-1's close.
+
+**Scope explicitly NOT expanded:**
+
+- §2's full backend prose is not rewritten to reflect each of
+  R-2 through X-1's test additions. §2 is a summary index; §3
+  is authoritative. Rewriting would double §2's length for no
+  reader benefit.
+- KI-005's RESOLVED state untouched (correctly resolved at W-1).
+- The KI-005 sweep not reopened — all four docs swept, one real
+  gap closed at X-1.
+- Phase 2 not proposed — Y-1 is doc hygiene; Phase 2 is a
+  separate choice.
+
+**The pending-lessons pattern this closes.** X-1's close file
+said the two lessons "belong in §7 at the next handoff edit" and
+shipped anyway. That's a defensible deferral — the primary task
+was done; the two lessons were a follow-up edit. But the
+deferral means a fresh session reading the handoff would not see
+them. **Rule for future sessions:** when a session entry names a
+doc-hygiene item as "the next handoff edit," either land it in
+the same commit (making the entry self-contained), or explicitly
+file the pending item as a backlog entry so it survives the
+session boundary. A sentence in the close file is not a
+persistent tracker; the handoff is.
+
+**Counts.** Backend 254, Android JVM 212, androidTest 46 — all
+unchanged (doc-only session).
+
+
 ---
 
 ## 4. Known issues
@@ -3816,7 +3880,7 @@ Original phrasing preserved below for history:
     **TASK-P1-040-D DONE 2026-10-18.** HttpClient 401 interceptor
     landed across three commits (`ae1c840` D-1 interceptor +
     predicate + 7 JVM tests, `d835821` D-2 AppRoot wiring,
-    `<040-D-3-hash>` D-3 terminal-state honesty fixes).
+    `bfe9fee` D-3 terminal-state honesty fixes).
     TEST-SESSION-REVOKED-ON-DEVICE passed fully — detection
     (Revoked terminal screen) and recovery (Log out and try again
     → Authenticate → Conversations) both verified. See §3 Session
@@ -4735,10 +4799,52 @@ Rebuild after flipping — read at HttpClient construction time.
   same commit that bumps the others; don't ship a bump that
   leaves the file's own version metadata inconsistent across
   sections.
+- **`set -e` + `grep -c` returning 0 aborts the shell.** Session
+  X-1's Command 8 used `set -e` at the top of a write-then-verify
+  shell block (the fix for the per-block-preflight bug from
+  Command 5). Then a spot-check `grep -c` on a pattern containing
+  a Python-style Unicode escape (literal `u2014` in the grep
+  pattern, rather than the em-dash character the file actually
+  contains) returned 0 — the pattern searched for the literal
+  characters, not the em-dash. `grep -c` exits 1 on zero
+  matches; under `set -e` that killed the shell mid-command.
+  Commits never ran; two files landed uncommitted. Recovery took
+  a full command cycle. **Rule:** the `set -e` protection for
+  write-phase failures has a side effect on the verify phase —
+  any grep that can legitimately return zero matches will abort
+  the script. Use `set +e` before the spot-check block and
+  `set -e` again after; or `|| true` on each grep; or
+  `if grep -q; then...fi` guards. Simpler: don't put Python-style
+  Unicode escapes in bash grep patterns — anchor on ASCII-only
+  substrings, or use `$'\uXXXX'` (ANSI-C quoting) if the
+  character must be present.
+
+- **Regex capture-group substitutions lie silently when a group's
+  role is misread.** Session X-1's Command 8 used a substitution
+  with the pattern `(| TASK-P1-042 |[^\n]*?| )(Proposed)( |)` and
+  the replacement `\1DONE\2` — where `\2` refers to "Proposed"
+  (the target), not the trailing " |" separator (group 3). The
+  result was `...| 1 | DONEProposed` (concatenated, trailing pipe
+  dropped) rather than `...| 1 | DONE |`. The corruption passed
+  any grep for the substituted text ("DONE" is present) but
+  failed any grep that anchors on row structure (`| DONE |`).
+  X-1's close caught it in the same session via the row-structure
+  spot-check that returned 0; the fix at bf5faf1 anchored on the
+  minimal unique substring `DONEProposed`, not on the
+  fully-formed assumed value `| DONEProposed |` — the corruption
+  was *missing* a character (the trailing pipe), and the wider
+  anchor that assumed its presence failed to match. **Rule:** a
+  substitution anchored on `(...)(target)(suffix)` risks
+  group-numbering bugs; the correct form is `\1NEW\3` (or
+  `sed -E 's/| Proposed |/| DONE |/'` for a fixed literal
+  target — no capture groups at all). When a corruption is
+  found, **anchor the fix on the minimal unique substring that
+  names it**, not on the fully-formed assumed corrupted value.
+
 
 Current verified state: **212 Android JVM tests** (2026-10-18),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
-and **251 backend tests** (2026-10-18, 20 files), all from runner output.
+and **254 backend tests** (2026-10-18, 20 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
 infrastructure (Mac vs emulator) and must not be summed.
 
