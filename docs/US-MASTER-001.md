@@ -1,7 +1,7 @@
 # US-MASTER-001 — Umoja Secure Governing Architecture
 
 Document ID: US-MASTER-001
-Version: 0.1 (draft for owner review)
+Version: 0.2 (conformance-swept 2026-10-18)
 Date: 2026-10-14
 Authority: Governing architecture, threat model, phase boundaries. Per UMOJA-SECURE-BUILD-MASTER.md §0, US-ADD-001 wins over this document in any conflict.
 Status: Draft. Not yet in force. Subject to revision.
@@ -115,9 +115,18 @@ Tor-only. No clearnet fallback. Build Master §11 forbids enabling one.
 Server-authoritative. The backend checks `devices.status` on every
 protected request. `LISTEN/NOTIFY` on a `device_revoked` channel prompts
 WebSocket closure within ≤5s; the per-request check is authoritative and
-covers missed notifications; on listener reconnect, a full reconciliation
-pass closes any connections for devices revoked while the listener was
-down.
+covers missed notifications.
+
+> *v0.2 correction (2026-10-18):* The v0.1 text claimed "on listener
+> reconnect, a full reconciliation pass closes any connections for
+> devices revoked while the listener was down." Actual
+> `backend/src/ws/revocation.ts` runs reconciliation on listener
+> **startup**, not reconnect; the `on('error')` handler logs but does
+> not reconnect or re-reconcile. The reconnect gap is real — filed as
+> TASK-P1-042 (same gap AUTH-SPEC-001 §9.3 defense 2 and
+> THREAT-MODEL-001 §8 v0.2 name). Until P1-042 lands: WS-close timing
+> is ≤5s when the listener is healthy, ≤5min when disconnected (via
+> per-connection revalidation timer).
 
 Client does **not** enforce revocation in the delivery path. Detail:
 Build Master §3.3, `docs/reference/AUTH-SPEC-001.md` §9, and
@@ -221,6 +230,7 @@ Do not guess.
 | US-MASTER-001 | `docs/US-MASTER-001.md` | Architecture, threat model, phases |
 | AUTH-SPEC-001 | `docs/reference/AUTH-SPEC-001.md` | Device identity, sessions, revocation |
 | THREAT-MODEL-001 | `docs/reference/THREAT-MODEL-001.md` | Adversary model, STRIDE |
+| USER-ONBOARDING | `docs/reference/USER-ONBOARDING.md` | User-facing: onboarding, recovery, erasure |
 | US-TASK-P1-001 | `docs/US-TASK-P1-001.md` | Task registry |
 | UMOJA-SECURE-BUILD-MASTER | `UMOJA-SECURE-BUILD-MASTER.md` | Build instructions |
 
@@ -231,7 +241,8 @@ Do not guess.
 | Version | Date | Change |
 |---------|------|--------|
 | 0.1 | 2026-10-14 | Initial draft. Authored from Build Master v1.4.2 + owner attestation. |
+| 0.2 | 2026-10-18 | Conformance sweep (KI-005, Session W-1). §3.5 corrected: v0.1 claimed reconciliation-on-listener-reconnect; actual code runs reconciliation on startup only. Cross-references TASK-P1-042 (same gap AUTH-SPEC-001 §9.3 defense 2 / THREAT-MODEL-001 §8 v0.2). §7 canonical document set adds `USER-ONBOARDING.md` (written Session U-2, referenced by Build Master §2). Ten other architecture claims verified holding (§3.1 tiers, §3.2 four device keys + two org keys, §3.3 matrix, §3.4 messaging, §3.6 ceremony, §4 threat summary, §5 phases, §6 precedence). |
 
 ---
 
-— end of US-MASTER-001 v0.1 draft —
+— end of US-MASTER-001 v0.2 draft —
