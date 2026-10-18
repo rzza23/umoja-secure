@@ -410,6 +410,67 @@ logging is non-blocking; benefits from 040's state manager being
 in place since 041's log surface sits inside verification failure
 paths the state manager already touches.
 
+### v0.4 (2026-10-18) -- TASK-P1-041 DONE, 037-041 hardening pass fully closed
+
+TASK-P1-041 (failed-verification operator logging) closes the
+final task in the ADR §6 sequencing. With this, the entire 037-
+041 hardening chain is DONE end-to-end:
+
+- 037 (matrix transport) -- closed across Sessions O-1 / O-2
+- 038 (send gate) -- closed across Session P
+- 039 (release-build hardening) -- closed across Session Q
+- 040 (session lifecycle & revocation UX) -- closed across
+  Sessions R through R-5
+- 041 (failed-verification operator logging) -- closed Session T-1
+
+**041 commits:** one implementation commit + handoff + this
+amendment. Delivers local, DiagnosticsScreen-visible log of
+verification failures (matrix / notice / ack). Registry §B non-
+goals honored: no backend changes, no telemetry, no server-side
+audit extension. See handoff §3 Session T-1 for the full entry.
+
+**041 design notes captured in code + commit message:**
+
+- Failure log lives in the stores, not the verifiers. Session H's
+  ruling on `MatrixVerifier` ("stateless crypto primitive; policy
+  state lives in MatrixStore.accept") extends to failure recording
+  -- verifiers stay pure, stores own the state. Otherwise
+  `MatrixVerifierTest.kt` and `ReplacementNoticeVerifierTest.kt`
+  would need to grow store dependencies.
+
+- `failureLog: VerificationFailureStore? = null` optional param
+  on all three store classes. Default-null is invisible to existing
+  tests and construction sites -- zero blast radius. Production
+  wires at MainActivity's three sites. Matches Session K's
+  lambda-injection precedent (`IdentityChangeController`'s
+  `listNotices` / `postAck`).
+
+- Filtered `clearOf(ArtifactType)` for production stores, full
+  `clear()` for the DiagnosticsScreen debug control. Registry §B's
+  "matrix-store wipe clears matrix-failure log; notice-store wipe
+  clears notice-failure log" phrasing is scope, not full-wipe;
+  the debug UI's operator intent is "clear everything I'm
+  looking at" -- different purpose, different control.
+
+- `VerificationFailureStore.version: StateFlow<Long>` is the
+  third write-notification instance in the codebase (precedents:
+  IdentityChangeController.version in Session K,
+  MatrixStore.version in Session P D-1). Third instance makes
+  it a convention (handoff §7 records the pattern as assume-not-
+  consider).
+
+**No blocking tasks remain after 041.** The hardening pass
+delivered every ADR-HARDENING-001 §1 guarantee ("a fielded
+device must never present a state the user cannot recover from
+without losing data or access") across the failure classes
+enumerated in §2 (401 / network failure / revoked / expired) plus
+the operational concerns in §3 (Tor mandatory, R8 minified,
+FLAG_SECURE) and §4 (send gate).
+
+Future work is Phase 2 preparation (networking suspend refactor,
+dependency reviews) or backlog hygiene (MessageStore SQLite leak,
+KI-016/008/018, migration 017) -- no obligation, choice.
+
 ### Non-blocking
 
 None blocking. Any that arise during implementation get resolved in
