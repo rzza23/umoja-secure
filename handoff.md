@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-17 (Session P — TASK-P1-038 DONE: SendGate + MessagingService gate + ChatScreen banner + reactivity fix D-1. Three-case acceptance passed: fail-closed, allow-on-match, re-engage-on-remove. Next: TASK-P1-039 — release-build hardening.)
+Last updated: 2026-10-17 (Session Q — TASK-P1-039 DONE: R8 + buildConfig + libsignal keep rules, TransportConfig immutability + startup assertion, FLAG_SECURE on Chat/Admin/Diagnostics, RELEASE-ACCEPTANCE.md. Cold-start acceptance passed: crash buffer empty, Tor transport active, four-screen FLAG_SECURE matrix green. Next: TASK-P1-040 — session lifecycle & revocation UX.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -1777,6 +1777,103 @@ verifying release builds before 040's state-machine changes means
 manual on-device verification of 040 isn't compounded with
 minification debugging.
 
+### Session Q — TASK-P1-039 DONE (2026-10-17)
+
+Release-build hardening landed end-to-end. Five commits (A/B/C/D/doc):
+
+- `cb7ac82` — **A: enable R8 + buildConfig + libsignal keep rules.**
+  `buildFeatures { buildConfig = true }`. `optimization { enable =
+  false }` → `enable = true`. New
+  `android/app/src/release/keepRules/libsignal.keep` with keep rules
+  for `org.signal.libsignal.**` (protocol, internal JNI bridge,
+  native method names) and `org.whispersystems.libsignal.**`.
+
+  **ADR §9 v0.2 item 7 resolved via AGP 9.4.1 API docs.**
+  `Optimization.enable` gates R8 minification AND resource
+  shrinking together; default Android keep rules are auto-included
+  (no `getDefaultProguardFile` needed). Project keep rules use the
+  AGP 9.3+ `src/<variant>/keepRules/*.keep` source set, not the
+  legacy `proguard-rules.pro`. ADR §3's prose used legacy DSL
+  names (`minifyEnabled`, `proguardFiles`); the intent is
+  preserved, the syntax follows AGP 9.4.1 and the existing
+  `optimization { }` block. Mapping recorded in the commit message
+  and in `docs/ops/RELEASE-ACCEPTANCE.md`.
+
+- `306bcd7` — **B: TransportConfig immutability + release/Tor
+  assertion.** `var useTor: Boolean = true` →
+  `val useTor: Boolean = !BuildConfig.DEBUG`.
+  `UmojaApplication.onCreate` gains a startup assertion:
+  `check(BuildConfig.DEBUG || TransportConfig.useTor)`. Behavioral
+  shift per ADR §9 v0.2 item 6: dev-iteration moves to
+  debug/clearnet (adb reverse tcp:8080); Tor is exercised in
+  release. No test coupling — `grep useTor|TransportConfig` in
+  test/ and androidTest/ returned zero matches.
+
+- `3a98ca0` — **C: FLAG_SECURE on ChatScreen, AdminScreen,
+  DiagnosticsScreen.** New `ui/common/SecureScreen.kt` — a
+  `DisposableEffect` wrapper setting/clearing
+  `WindowManager.LayoutParams.FLAG_SECURE` for the composition
+  lifetime. Three call sites match ADR §3's scope exactly; UI
+  audit confirmed no fourth sensitive surface (the seven
+  `*Screen` composables are Settings, Chat, Contacts, Admin,
+  EnrollmentQr, Conversations, Diagnostics; the four excluded
+  ones carry no sensitive content per ADR §3).
+
+- `93c04a4` — **D: RELEASE-ACCEPTANCE.md.** New procedural
+  reference (157 lines): build + sign + cold-start + four-screen
+  FLAG_SECURE matrix + misleading-diagnostic patterns learned
+  this session.
+
+- `[handoff-hash]` — this commit.
+
+**Empirical acceptance evidence** (ADR §3: "The acceptance test is
+not 'build succeeds' — minification bugs surface at cold-start,
+not build time"):
+
+- Release APK: 151,633,853 B (unminified baseline) → 103,756,048 B
+  (−32%). Remaining size is native `.so` for 4 ABIs, not dex.
+  ABI splits are a future optimization, not this task.
+- Dex after R8: `MessagingService` / `MatrixStore` absent
+  (obfuscated); `MainActivity` / `UmojaApplication` present
+  (correct — AndroidManifest entry points the manifest references
+  by name).
+- `org/signal/libsignal` strings in release dex: 221 (keep rules
+  held; native method names preserved).
+- Cold launch: crash buffer empty. No
+  `ClassNotFoundException`, `NoSuchMethodError`,
+  `UnsatisfiedLinkError`.
+- Tor transport: `UmojaWS : Tor mode: routing WS via HTTP bridge
+  127.0.0.1:44023` in logcat; backend received `GET /me/matrix`
+  from `172.18.0.4` (Tor container) with `.onion` host header.
+  Proves `useTor = !BuildConfig.DEBUG = true` reached the request
+  layer.
+- Four-screen FLAG_SECURE matrix, all pass:
+  - Conversations: `fl=` no SECURE, 80,356 B, UI visible.
+  - Settings: `fl=` no SECURE, 105,901 B, UI visible.
+  - Chat: `fl=` SECURE, ~23 KB, black content + system overlays.
+  - Diagnostics: `fl=` SECURE, ~23 KB, black content + system
+    overlays.
+  - Optional re-verify after Chat→Settings: no SECURE, ~105 KB,
+    no leak — `SecureScreen.onDispose` fires correctly.
+
+**§7 additions earned this session** (five, all in the global §7
+block below):
+
+**Counts.** Android JVM 178 unchanged (release hardening has no
+JVM-testable surface; acceptance is emulator cold-start per ADR
+§3). Backend 247 unchanged. Both from runner output.
+
+**Next: TASK-P1-040 — session lifecycle & revocation UX.** Per
+ADR-HARDENING-001 §2 and §6 Order: `037 → 038 → 039 → 040 → 041`.
+040 implements the 7-state SessionStateManager, single-flight
+re-auth mutex, recursion guard, retry-original-call interceptor,
+the backend `device_revoked` code on the 401 path (precedent in
+`auth/verify.ts`), and the AppRoot routing replacement
+(`sessionExpiresAt < now()` → re-auth, not the current `== null`
+check). Per ADR §9 v0.2 item 2, `lookupSession` does not
+currently differentiate expired from revoked; the backend change
+is confirmed needed.
+
 ---
 
 ## 4. Known issues
@@ -2371,13 +2468,26 @@ Original phrasing preserved below for history:
     three-case acceptance passed end-to-end. See §3 Session P entry.
     030e-d remains deferred behind the whole 037–041 pass.
 
-    **Next task: TASK-P1-039 — release-build hardening.** Per
-    ADR-HARDENING-001 §3: `FLAG_SECURE` on ChatScreen / AdminScreen
-    / DiagnosticsScreen, `TransportConfig.useTor` becomes `val` from
-    `BuildConfig.DEBUG` with startup assertion, `minifyEnabled=true`
-    with libsignal keep rules. Per ADR-HARDENING-001 §4's "acceptance
-    test is cold-start, not build succeeds" — the task's acceptance
-    is a manual cold-start of the release build, not a compile.
+    **TASK-P1-039 DONE 2026-10-17.** Five commits (A/B/C/D/doc);
+    see §3 Session Q entry. Empirical acceptance: release APK cold-
+    starts with no crash, Tor transport active (`.onion` request
+    seen at backend from 172.18.0.4), four-screen FLAG_SECURE
+    matrix passes. ADR §9 v0.2 item 7 (optimization.enable
+    semantics) resolved to `optimization { enable = true }` +
+    `src/release/keepRules/*.keep` per AGP 9.4.1 docs. See
+    `docs/ops/RELEASE-ACCEPTANCE.md` for the reproduction procedure.
+
+    **Next task: TASK-P1-040 — session lifecycle & revocation UX.**
+    Per ADR-HARDENING-001 §2 + §6 Order: `037 → 038 → 039 → 040 →
+    041`. Scope: 7-state SessionStateManager, single-flight re-auth
+    mutex, recursion guard, retry-original-call interceptor,
+    backend `device_revoked` code on 401 path, AppRoot routing
+    replaced (`sessionExpiresAt < now()` → re-auth, not the current
+    `== null` check). Per ADR §9 v0.2 item 2, `lookupSession`
+    currently does not differentiate expired from revoked — the
+    backend change is confirmed needed. Two
+    `[VERIFY AT IMPLEMENTATION]` items for 040's session start:
+    `lookupSession` shape, `AppRoot` routing.
 
 **Backlog items (not scheduled):**
 - Instrumented Compose tests for admin flows (no test rule configured;
@@ -2839,6 +2949,35 @@ Rebuild after flipping — read at HttpClient construction time.
   remembered instance the observer (ChatScreen) collects from, or
   the bump goes to a throwaway object and the observer never sees
   it. Session P D-1.
+- **`grep FLAG_SECURE` on `dumpsys window` returns nothing by
+  design.** dumpsys emits `SECURE` (the symbolic name inside the
+  `fl=` line), not the fully-prefixed `FLAG_SECURE` constant name.
+  Any FLAG_SECURE diagnostic needs to match
+  `grep -E '^\s+fl=.*SECURE'`. Session Q.
+- **`screencap` uniform-black PNGs are ~20–25 KB, not <20 KB.** The
+  platform's black framebuffer includes the system status bar
+  overlay, which compresses to 20–25 KB, not 5–10 KB. A threshold
+  of `<20000` incorrectly labels correct black captures as
+  "FLAG_SECURE ABSENT." Correct threshold for the check:
+  `<50000` (safe margin between ~23 KB black and 80–105 KB UI).
+  Session Q.
+- **`sed -n '/X/,/^$/p'` is the reliable `dumpsys window` scoping
+  pattern.** `grep -A40 | head -3` truncates before the `fl=` line
+  because `mAttrs` and other fields precede `fl=` in the window
+  block. Section-scoped extraction (sed) is required, not
+  count-based grep. Session Q.
+- **FLAG_SECURE screenshot signature: black content + visible
+  system overlays.** The status bar (top) and home indicator
+  (bottom) render normally — they are system windows, not the app
+  window. A fully-black screenshot with no overlays means
+  something else is wrong (R8 stripped the UI, or screencap is
+  reading a dead framebuffer). Overlays surviving is the marker
+  that FLAG_SECURE is doing exactly what it should. Session Q.
+- **Batched `screencap` across screens returns byte-identical
+  PNGs.** Navigation happens in the emulator UI between pastes,
+  not within. Four `screencap` commands in one paste all capture
+  the same framebuffer. One paste, one probe, one navigation
+  between probes. Session Q.
 
 Current verified state: **178 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
