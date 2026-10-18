@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session V-1 — KI-005 sweep continued: THREAT-MODEL-001 v0.1 → v0.2. Eight amendments across six sections: two doc-drifts (§6.2 consumption mechanism, §8 reconciliation query), one real gap cross-referenced (§8 reconciliation-on-reconnect — already filed as TASK-P1-042 from U-3), three completeness markers (§6.3 duress wipe via P1-021b, §6.4 wipe notification via P1-021b, §6.7 rotation via P1-036 — all designed-not-shipped, marked as such), one precision amendment (§5 STRIDE R-repudiation P1-031 scope), ten claims verified holding. Backend 251, Android JVM 212, androidTest 46 — all unchanged (doc-only). KI-005 now 2 of 4 docs swept. **No blocking work remains.** Next: KI-005 continuation (US-ADD-001 / US-MASTER-001) OR TASK-P1-042 OR Phase 2 OR nothing — choice, not obligation.)
+Last updated: 2026-10-18 (Session W-1 — KI-005 sweep COMPLETE: US-ADD-001 v0.2 → v0.3 + US-MASTER-001 v0.1 → v0.2. **All four canonical docs now swept.** US-ADD-001: 4 completeness markers on build-time-target parameter rows (§5 SQLCipher/Tor, §6 attestation, §7 recovery version) + stale end-of-doc v0.1 → v0.3. US-MASTER-001: cross-doc propagation of THREAT-MODEL-001 §8's reconciliation drift into §3.5 + USER-ONBOARDING.md added to §7 canonical set. **KI-005 RESOLVED.** Backend 251, Android JVM 212, androidTest 46 — all unchanged (doc-only). **No blocking work remains.** Next: TASK-P1-042 (revocation listener reconnect — 3 docs cross-reference the gap) OR Phase 2 OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -2897,6 +2897,108 @@ US-MASTER-001. Each is one session of reconnaissance-plus-
 amendment. No blocking work depends on any of them.
 
 
+### Session W-1 — KI-005 sweep COMPLETE: US-ADD-001 v0.3 + US-MASTER-001 v0.2 (2026-10-18)
+
+Third and final KI-005 sweep session (U-3 AUTH-SPEC-001, V-1
+THREAT-MODEL-001, W-1 both). Two documents in one session because
+Command 1's size preflight showed combined 512 lines (US-ADD-001
+275, US-MASTER-001 237) — the size check itself determined the plan
+rather than guessing. Two commits:
+
+- `20771af` — **US-ADD-001 v0.2 → v0.3.** Seven amendments: four
+  completeness markers on parameter-register rows (§5
+  `Local storage | SQLCipher`, §5 `Tor | tor-android embedded`,
+  §6 `Enrollment attestation | Android Key Attestation`, §7
+  `Recovery key version` — all describe build-time targets not yet
+  shipped), header version bump, revision history v0.3 row, and a
+  pre-existing staleness fix (end-of-doc line said v0.1 while header
+  was already v0.2).
+
+- `3720b59` — **US-MASTER-001 v0.1 → v0.2.** Five amendments: §3.5
+  cross-document propagation of THREAT-MODEL-001 §8's
+  reconciliation-drift correction (same gap, same code,
+  cross-references TASK-P1-042); §7 canonical document set gains
+  `USER-ONBOARDING.md` (written Session U-2, referenced by Build
+  Master §2); version bump, revision history v0.2 row,
+  end-of-doc line.
+
+**Sweep verdict — the parameter-register-vs-architecture split.**
+
+US-ADD-001 and US-MASTER-001 have fundamentally different finding
+shapes:
+
+- **US-ADD-001 is a register** — mixed current-state assertions
+  (§4 backend params all accurate: Node 24, Fastify 5.12.5,
+  PostgreSQL 16) and build-time-target assertions (§5/§6/§7
+  describe Phase 1 target stack as if in place). Four completeness
+  markers resulted, none behavioral. This is the **parametric form
+  of completeness** — different from THREAT-MODEL-001's behavioral
+  form (§6.3/§6.4/§6.7 described features as shipped; US-ADD-001
+  described stack as current). Both are `completeness`; the
+  amendment shape differs (behavioral → "planned per TASK-P1-YYY";
+  parametric → "current: X, target: Y, pending Z").
+
+- **US-MASTER-001 is a summary** — its §3.1-£3.6 restate AUTH-SPEC-001,
+  THREAT-MODEL-001, and ADR-PROVISIONING-001. When those sources
+  drift, US-MASTER-001's restatement drifts too. Its only finding
+  was §3.5 propagating THREAT-MODEL-001 §8's reconciliation-drift
+  correction. **Found via V-1's cross-document propagation
+  discipline, applied as W-1's first action.**
+
+**V-1's cross-document propagation discipline worked as designed.**
+V-1's §7 addition said "grep the doc set for the offending phrase
+before closing the sweep." W-1 opened with exactly that grep
+(`grep -r 'on listener reconnect' docs/`) and found US-MASTER-001
+§3.5 in one shot, ~20 lines into the sweep. Reading US-MASTER-001
+in isolation would not have found this — the summary was internally
+consistent with its own sections; the drift is only visible against
+the sibling document's correction. **Discipline notes in §7 earn
+their value when the next session reads them before the writes
+start, not after.**
+
+**Refuted predictions from the pre-sweep hypothesis set:**
+
+- US-ADD-001 §3.1's Phase 1 in-scope list including TASK-P1-021a
+  and TASK-P1-021b looked like a completeness finding — verified
+  it's a *scoping decision*, not a status claim. Scoping a Phase 1
+  feature as in-scope while the task is queued is accurate; only
+  behavioral claims ("the app wipes in ≤5s") would be findings.
+- US-ADD-001 §4 (backend parameters) looked like it would drift —
+  verified all accurate against the actual stack.
+- US-ADD-001 §7 (cryptographic protocol) looked like it would
+  drift — verified all rules hold (JCS, SHA-256 digest, Ed25519
+  over digest, base64url, monotonic version, enrollment floor,
+  recovery version monotonicity is designed but not exercised —
+  that last one is the §7 completeness marker).
+
+**The completeness bucket's parametric form is a new pattern.**
+V-1 introduced `completeness` for "prose describes a not-yet-shipped
+behavioral feature." W-1 discovered the parametric form: "prose
+describes a target stack/value as current." Same classification,
+different amendment shape. See §7 addition below.
+
+**Scope honestly stated.** Four of four documents swept.
+AUTH-SPEC-001 v0.2, THREAT-MODEL-001 v0.2, US-ADD-001 v0.3,
+US-MASTER-001 v0.2. KI-005 is RESOLVED.
+
+**What the full sweep produced:**
+
+| Class | Count | Locations |
+|---|---|---|
+| Doc-drift | 4 | AUTH-SPEC-001 §10.3 mechanism; THREAT-MODEL-001 §6.2 mechanism + §8 query; US-MASTER-001 §3.5 cross-doc; US-ADD-001 stale end-of-doc line |
+| Real gap cross-ref | 1 | THREAT-MODEL-001 §8 reconciliation-on-reconnect — TASK-P1-042 (filed at U-3, reconfirmed at V-1, propagated to US-MASTER-001 §3.5 at W-1) |
+| Completeness (behavioral) | 3 | THREAT-MODEL-001 §6.3 duress wipe, §6.4 wipe notification, §6.7 rotation |
+| Completeness (parametric) | 4 | US-ADD-001 §5 SQLCipher, §5 Tor embedded, §6 enrollment attestation, §7 recovery version |
+| Precision | 2 | AUTH-SPEC-001 §6.2; THREAT-MODEL-001 §5 P1-031 scope |
+| Cross-doc completeness | 1 | US-MASTER-001 §7 missing USER-ONBOARDING.md |
+| Holds | ~30 | Across all four docs |
+
+One new task could have been filed (P1-042 already existed from U-3);
+zero new tasks filed in W-1. One document under `USER-ONBOARDING.md`
+mentioned as needed (U-2 wrote it; the sweep confirmed its inclusion
+in US-MASTER-001 §7).
+
+
 ---
 
 ## 4. Known issues
@@ -2916,30 +3018,44 @@ Shut down emulator cleanly (menu -> Power off). Or accept re-enrollment.
 Resolved by commit `e6eed9b`. File has `generated: true`, all six
 W-series vectors populated.
 
-### KI-005 (PARTIAL SWEEP 2026-10-18): Requirements layer authored after the code
-**Two of four canonical documents swept.**
+### KI-005 (RESOLVED 2026-10-18, Sessions U-3 / V-1 / W-1): Requirements layer authored after the code
+**All four canonical documents swept.**
 
-AUTH-SPEC-001 v0.1 → v0.2 (commit `349b268`, Session U-3):
-mechanism correction to §10.3 consumption, nullability correction
-to §10.2 floor, precision amendment to §6.2, one real gap
-(reconciliation-on-reconnect, §9.3 defense 2) filed as
-TASK-P1-042.
+| Doc | Version | Sweep session | Commit | Findings |
+|---|---|---|---|---|
+| AUTH-SPEC-001 | v0.1 → v0.2 | U-3 | `349b268` | 1 precision, 1 doc-drift, 1 real gap (filed P1-042), 3 hypotheses refuted |
+| THREAT-MODEL-001 | v0.1 → v0.2 | V-1 | `5655318` | 2 doc-drift, 1 real gap (cross-ref P1-042), 3 completeness behavioral, 1 precision, 10 holds |
+| US-ADD-001 | v0.2 → v0.3 | W-1 | `20771af` | 4 completeness parametric, 1 stale-end-of-doc, 10 holds |
+| US-MASTER-001 | v0.1 → v0.2 | W-1 | `3720b59` | 1 cross-doc propagation, 1 doc-set completeness, 10 holds |
 
-THREAT-MODEL-001 v0.1 → v0.2 (commit `5655318`, Session V-1): two
-doc-drifts corrected (§6.2 mechanism, §8 reconciliation query),
-three completeness markers (§6.3 duress wipe, §6.4 wipe
-notification, §6.7 rotation/recovery — all designed-not-shipped,
-P1-021b/P1-036 pending), one real gap cross-referenced (P1-042
-again), one precision amendment (§5 P1-031 scope), ten claims
-verified holding.
+**Total across the sweep:** 4 doc-drift, 1 real gap (P1-042), 3
+behavioral completeness, 4 parametric completeness, 2 precision,
+1 cross-doc completeness, ~30 claims verified holding.
 
-**Remaining:** US-ADD-001, US-MASTER-001. Each is a session of
-reconnaissance-plus-amendment, same shape as U-3/V-1 but with a
-potential fourth classification bucket (`completeness`) given
-US-ADD-001's amendment-based scope. When a future session sweeps
-one of the remaining two, that session replaces this entry with
-its findings. When all four are swept this entry becomes
-RESOLVED.
+**One real gap:** the WS revocation listener does not
+reconnect-and-re-reconcile. Named at U-3 (§9.3 defense 2), V-1
+(§8), and W-1 (US-MASTER-001 §3.5). Filed as TASK-P1-042. Until
+that ships: WS-close timing is ≤5s when the listener is healthy,
+≤5min when disconnected.
+
+**No new task filed by the sweep itself** — the real gap was
+already filed at U-3; every other finding was a prose correction.
+
+**Methodology lessons captured in §7** (below):
+- `completeness` as a fourth classification bucket (V-1).
+- `completeness` has two forms — behavioral (V-1) and parametric
+  (W-1). Same bucket, different amendment shape.
+- Cross-document propagation (V-1 named it, W-1 applied it and
+  found US-MASTER-001 §3.5 in one shot).
+
+**Re-sweep cadence:** the four documents are now marked
+"conformance-swept 2026-10-18." A future re-sweep is warranted if
+a document's scope changes materially or a code refactor touches
+claims the sweep verified. No scheduled cadence; the docs'
+version histories record the sweep's findings, and future
+divergence shows up as a doc claiming something the code
+doesn't do — the same mechanism every drifted claim in this sweep
+had.
 
 ### KI-006 (RESOLVED 2026-10-18, Session U-2): USER-ONBOARDING.md written
 `docs/reference/USER-ONBOARDING.md` written at Session U-2.
@@ -3599,15 +3715,6 @@ Original phrasing preserved below for history:
 
     **No blocking tasks remain.** The next session's shape is a
     choice, not a backlog obligation:
-    - **KI-005 continuation** — sweep US-ADD-001 or
-      US-MASTER-001 (AUTH-SPEC-001 done U-3, THREAT-MODEL-001
-      done V-1). Same reconnaissance-plus-amendment shape as
-      U-3/V-1: read spec verbatim, read code at HEAD, classify
-      each divergence, amend + file. THREAT-MODEL-001's sweep
-      surfaced a fourth classification bucket (`completeness`
-      — prose describes a not-yet-shipped feature) which is
-      likely applicable to US-ADD-001's amendment scope. One
-      document per session.
     - **TASK-P1-042** — WS revocation listener reconnect +
       re-reconcile. Filed from the AUTH-SPEC-001 sweep. Medium
       priority, small scope (~20 lines + 3 tests). Closes the gap
@@ -4438,6 +4545,38 @@ Rebuild after flipping — read at HttpClient construction time.
   `grep -r` the doc set for the offending phrase before closing
   the sweep. Cost is one grep; cost of skipping is a future
   session's finding.
+
+- **`completeness` has two forms: behavioral and parametric.** V-1
+  introduced `completeness` for behavioral features described as
+  shipped (THREAT-MODEL-001 §6.3 duress wipe, §6.4 wipe
+  notification, §6.7 rotation). W-1 discovered the parametric form:
+  target-stack values asserted as current (US-ADD-001 §5 SQLCipher,
+  §5 tor-android embedded, §6 enrollment attestation, §7 recovery
+  version). Same classification bucket, different amendment shape.
+  Behavioral → "planned per TASK-P1-YYY." Parametric → "current:
+  X, target: Y, pending Z." Both preserve the doc's authority as
+  design target while stating today's truth. **Rule:** when a
+  document mixes current-state and build-time-target assertions
+  (registers do; summaries usually don't), expect both forms and
+  amend each with its own shape — not one with the other.
+
+- **Cross-document propagation discipline earned its keep the
+  session after it was written.** V-1's §7 addition said "after
+  classifying a doc-drift, grep the doc set for the offending
+  phrase before closing the sweep." W-1 opened with exactly that
+  grep (`grep -r 'on listener reconnect' docs/`) and found
+  US-MASTER-001 §3.5's instance in one shot, ~20 lines into the
+  sweep. **Not a finding W-1 would have produced alone** — reading
+  US-MASTER-001 in isolation finds internal consistency; the drift
+  is only visible against THREAT-MODEL-001 §8 v0.2's correction.
+  The lesson is that **§7 notes must be read before the writes
+  start, not after**. A discipline note that's read after the work
+  is a postmortem; a discipline note that's read before is a
+  decision lever. V-1's note was read at W-1's Command 1, applied
+  at Command 3, and it changed the outcome. Preserve the pattern:
+  **when a §7 addition names a pre-write action, the next session
+  must run that action in its first command block, not somewhere
+  mid-sweep.**
 
 Current verified state: **212 Android JVM tests** (2026-10-18),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
