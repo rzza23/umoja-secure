@@ -102,37 +102,4 @@ data class SignedReplacementNotice(
 // top-level `private` is file-scoped, so no conflict with the matrix
 // validators despite identical names.
 
-private val RN_BASE64URL_RE = Regex("^[A-Za-z0-9_-]+$")
 private val RN_ISO8601_UTC_RE = Regex("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$")
-
-private fun requireString(value: Any?, field: String): String {
-    val s = value as? String
-        ?: throw IllegalArgumentException(
-            "$field: expected string, got ${value?.let { it::class.simpleName } ?: "null"}",
-        )
-    if (s.isEmpty()) {
-        throw IllegalArgumentException("$field: empty string not permitted")
-    }
-    return s
-}
-
-private fun requireBase64Url32(value: Any?, field: String): String {
-    val s = requireString(value, field)
-    if (!RN_BASE64URL_RE.matches(s)) {
-        throw IllegalArgumentException(
-            "$field: not base64url (no padding, [A-Za-z0-9_-] only)",
-        )
-    }
-    if (s.length != 43) {
-        throw IllegalArgumentException(
-            "$field: expected 43 base64url chars for 32 bytes, got ${s.length}",
-        )
-    }
-    val decoded = Base64.getUrlDecoder().decode(s)
-    if (decoded.size != 32) {
-        throw IllegalArgumentException(
-            "$field: decodes to ${decoded.size} bytes, expected 32",
-        )
-    }
-    return s
-}

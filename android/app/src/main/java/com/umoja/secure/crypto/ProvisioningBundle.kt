@@ -101,19 +101,7 @@ data class ProvisioningBundle(
 
 // ---------- validation helpers ----------
 
-private val BASE64URL_RE = Regex("^[A-Za-z0-9_-]+$")
 private val PRINTABLE_ASCII_RE = Regex("^[\\x20-\\x7E]+$")
-
-private fun requireString(value: Any?, field: String): String {
-    val s = value as? String
-        ?: throw IllegalArgumentException(
-            "$field: expected string, got ${value?.let { it::class.simpleName } ?: "null"}",
-        )
-    if (s.isEmpty()) {
-        throw IllegalArgumentException("$field: empty string not permitted")
-    }
-    return s
-}
 
 private fun requirePrintableAscii(value: Any?, field: String, maxLen: Int): String {
     val s = requireString(value, field)
@@ -122,23 +110,6 @@ private fun requirePrintableAscii(value: Any?, field: String, maxLen: Int): Stri
     }
     if (s.length > maxLen) {
         throw IllegalArgumentException("$field: exceeds max length $maxLen, got ${s.length}")
-    }
-    return s
-}
-
-private fun requireBase64Url32(value: Any?, field: String): String {
-    val s = requireString(value, field)
-    if (!BASE64URL_RE.matches(s)) {
-        throw IllegalArgumentException("$field: not base64url (no padding, [A-Za-z0-9_-] only)")
-    }
-    if (s.length != 43) {
-        throw IllegalArgumentException(
-            "$field: expected 43 base64url chars for 32 bytes, got ${s.length}",
-        )
-    }
-    val decoded = Base64.getUrlDecoder().decode(s)
-    if (decoded.size != 32) {
-        throw IllegalArgumentException("$field: decodes to ${decoded.size} bytes, expected 32")
     }
     return s
 }
