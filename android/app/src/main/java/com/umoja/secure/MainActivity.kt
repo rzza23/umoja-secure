@@ -352,9 +352,31 @@ fun AppRoot(lifecycle: Lifecycle) {
                 role = null
                 screen = AppScreen.Enrollment
             }
-            is SessionStateManager.State.Authenticating,
-            is SessionStateManager.State.Reauthenticating -> {
+            is SessionStateManager.State.Authenticating -> {
+                // Initial auth: user is enrolling, or retrying after a
+                // network failure. Loading is correct -- there is no
+                // prior screen to preserve.
                 screen = AppScreen.Loading
+            }
+            is SessionStateManager.State.Reauthenticating -> {
+                // Silent reauth (ADR-HARDENING-001 section 2). A
+                // 401-triggered reauth must not flash Loading: the
+                // user was already on a valid screen when the 401
+                // arrived, and the reauth is meant to be invisible.
+                // Leave `screen` alone; the Authenticated branch
+                // below restores the right destination (Authenticated,
+                // or Admin / Diagnostics if the user was there) with
+                // no visible transition.
+                //
+                // This branch is deliberately a no-op. It also
+                // dedupes the double /me/matrix fetch observed at
+                // Session R-5: the matrix-fetch effect is keyed on
+                // (screen, deviceId), so leaving `screen` unchanged
+                // means the effect never re-fires while the
+                // interceptor's retry has already fetched once with
+                // a fresh bearer. Adding `screen = AppScreen.Loading`
+                // here would reintroduce both the flash and the
+                // duplicate fetch. Do not "helpfully" fill this in.
             }
             is SessionStateManager.State.Authenticated -> {
                 role = SecureStorage(context).get("session_role")
