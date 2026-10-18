@@ -54,6 +54,7 @@ class ChatViewModel(private val context: Context) {
             val errorCode = when (outcome) {
                 is MessagingService.SendOutcome.Success -> null
                 is MessagingService.SendOutcome.Failure -> outcome.code
+                is MessagingService.SendOutcome.NotAuthorized -> "not_authorized"
             }
             onResult(errorCode)
         }

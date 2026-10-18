@@ -4,7 +4,9 @@ import android.content.Context
 import android.util.Base64
 import android.util.Log
 import org.json.JSONObject
+import com.umoja.secure.crypto.MatrixStore
 import com.umoja.secure.crypto.PersistentSignalProtocolStore
+import com.umoja.secure.crypto.SendGate
 import com.umoja.secure.storage.SecureStorage
 import com.umoja.secure.storage.local.MessageStatus
 import com.umoja.secure.storage.local.MessageStore
@@ -67,6 +69,15 @@ class MessagingService(private val context: Context) {
     sealed class SendOutcome {
         data class Success(val envelopeId: String, val wasPreKey: Boolean) : SendOutcome()
         data class Failure(val code: String) : SendOutcome()
+        /**
+         * Policy denial: the peer is not in the accepted authorization
+         * matrix's `permitted_contacts`, or no matrix is stored. Distinct
+         * from [Failure] (transient/transport) because no retry helps —
+         * the fix is a new matrix from the admin.
+         *
+         * TASK-P1-038, ADR-HARDENING-001 §4.
+         */
+        data class NotAuthorized(val peerDeviceId: String) : SendOutcome()
     }
 
     data class ReceivedMessage(
@@ -90,7 +101,17 @@ class MessagingService(private val context: Context) {
         peerDeviceId: String,
         plaintext: String,
     ): SendOutcome = withContext(Dispatchers.IO) {
+        // 0. Send gate: fail-closed on the accepted authorization matrix.
+        //    Null (no matrix stored) and empty (matrix with zero contacts)
+        //    both reject — "matrix not loaded" is not a policy to send
+        //    under. See ADR-HARDENING-001 §4, TASK-P1-038.
         val storage = SecureStorage(context)
+        val matrixStore = MatrixStore(storage)
+        if (!SendGate.authorized(matrixStore.permittedContacts(), peerDeviceId)) {
+            Log.w(TAG, "sendMessage blocked by SendGate for peer ${peerDeviceId.take(8)}")
+            return@withContext SendOutcome.NotAuthorized(peerDeviceId)
+        }
+
         val sessionToken = storage.get("session_token")
             ?: return@withContext SendOutcome.Failure("not_authenticated")
 

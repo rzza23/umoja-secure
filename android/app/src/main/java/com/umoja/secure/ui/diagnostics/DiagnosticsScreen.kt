@@ -189,6 +189,8 @@ fun DiagnosticsScreen(
                                 "Sent: ${outcome.envelopeId.take(8)}... (prekey=${outcome.wasPreKey})"
                             is MessagingService.SendOutcome.Failure ->
                                 "Send error: ${outcome.code}"
+                            is MessagingService.SendOutcome.NotAuthorized ->
+                                "Send blocked: peer not in permitted contacts"
                         }
                     }
                 }
