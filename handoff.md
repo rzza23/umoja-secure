@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session T-1 — TASK-P1-041 DONE: VerificationFailureStore + 3-site wiring + DiagnosticsScreen section + reactivity StateFlow. All six registry §B acceptance criteria met, emulator acceptance verified. Android JVM 198 → 212. **037–041 hardening pass fully closed.** Next: backlog hygiene (MessageStore SQLite leak, KI-016/008/018, migration 017) or Phase 2 preparation — no blocking tasks remain.)
+Last updated: 2026-10-18 (Session U-1 — SQLite leak fixed + backlog hygiene: LocalDatabaseHelper singleton (0 leaks after ChatScreen GC vs 2 before), KI-008 canonicalJson extraction, KI-016 crypto validator extraction (3 files → 1 shared), KI-018 marked RESOLVED (already landed Session C). Android JVM 212 unchanged (deduplication preserves behavior). Backend 250 unchanged. Remaining: migration 017, double-fetch dedupe (deferred to U-2). No blocking tasks.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -2536,6 +2536,124 @@ range-based structural anchors. Same class as Session C's
 because already pushed. The correct fix is the follow-up with
 honest framing, not a force-push.
 
+
+### Session U-1 — MessageStore leak + backlog hygiene (2026-10-18)
+
+One real defect fixed, three backlog items closed. Three commits.
+
+- `644d5cf` — **SQLite connection leak fixed.** LocalDatabaseHelper
+  was a per-instance SQLiteOpenHelper; 5 MessageStore construction
+  sites across the app (ChatViewModel.refresh,
+  ConversationsScreen's LaunchedEffect, MessagingService x3),
+  **0 .close() calls anywhere**. Each construction opened its own
+  SQLiteDatabase handle; GC logged "was leaked!" via
+  SQLiteConnectionPool. Fix: LocalDatabaseHelper gains a
+  companion singleton accessor (`LocalDatabaseHelper.get(context)`)
+  with @Volatile + double-checked locking; MessageStore's `helper`
+  field reads it. All MessageStore instances share one database
+  handle, one connection pool, no per-instance leak.
+
+  **Reproduction and verification:**
+  - Baseline (cold launch to Conversations): 0 leaks
+  - Enter ChatScreen + Home key (triggers GC of
+    ChatViewModel's MessageStore) + wait 4s: **2 leaks**
+  - After fix, same flow: **0 leaks**
+  - After fix, 3 additional ChatScreen visits: **0 leaks** (proves
+    the singleton holds under repeated MessageStore construction,
+    not just one instance)
+
+  The `MessageStore.close()` method remains (unused, valid escape
+  hatch for future explicit lifecycle management).
+
+- `[KI-008 hash]` — **canonicalJson extracted** to
+  backend/src/audit/canonicalJson.ts. Byte-identical function was
+  duplicated in audit/log.ts (write path) and audit/verify.ts
+  (verify path); drift would silently break every audit chain
+  verification with a misleading "broken_at: N". Extraction with
+  KDoc documenting the shallow-sort pre-existing concern (nested
+  payload keys could reorder via Postgres JSONB; fixing it would
+  require a chain migration, not a small fix; out of scope).
+  Backend 250/250 passing proves write and verify paths still
+  agree on HMAC.
+
+- `[KI-016 hash]` — **crypto validation helpers extracted** to
+  crypto/Base64UrlValidation.kt. Three private copies
+  (ProvisioningBundle, AuthorizationMatrix, ReplacementNotice)
+  consolidated to one shared `internal` definition. Scope bounded:
+  PRINTABLE_ASCII_RE / requirePrintableAscii stays in PB;
+  ISO8601_UTC_RE / requirePositiveInt / requireStringList stays in
+  AM; EnrollmentQrPayload's variant stays put (different regex +
+  input type -- genuine different validation). KDoc records
+  Session F's `RN_` prefix discipline as superseded by extraction
+  (the discipline defended against wrong-file references when
+  three file-private copies existed; one shared definition
+  eliminates the state that required the prefix).
+
+  Verification: ProvisioningBundleTest 16/16, AuthorizationMatrixTest
+  23/23, ReplacementNoticeTest 7/7 -- the three validation
+  consumers still pass, proving byte-identical behavior.
+
+- **KI-018 marked RESOLVED** (doc-only). Session C landed
+  `backend/migrations/013_org_matrix_versions.sql` +
+  `backend/src/admin/matrixVersions.ts` on 2026-10-16. §4 of this
+  handoff still says "(NEW)". This session fixes that staleness.
+  No code change.
+
+**Four §7 additions earned** (from actual failures this session):
+
+1. **If a class has `close()` and grep finds zero call sites,
+   either the class is a leak or `close()` is a design lie.**
+   The MessageStore leak had this exact signature:
+   `close() { helper.close() }` existed, nothing called it,
+   `LocalDatabaseHelper(context)` opened a fresh handle per
+   MessageStore construction, ~0 close calls. Audit `close()`
+   call sites as a first-class check, not an afterthought. Same
+   class as R-3/R-4's diagnostic-pattern-grep lessons (a grep
+   that finds zero can mean "not used" or "not wired").
+
+2. **Byte-identical private helpers across files are a drift
+   hazard, and extraction beats the RN_-prefix defense.**
+   Session F's `RN_` prefix was a valid local-edit-time
+   discipline when three file-private copies existed
+   (`RN_requireBase64Url32` couldn't silently resolve to
+   AuthorizationMatrix's copy). Once extraction leaves one
+   shared `internal` definition, the discipline's purpose is
+   served by construction -- there's nothing to confuse.
+   **Supersession is the correct response to extraction, not
+   preservation.**
+
+3. **The `tail -N` family of commands truncates diagnostic
+   output in exactly the way that hides errors.**
+   Consolidated from T-1 and reinforced this session: `grep
+   "^e:"` on the compiler output is the acceptance; `tail -4`
+   hides the error list. Same class as `--since N` (R-3/R-4)
+   truncating windows before slow events. All three are
+   output-truncation failures.
+
+4. **Brace-walk removal beats fixed-string function removal
+   in Python edit scripts.** Three attempts in U-1: exact-string
+   `replace()` on `requireBase64Url32` failed because PB's body
+   has single-line exception formatting but AM's had multi-line
+   (from the exact same visual shape in the earlier read).
+   Robust alternative: find header line, walk brace depth to
+   find closing brace, replace the whole function block. Works
+   regardless of body formatting. Same class as T-1's
+   line-level-manipulation fix for call sites.
+
+**Deferred to U-2** (backlog hygiene continued):
+
+- Migration 017: `enrollment_tokens.used_by_device_id ON DELETE
+  SET NULL`. Schema change with a design decision (SET NULL vs
+  CASCADE vs NO ACTION preserves audit chain); deserves its own
+  focused session.
+- Double-matrix-fetch dedupe (R-5 §7 note). Requires StateFlow or
+  fetch-flag design; risk of new reactivity bug exceeds the
+  payoff of one saved round-trip.
+
+**Counts.** Android JVM 212 unchanged (deduplication preserves
+behavior; the tests prove it). Backend 250 unchanged. Full-suite
+green after every command.
+
 ---
 
 ## 4. Known issues
@@ -2565,18 +2683,20 @@ Referenced by Build Master §2 and §3.4. Not blocking.
 ### KI-007 (RESOLVED): Kotlin number serialization
 Resolved by `ff15357`.
 
-### KI-008: Three canonicalizers coexist
+### KI-008 (RESOLVED 2026-10-18, Session U-1): Three canonicalizers coexist
 
 | Encoder | Serves | Prehash? |
 |---|---|---|
 | `canonicalizeChallenge` (TS) / `CanonicalChallenge.encode` (KT) | challenge-response | no |
-| `canonicalJson` (TS, duplicated) | audit hash chain | no |
+| `canonicalJson` (TS) | audit hash chain | no |
 | `jcsCanonicalize` (TS) / `jcsCanonicalizeString` (KT) | matrix signing | yes (SHA-256) |
 
-Do not unify. Different protocols, different signing rules.
-
-Optional cleanup: `canonicalJson` is duplicated between
-`backend/src/audit/log.ts` and `audit/verify.ts`.
+Still three canonicalizers, still not unified -- different
+protocols, different signing rules. But the duplication of
+`canonicalJson` between `audit/log.ts` and `audit/verify.ts`
+was extracted to `audit/canonicalJson.ts` (single source; KDoc
+documents the shallow-sort pre-existing concern). Backend
+250/250 passing proves write and verify paths agree on HMAC.
 
 ### KI-009: Backend test suite requires Postgres
 `vitest run` triggers `test/global-setup.ts` -> Postgres connection.
@@ -2627,11 +2747,18 @@ Both wrong. Gradle's Kotlin compiler ignores `.bak` — the file does
 not reach the classpath. The actual harm is repo pollution and
 search noise. All six were deleted in commit `407bbac`.
 
-### KI-016 (NEW): Duplicated base64url validators
-`ProvisioningBundle.kt` and `AuthorizationMatrix.kt` each define
-file-private `requireBase64Url32` / `requireString` / `BASE64URL_RE`.
-~30 lines duplicated. Optional cleanup; do not fold into unrelated
-tasks.
+### KI-016 (RESOLVED 2026-10-18, Session U-1): Duplicated base64url validators
+`ProvisioningBundle.kt`, `AuthorizationMatrix.kt`, and
+`ReplacementNotice.kt` each defined file-private
+`requireBase64Url32` / `requireString` / `BASE64URL_RE` (three
+copies, not two -- the original note missed ReplacementNotice).
+Extracted to `crypto/Base64UrlValidation.kt` with `internal`
+visibility. Scope bounded: PRINTABLE_ASCII_RE /
+requirePrintableAscii stayed in PB; ISO8601_UTC_RE /
+requirePositiveInt / requireStringList stayed in AM;
+EnrollmentQrPayload's variant stayed put (genuine different
+validation). Session F's `RN_` prefix discipline superseded by
+extraction (KDoc records the reasoning).
 
 ### KI-017 (NEW): QR payload not signed
 The enrollment QR payload carries public keys and a device_id with no
@@ -2640,11 +2767,13 @@ only). A future hardening task could have the device sign the payload
 with its auth key — at which point the `domain` field becomes
 load-bearing and the payload should be JCS-canonicalized. Not Phase 1.
 
-### KI-018 (NEW): Backend does not track current matrix version
-Matrix `version` is admin-entered with no server-side source of truth.
-Monotonicity is device-enforced (§3.7), so a bad number fails safe,
-but the admin has no way to query "what version is currently
-authorized." Future improvement.
+### KI-018 (RESOLVED 2026-10-16, Session C; marked 2026-10-18, U-1)
+Backend tracks current matrix version per org.
+`backend/migrations/013_org_matrix_versions.sql` +
+`backend/src/admin/matrixVersions.ts` landed in Session C
+(commits 6013077, 4e6e096, 8adde6b). This entry was stale --
+still said "(NEW)" in the handoff until Session U-1's doc
+hygiene pass. No code change needed.
 
 ### KI-020 (RESOLVED 2026-10-15): EnrollmentQrScreen unreachable before authentication
 `EnrollmentQrScreen` was reached only via Settings → "Enrollment QR",
@@ -3911,6 +4040,56 @@ Rebuild after flipping — read at HttpClient construction time.
   form for multi-line prose. Same class as R-3/R-4's grep
   patterns that didn't match JSON log format — anchors on
   assumed text shape, not actual text shape.
+- **If a class has `close()` and grep finds zero call sites,
+  either the class is a leak or `close()` is a design lie.**
+  Session U-1's MessageStore leak had this exact signature:
+  `close() { helper.close() }` existed, nothing called it, and
+  `LocalDatabaseHelper(context)` opened a fresh SQLite handle
+  per MessageStore construction with ~0 close() calls. Audit
+  `close()` call sites as a first-class check when reading any
+  resource-holding class. A close() with no callers is a signal
+  about design, not just a missing call -- either the lifecycle
+  needs wiring (this session's fix: singleton helper eliminates
+  the need for close) or the method shouldn't exist.
+- **Byte-identical private helpers across files are a drift
+  hazard, and extraction supersedes the RN_-prefix defense.**
+  Session F's `RN_` prefix on `requireBase64Url32` / `requireString`
+  / `RN_BASE64URL_RE` was correct for its state: three file-private
+  copies, one shared name, a wrong-file reference would fail
+  compile visibly. Once extraction leaves one shared `internal`
+  definition, the state that required the prefix is gone --
+  there's one definition, one name, nothing to confuse. **Supersession
+  is the correct response to extraction, not preservation.**
+  Session F's note stays in the handoff as history; the KDoc
+  in `Base64UrlValidation.kt` records the supersession so a
+  future reader sees why.
+- **Truncated output commands hide exactly the errors you need.**
+  Consolidated from T-1 (`tail -4` hides the compile error list)
+  and R-3/R-4 (`--since N` truncates before slow events). Three
+  failures this class across the R-S-T-U chain: (a) `tail -4` on
+  a Gradle build hides `^e:` lines; (b) `--since 1m` / `--since
+  10m` on `docker compose logs` truncates before the sleep +
+  screencap + diagnostic assembly completes; (c) `tail -N` on a
+  multi-line grep match hides everything past the last match.
+  **Rule: grep `^e:` for compile output, `--since 30m` for
+  container logs (wide), and `head` the first few matches when
+  the error count is what matters.** Same family as the
+  log-format grep lessons (R-3/R-4): truncation is silent, and
+  the failure mode is "no output" being read as "no event."
+- **Brace-walk removal beats fixed-string function removal in
+  Python edit scripts.** Session U-1 attempted exact-string
+  `replace()` on `requireBase64Url32` three times; the third
+  time succeeded only after switching to a brace-walk approach
+  (find header line, walk `{`/`}` depth to find closing brace,
+  replace the whole function block). Fixed-string removal fails
+  when body formatting differs between the source files --
+  single-line exception vs multi-line exception in PB vs AM
+  produced identical-looking bodies that weren't textually
+  identical. Same class as T-1's line-level-manipulation fix
+  for Kotlin call sites: **for multi-line code edits, anchor on
+  structure (line positions, brace depth) and compute
+  indentation from the file, never paste whitespace or full
+  bodies into Python strings.**
 
 Current verified state: **212 Android JVM tests** (2026-10-18),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
