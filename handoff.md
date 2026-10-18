@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session R — TASK-P1-040-A DONE: backend device_revoked disambiguation. LookupSession returns discriminated union {session | device_revoked | no_session}; middleware/challenge/verify/ws all handle device_revoked; curl verified active→200, revoked→401 device_revoked. ADR-IDENTITY-CHANGE-001 v0.4 amendment. Next: TASK-P1-040-B — Android SessionStateManager.)
+Last updated: 2026-10-18 (Session R-2 — TASK-P1-040-B DONE: SessionStateManager 7-state machine + single-flight Mutex+CompletableDeferred + fail-toward-recovery on malformed expiry, 12 JVM tests, 178 -> 190. First-run failure (Deferred.awaitAll does not mutate the list) caught and fixed. Next: TASK-P1-040-C — AppRoot routing rewrite.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -93,7 +93,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 178** (verified 2026-10-17 from XML; Session O-2's 5 MatrixApiTest tests, then Session P's 4 SendGateTest tests as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance.)
+- **JVM unit tests: 190** (verified 2026-10-18 from XML; Session P's 4 SendGateTest tests, then Session R-2's 12 SessionStateManagerTest tests as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests.)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -1949,6 +1949,95 @@ rewrite — is 040-B through 040-E, each comparable to 040-A in
 scope. Session R closes with the backend half done and verified,
 not with the task marked complete.
 
+
+### Session R-2 — TASK-P1-040-B DONE (2026-10-18)
+
+Android session state machine landed as a self-contained class. Zero
+production integration this session — 040-C wires it into AppRoot,
+040-D wires it into HttpClient. 040-B ships the class with a 12-test
+JVM suite so integration has a tested foundation. One commit:
+
+- `f9e01ab` — **040-B: SessionStateManager + tests.** New
+  `auth/SessionStateManager.kt` (~218 lines), new
+  `test/auth/SessionStateManagerTest.kt` (~257 lines). Android JVM
+  178 → 190 (+12). Backend 250 unchanged (no backend touch).
+
+**The load-bearing design ruling — single-flight is Mutex +
+CompletableDeferred, not Mutex alone.** ADR §2 says "a mutex ...
+ensures concurrent 401s produce one re-auth. Other callers block
+on the same future." A bare mutex would serialize reauths — five
+concurrent 401s → five lambda executions in turn, exactly what
+ADR §2 says must not happen. The deferred is the "same future"
+phrasing: leader acquires lock, creates deferred, releases lock,
+runs reauth, completes deferred; followers acquire lock, see
+existing deferred, release lock, await it. Five callers, one wire
+call, one shared outcome. First `Mutex` and first
+`CompletableDeferred` in the codebase — named in the class KDoc
+so future readers see the two-pattern shape and don't
+"simplify" it back to bare mutex.
+
+**The boundary 040-B does NOT cross.** ADR §2 assigns two
+responsibilities to the interceptor, not the state manager:
+
+- Recursion guard — `/auth/challenge` and `/auth/verify` 401s
+  must not trigger reauth; enforced by URL prefix at the
+  interceptor layer (040-D).
+- Retry-original-call — interceptor buffers the failed request,
+  calls `reauthenticate()`, re-executes the buffer once on
+  success (040-D).
+
+The state manager transitions state and returns. Both class KDoc
+and commit message state this so 040-C/D don't re-litigate it.
+
+**Fail-toward-recovery on malformed expiry.** `isExpired()`
+treats an unparseable `expiresAt` as expired. ADR §1's invariant:
+a fielded user must never be stranded. An unparseable date is
+indistinguishable from corruption; treating it as expired routes
+through reauth (recovers if backend healthy) rather than trusting
+a value we cannot read (would strand the user with a stale
+token).
+
+**Terminal-state short-circuit.** `reauthenticate()` on `Revoked`
+or `EnrollmentRequired` returns immediately without invoking the
+reauth lambda. Registry §B: "no retry loop."
+`TEST-SESSION-REVOKED-TERMINAL` asserts `reauthCalls == 1` after
+two `reauthenticate()` calls on `Revoked`.
+
+**First-run failure was informative.** `TEST-SESSION-CONCURRENT-
+401-SINGLE-REAUTH` failed on first run: `assertTrue(it is State)`
+was iterating `List<Deferred<State>>` because `awaitAll()`
+returns the results but does not mutate the list. Always-false
+assertion. The fix: `val outcomes = results.awaitAll()` and
+iterate `outcomes`. **The state machine was already correct**
+(`reauthCalls == 1` held throughout); only the final assertion
+was wrong. This is the class of failure a green first run would
+have hidden — which is why tests run before commit, not after.
+
+Secondary hardening: replaced two `yield()` calls with
+`delay(200)` before `gate.complete`. `yield()` releases the
+`runBlocking` thread but not `Dispatchers.Default` coroutines;
+without real wall-clock time, followers can arrive after the
+leader completes and each become a fresh leader
+(`reauthCalls > 1`). No observable signal for "follower awaiting"
+exists on the state manager's public surface, so a bounded delay
+is the honest test seam. Assertion messages name the actual
+violation if the invariant ever breaks: `"single-flight violated
+during leader block: N reauths"`.
+
+**Test framework: `runBlocking`, not `runTest`.**
+`kotlinx-coroutines-test` is not on the classpath;
+`IdentityChangeControllerTest` establishes the `runBlocking`
+precedent. No `build.gradle.kts` change needed.
+
+**Scope honestly stated.** 040-B delivers the class and its tests.
+040-C (AppRoot routing rewrite — the bug ADR §9 v0.2 item 3
+confirmed: `sessionExpiresAt == null` never checks `< now()`) is
+R-3's opening task. 040-D (HttpClient interceptor — the
+greenfield work ADR §2 presupposed existed; `HttpClient.kt` has
+zero 401 handling, each API catches its own errors via domain
+exceptions) is R-3's second commit. 040-E (emulator acceptance
+for expired/revoked/network paths) is R-3's third.
+
 ---
 
 ## 4. Known issues
@@ -2559,12 +2648,25 @@ Original phrasing preserved below for history:
     Backend 247 → 250. Curl verified active→200, revoked→401
     `device_revoked`. See §3 Session R entry.
 
-    **TASK-P1-040-B next.** Android SessionStateManager: 7 states,
-    single-flight re-auth mutex, recursion guard, retry-original-
-    call interceptor. Then 040-C AppRoot routing rewrite
-    (`sessionExpiresAt < now()` → re-auth, not the current `== null`
-    check); 040-D interceptor integration into HttpClient; 040-E
-    emulator acceptance (expired / revoked / network-failure paths).
+    **TASK-P1-040-B DONE 2026-10-18.** Android session state
+    machine landed (`f9e01ab`). `SessionStateManager` with 7 states,
+    single-flight Mutex+CompletableDeferred, fail-toward-recovery on
+    malformed expiry, terminal-state short-circuit. 12 JVM tests,
+    178 → 190. Zero production integration this commit — 040-C wires
+    it into AppRoot, 040-D wires it into HttpClient. See §3 Session
+    R-2 entry.
+
+    **TASK-P1-040-C next.** AppRoot routing rewrite — replace the
+    current `sessionExpiresAt == null → Enrollment` check
+    (`MainActivity.kt` lines ~232-234) with `sessionExpiresAt <
+    now()` → silent reauth via SessionStateManager. This is the
+    first production integration: `AppRoot` constructs a
+    `SessionStateManager` with `reauth = { SessionManager(context)
+    .authenticate() }` (mapped to `ReauthOutcome`) and
+    `sessionProvider = { SessionManager(context).currentSession()
+    }`. Then 040-D interceptor (greenfield — `HttpClient.kt` has
+    zero 401 handling today, so 040-D adds the whole retry layer,
+    not extends one). Then 040-E emulator acceptance.
 
 **Backlog items (not scheduled):**
 - Instrumented Compose tests for admin flows (no test rule configured;
@@ -3075,8 +3177,31 @@ Rebuild after flipping — read at HttpClient construction time.
   would have shipped silently. A test that breaks when the contract
   changes is doing its job; a test that would pass regardless is
   not testing the contract. Session R.
+- **`Deferred.awaitAll()` returns the results but does not mutate
+  the original list.** Session R-2's `TEST-SESSION-CONCURRENT-401-
+  SINGLE-REAUTH` failed on first run because `assertTrue(it is
+  State)` iterated `List<Deferred<State>>` after `awaitAll()` --
+  the deferred is not the value; the assertion was always false.
+  The failure compiles cleanly (any `is` check on the wrong type
+  compiles). Fix: `val outcomes = list.awaitAll()` and iterate
+  `outcomes`. Diagnostic discipline: assertion messages must name
+  the actual value, not just the predicate --
+  `assertTrue("result[$i] should be X, got $r", r is X)`.
+  Otherwise the failure points at a predicate and not at the
+  value that was wrong. Session R-2.
+- **`yield()` releases the current thread's coroutine; it does not
+  release coroutines on other dispatchers.** A `runBlocking`
+  thread yielding does not give `Dispatchers.Default` coroutines
+  real wall-clock time to reach a synchronization point. For
+  cross-dispatcher test synchronization, use `delay(ms)` with a
+  bounded value, or a `CompletableDeferred` the code sets. The
+  delay is not flakiness -- it is the honest test seam when the
+  production API has no observable "arrived" signal. If the
+  bounded delay still leaves the test flaky, the fix is exposing
+  a signal (e.g. a `StateFlow` emitting on entry), not increasing
+  the delay. Session R-2.
 
-Current verified state: **178 Android JVM tests** (2026-10-17),
+Current verified state: **190 Android JVM tests** (2026-10-18),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
 and **250 backend tests** (2026-10-18, 16 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
