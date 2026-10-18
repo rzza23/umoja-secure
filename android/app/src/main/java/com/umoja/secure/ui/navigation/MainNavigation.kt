@@ -50,7 +50,7 @@ fun MainNavigation(
     var openEnrollmentQr by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
-    val chatViewModel = remember { ChatViewModel(context) }
+    val chatViewModel = remember { ChatViewModel.create(context) }
 
     // If a chat is open, show it full-screen instead of the tabbed shell.
     if (openEnrollmentQr) {

@@ -18,11 +18,28 @@ import kotlinx.coroutines.launch
  * Exposes the message list as a StateFlow so Compose observes updates.
  * The backing store is not reactive; refresh() re-queries it. Callers
  * trigger refresh() when MessagingService.messagesVersion increments.
+ *
+ * **Injected lambdas for testability (Session C).** The two data-access
+ * operations (listMessages, sendMessage) and the coroutine scope are
+ * constructor-injected. Production uses the [create] factory below,
+ * which wires the real [MessageStore] + [MessagingService] and the
+ * same `CoroutineScope(Dispatchers.IO + SupervisorJob())` this class
+ * previously constructed inline. Tests inject synchronous fakes + an
+ * `Unconfined` scope. The public surface (messages, observe, refresh,
+ * send) is unchanged from the pre-refactor shape -- ChatScreen's call
+ * sites compile unchanged.
+ *
+ * **Fire-and-forget preserved.** [send] launches on the injected scope
+ * and returns before the network round-trip completes. Production's
+ * scope is independent of any Compose composition, so a user who taps
+ * send and immediately navigates away still delivers the message.
+ * Emulator smoke test: hit send, tap Back, verify peer receives.
  */
-class ChatViewModel(private val context: Context) {
-
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
+class ChatViewModel(
+    private val listMessagesFn: suspend (String) -> List<Message>,
+    private val sendMessageFn: suspend (String, String) -> MessagingService.SendOutcome,
+    private val scope: CoroutineScope,
+) {
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
     val messages: StateFlow<List<Message>> = _messages.asStateFlow()
 
@@ -38,8 +55,7 @@ class ChatViewModel(private val context: Context) {
     fun refresh() {
         val peer = currentPeerId ?: return
         scope.launch {
-            val list = MessageStore(context).listMessages(peer)
-            _messages.value = list
+            _messages.value = listMessagesFn(peer)
         }
     }
 
@@ -50,7 +66,7 @@ class ChatViewModel(private val context: Context) {
      */
     fun send(peerDeviceId: String, plaintext: String, onResult: (String?) -> Unit) {
         scope.launch {
-            val outcome = MessagingService(context).sendMessage(peerDeviceId, plaintext)
+            val outcome = sendMessageFn(peerDeviceId, plaintext)
             val errorCode = when (outcome) {
                 is MessagingService.SendOutcome.Success -> null
                 is MessagingService.SendOutcome.Failure -> outcome.code
@@ -58,5 +74,21 @@ class ChatViewModel(private val context: Context) {
             }
             onResult(errorCode)
         }
+    }
+
+    companion object {
+        /**
+         * Production factory. Wires the real data sources and the same
+         * scope shape the previous (context-only) constructor used.
+         * Callers that previously did `ChatViewModel(context)` should
+         * call `ChatViewModel.create(context)`.
+         */
+        fun create(context: Context): ChatViewModel = ChatViewModel(
+            listMessagesFn = { peer -> MessageStore(context).listMessages(peer) },
+            sendMessageFn = { peer, text ->
+                MessagingService(context).sendMessage(peer, text)
+            },
+            scope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
+        )
     }
 }
