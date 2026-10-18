@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session R-3 — TASK-P1-040-C DONE: SessionStateManager.clear() + AppRoot routing rewrite (state-driven), 4 new AppScreen branches, SessionScreens.kt, smoke verified (cold launch → Authenticated + /me/matrix; logout → Enrollment + backend logout; authenticate → full auth chain). JVM 190 → 191. Next: TASK-P1-040-D — HttpClient 401 interceptor.)
+Last updated: 2026-10-18 (Session R-4 — TASK-P1-040-D DONE: HttpClient 401 interceptor + companion-scoped handler, AppRoot wiring, Revoked-branch preserve-device_id fix, EnrollmentScreen onAuthFailed fix. TEST-SESSION-REVOKED-ON-DEVICE passed end-to-end (detection + recovery). JVM 191 → 198. Next: TASK-P1-040-E — expired-session + network-failure acceptance, then handoff close.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -93,7 +93,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 191** (verified 2026-10-18 from XML; Session R-2's 12 SessionStateManagerTest tests, then Session R-3's 1 SessionStateManager.clear() test (CLEAR-TRANSITIONS-TO-UNAUTHENTICATED) as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows.)
+- **JVM unit tests: 198** (verified 2026-10-18 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed.)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -2178,6 +2178,113 @@ session, revoked device, network-failure paths) needs both
 040-D and the state machine's triggering chain. R-4 opens on
 040-D.
 
+
+### Session R-4 — TASK-P1-040-D DONE (2026-10-18)
+
+HttpClient 401 interceptor wired end-to-end. TEST-SESSION-
+REVOKED-ON-DEVICE passed fully — detection (Revoked terminal
+screen) and recovery (Log out and try again → Authenticate →
+Conversations) both verified on emulator 5556 with backend log
+evidence. Three commits:
+
+- `ae1c840` — **040-D-1: HttpClient interceptor + retry
+  predicate.** Companion-scoped `on401Handler: (suspend () ->
+  String?)?` rather than constructor-injected (13 HttpClient
+  construction sites; only AppRoot should own the wiring).
+  Handler returns **String? (fresh bearer)** not Boolean —
+  critical design point ADR §2 does not specify: the retried
+  request must use the fresh token from the state machine's
+  reauth, or the retry hits 401 again with the pre-reauth bearer.
+  Structural recursion guard via extracted `shouldRetryAfter401()`
+  predicate — excludes `/auth/` prefix and `/enrollment`. 7 new
+  `TEST-INTERCEPTOR-*` JVM tests. JVM 191 → 198.
+
+- `d835821` — **040-D-2: AppRoot wires HttpClient.on401Handler
+  to state machine.** `DisposableEffect(sessionStateManager)`
+  registers the handler; onDispose clears it. Keyed on
+  sessionStateManager so a deviceId change re-registers against
+  the new instance. During reauth, the state machine's transitions
+  fire the routing effect so the UI updates transparently.
+
+- `<040-D-3-hash>` — **040-D-3: terminal-state honesty fixes
+  (Revoked branch + EnrollmentScreen onAuthFailed).** Two bugs
+  caught during acceptance, both ADR §1 violations:
+
+  **Fix A — Revoked branch** — preserve device_id, "Log out and
+  try again" label. The prior "Re-enroll this device" removed
+  device_id, forcing the next enrollment to POST /enrollment with
+  the same public_key. Backend's INSERT is pure (consume.ts:61),
+  so 23505 on devices_key_unique returns 409
+  device_already_enrolled — a dead end. Revocation is a backend
+  state change, not a device identity change; device_id and
+  Keystore keypair are intact. New action clears session but
+  preserves device_id.
+
+  **Fix B — EnrollmentScreen's onAuthFailed callback** —
+  Authenticate button in EnrollmentScreen calls
+  SessionManager.authenticate() directly, not through the state
+  machine. On revoked device, failure was caught locally as
+  "Auth error: device_revoked" and stranded the user. New
+  `onAuthFailed(code)` callback re-invokes
+  `sessionStateManager.reauthenticate()`, which maps the code to
+  ReauthOutcome, transitions state, and the routing effect sets
+  the appropriate terminal AppScreen. Brief error flash then
+  auto-transition to terminal screen (~500ms).
+
+**Chain verified end-to-end** (backend log + logcat + screenshot):
+
+- 3 concurrent 401s (matrix fetch + 2 identity-change polls) →
+  single POST /auth/challenge (single-flight held) → 0 POST
+  /auth/verify (040-A's device_revoked short-circuit fires at
+  challenge before verify)
+- Interceptor log: `401 on /me/matrix; reauth failed or terminal,
+  returning 401 to caller` (handler returned null for
+  State.Revoked)
+- Routing effect transitioned screen to AppScreen.Revoked
+- Terminal screen rendered with the corrected label ("Log out
+  and try again") and corrected message ("request reactivation")
+
+**Nine diagnostic lessons earned** (consolidated in §7):
+
+1. Kotlin block comments nest — `/auth/*` in KDoc opens a
+   nested comment, unclosed-comment compile error at EOF
+2. `when` branches with multiple statements need `{ }` —
+   single-expression branches cannot be extended
+3. `devices_key_unique` AND `devices_pkey` both collide on
+   re-enroll — delete-and-recreate is the only clean path
+4. `information_schema.key_column_usage.referenced_table_name`
+   does not exist — `pg_constraint` is the correct FK source
+5. `grep "GET /path"` never matches JSON logs — format is
+   `"method":"GET","url":"/path"` (separate quoted fields)
+6. `grep -E "req\."` never matches JSON logs — format is
+   `"req":{` (colon, not period)
+7. `--since N` windows truncate before slow events (3rd
+   occurrence this project)
+8. `Deferred.awaitAll()` returns but does not mutate the
+   original list (from R-2, still worth naming)
+9. **"OK" from an edit script ≠ "change is correct"** — the
+   edit fires before compile; two consecutive compile failures
+   this session had `OK:` lines immediately above them
+
+Findings #5, #6, #7 are the same class: **diagnostic patterns
+that don't match the actual log format**. Consolidated into one
+§7 bullet naming the class, not three separate symptoms.
+
+**State recovery procedure** (documented for the backlogged
+bootstrap script): delete a device row requires ordered cleanup
+of 6 NO ACTION FK dependents (enrollment_tokens,
+org_matrix_versions, identity_change_notices from/to,
+identity_change_acks, matrices). The other 9 FKs cascade.
+Capture: 8-line transaction, psql heredoc, works.
+
+**Scope honestly stated.** R-4 delivered 040-D end-to-end:
+interceptor, wiring, and the two terminal-state honesty fixes
+its acceptance exposed. **040-E remains** — the expired-session
+test (`TEST-SESSION-APP-START-EXPIRED`) and network-failure
+test (`TEST-SESSION-NETWORK-DURING-REAUTH`) still need manual
+emulator verification; both require the interceptor in place,
+which landed this session. R-5 opens on 040-E.
+
 ---
 
 ## 4. Known issues
@@ -2810,17 +2917,27 @@ Original phrasing preserved below for history:
     POST /auth/challenge → POST /auth/verify → GET /me/matrix
     chain fires. See §3 Session R-3 entry.
 
-    **TASK-P1-040-D next.** HTTP interceptor (greenfield —
-    `HttpClient.kt` has zero 401 handling today, so 040-D adds the
-    whole retry layer, not extends one). Contract per ADR §2's
-    "Retry-the-original-call": buffer failed request → call
-    `sessionStateManager.reauthenticate()` → retry buffer once on
-    success → discard the failed response body (re-execute the
-    buffer, do not resume a response). Recursion guard: exclude
-    `/auth/challenge` and `/auth/verify` by URL prefix, or reauth
-    recursion is possible. Single-flight already in the state
-    manager; interceptor delegates. Then 040-E emulator acceptance
-    (expired session, revoked device, network failure paths).
+    **TASK-P1-040-D DONE 2026-10-18.** HttpClient 401 interceptor
+    landed across three commits (`ae1c840` D-1 interceptor +
+    predicate + 7 JVM tests, `d835821` D-2 AppRoot wiring,
+    `<040-D-3-hash>` D-3 terminal-state honesty fixes).
+    TEST-SESSION-REVOKED-ON-DEVICE passed fully — detection
+    (Revoked terminal screen) and recovery (Log out and try again
+    → Authenticate → Conversations) both verified. See §3 Session
+    R-4 entry.
+
+    **TASK-P1-040-E next.** Remaining manual acceptance:
+    - `TEST-SESSION-APP-START-EXPIRED` — force session expiry in
+      `sessions` table, cold launch, observe silent reauth
+      (Authenticating → Authenticated with no button tap)
+    - `TEST-SESSION-NETWORK-DURING-REAUTH` — force network failure
+      during reauth (kill docker compose backend mid-flow), observe
+      NetworkFailure terminal screen with Retry button
+
+    Both now reachable with 040-D's interceptor in place. After
+    040-E, TASK-P1-040 is fully DONE and R-5 closes with the
+    handoff + ADR-HARDENING-001 amendment noting the 040 chain's
+    completion.
 
 **Backlog items (not scheduled):**
 - Instrumented Compose tests for admin flows (no test rule configured;
@@ -2829,10 +2946,35 @@ Original phrasing preserved below for history:
 - `canonicalJson` deduplication between `audit/log.ts` and
   `audit/verify.ts` (KI-008).
 - Backend current-matrix-version tracking (KI-018).
-- `scripts/bootstrap-enrollment-token.sh` — one-command enrollment
-  recovery. Reads the device's QR JSON, generates a token, inserts
-  the enrollment_tokens row, prints the token. Three occurrences of
-  the manual procedure make it worth scripting.
+- **`scripts/bootstrap-enrollment-token.sh` — SPEC COMPLETE,
+  IMPLEMENT NEXT.** Five occurrences of the manual procedure
+  through Session R-4; the sixth (state recovery from
+  `devices_key_unique` + `devices_pkey` collision + 6 NO ACTION
+  FK dependencies) established the full specification:
+  - Takes: device public_key (or reads from existing
+    `devices` row), org_id, admin device_id (for `created_by`).
+  - Handles both fresh-enrollment and re-enrollment-from-broken-
+    state cases. The latter requires ordered DELETE of 6 NO
+    ACTION FKs before `DELETE FROM devices` (enrollment_tokens
+    used_by/created_by, org_matrix_versions asserted_by,
+    identity_change_notices from/to, identity_change_acks
+    acking, matrices).
+  - Generates token via `secrets.token_urlsafe(32)`; inserts
+    with `bound_public_key = decode(public_key_hex, 'hex')`,
+    `role='user'`, `created_by=<admin>`,
+    `expires_at = now() + interval '1 hour'`.
+  - Prints the raw token (what goes into the app's Enrollment
+    field) and the token_hash hex (for post-insert verification).
+  - ~40-line Python or shell script. Every ad-hoc psql session
+    since Session A is the same 4-query pattern.
+- **Consider making `enrollment_tokens.used_by_device_id`
+  `ON DELETE SET NULL`.** Session R-4's device-row deletion hit
+  the `NO ACTION` FK, requiring manual token cleanup. In a test
+  environment that's noise; in production it might be a
+  deliberate audit-preservation choice. **Migration 017
+  territory, not a fix for R-4.** Either adopt `SET NULL` (keeps
+  the token row, drops the FK to the deleted device) or document
+  that device deletion requires pre-cleaning enrollment_tokens.
 - **`MessageStore` SQLite connection leak** (Session R-3): logcat
   shows `SQLiteConnectionPool: A SQLiteConnection object for
   database '...umoja_local.db' was leaked!` at ~dozens/sec during
@@ -3380,8 +3522,73 @@ Rebuild after flipping — read at HttpClient construction time.
   visible time to the current `date -u`. When in doubt, take a
   fresh screenshot; the acceptance is "proven now," not "proof
   from earlier still applies." Session R-3.
+- **Kotlin block comments nest — `/path/*` in KDoc opens a nested
+  comment.** Session R-4's HttpClient interceptor KDoc contained
+  `Auth-free paths (\`/auth/*\`, ...)`, which the Kotlin compiler
+  parsed as opening a nested `/* */` block. The KDoc's closing
+  `*/` closed the *nested* comment, leaving the outer KDoc
+  unterminated. Compile signature: `"Unclosed comment"` at EOF
+  plus `"Missing '}'"` at the last line before the offending
+  KDoc. Fix: rephrase to `/auth/` prefix (no glob). Grep balance
+  check (`grep -c "/*" == grep -c "*/"`) before commit catches
+  it. Same class as Session Q's FLAG_SECURE grep trap — a syntax
+  construct in a comment has side effects the compiler honors.
+  Session R-4.
+- **A `when` branch with one expression cannot be extended by
+  adding a second statement.** Kotlin's single-expression `when`
+  branches (`is Foo -> statement()`) are not blocks; adding a
+  newline + statement after the first does not extend the branch
+  — the new statement is parsed as the beginning of the next
+  branch. Compile signature:
+  `"'when' expression must be exhaustive. Add the 'X' branch"` on
+  the branch following the edit, plus syntax errors on the
+  mis-parsed statement. Fix: wrap both statements in `{ }`. Session
+  R-4.
+- **`devices_key_unique` AND `devices_pkey` both collide on
+  re-enrollment.** A device that loses its `device_id` (e.g., from
+  a `SecureStorage.remove("device_id")`) generates a fresh UUID
+  on next Enroll, but its Keystore keypair is unchanged — so
+  `POST /enrollment`'s `INSERT INTO devices` collides on
+  `public_key` (`devices_key_unique`, from the old row) AND on
+  `device_id` (`devices_pkey`, if the old row survived). Both are
+  23505; both return `device_already_enrolled` 409. The only
+  clean path is delete-and-recreate the device row with all 6
+  NO ACTION FK dependents cleaned first. Session R-4.
+- **PostgreSQL FK enumeration uses `pg_constraint`, not
+  `information_schema.key_column_usage`.** The latter has no
+  `referenced_table_name` column. Correct query:
+  `SELECT conrelid::regclass, conname, confdeltype FROM
+  pg_constraint WHERE contype = 'f' AND confrelid = '<table>'::regclass;`
+  `confdeltype` names the action: 'a'=NO ACTION, 'r'=RESTRICT,
+  'c'=CASCADE, 'n'=SET NULL, 'd'=SET DEFAULT. Any "delete a
+  device row" procedure must start here — the 6 NO ACTION
+  dependencies are non-obvious without it. Session R-4.
+- **Diagnostic patterns that don't match the log format — a
+  recurring class.** Three occurrences across R-3 and R-4, all
+  yielding empty grep results against populated logs:
+  - `grep "GET /me/matrix"` — the backend JSON is
+    `"method":"GET","url":"/me/matrix"` (separate fields). Grep
+    the URL value: `grep '"url":"/me/matrix"'`
+  - `grep -E "req\."` — the JSON is `"req":{` (colon, not
+    period)
+  - `--since 1m` / `--since 10m` — windows truncate before slow
+    events (sleeps, screencaps, diagnostic block assembly)
+  When a grep returns empty on a known-active window, **verify
+  the pattern matches the log format before concluding "no
+  event occurred."** If a specific endpoint is under
+  investigation, grep it across a wide window (`--since 30m`)
+  rather than calibrating the window to the event. Session R-3,
+  Session R-4.
+- **"OK" from an edit script ≠ "change is correct."** The edit
+  script fires `sys.exit()` after `write_text()`; "OK" means the
+  bytes landed, not that they compile. Two consecutive compile
+  failures in R-4 had `OK:` lines immediately above them
+  (`/auth/*` nested-comment trap, `when` branch without `{ }`).
+  The compile is the acceptance; "OK" is the write-confirmed
+  signal. Run the compile in the same turn as the edit, and read
+  `^e:` lines (not `tail -4`) when it fails. Session R-4.
 
-Current verified state: **191 Android JVM tests** (2026-10-18),
+Current verified state: **198 Android JVM tests** (2026-10-18),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
 and **250 backend tests** (2026-10-18, 16 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
