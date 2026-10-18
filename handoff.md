@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session R-5 — TASK-P1-040-E DONE, TASK-P1-040 fully DONE: both manual tests passed — APP-START-EXPIRED (silent reauth) + NETWORK-DURING-REAUTH (NetworkFailure terminal, recovered via Retry). All six registry §B tests accounted for. Nine commits A→D-3 across four sessions. Next: TASK-P1-041 — failed-verification operator logging, deferred non-blocking.)
+Last updated: 2026-10-18 (Session S-1 — bootstrap-enrollment-token.sh DONE: ~250-line bash script replacing the ad-hoc psql procedure that recurred 5x (Sessions A–R-4). Three modes (--device, --pubkey, --ghost) tested against real DB, all cleanup verified. Backlog item closed. Next: TASK-P1-041 — failed-verification operator logging, deferred non-blocking.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -2363,6 +2363,64 @@ acceptance criterion and required test now accounted for:
 companion commit) noting 040's completion and the 037-041 chain
 being closed except 041.
 
+
+### Session S-1 — bootstrap-enrollment-token.sh DONE (2026-10-18)
+
+Backlog item filed at Session R-4 close, implemented here.
+Eliminates the five-times-recurred manual psql procedure. One
+commit.
+
+**`scripts/bootstrap-enrollment-token.sh`** (~250 lines, bash).
+Three modes:
+
+- `--device <uuid>` — existing device, token bound to its current
+  `public_key`. Use for revoke-and-reauth recovery after admin
+  reactivates.
+- `--pubkey <b64url>` — fresh enrollment, token bound to a key from
+  the app's QR payload. No device row needed — row is created when
+  token consumed.
+- `--ghost <uuid>` — broken-state recovery. Captures the ghost
+  device's public_key, mutates to `ff..ff` (frees
+  `devices_key_unique`), marks revoked, issues token bound to the
+  captured original. Codifies R-4's manual recovery path.
+
+**Two design rulings** (in script KDoc):
+
+1. Shell, not TypeScript/Python. The `sign-test-*.ts` scripts are
+   TypeScript because they share backend crypto. This one has none —
+   psql + token_urlsafe + sha256. Python only for two base64url/hex
+   one-liners. Language follows scope.
+
+2. GHOST, not DELETE. Full DELETE requires ordered cleanup of 6
+   NO ACTION FK dependents (enrollment_tokens, org_matrix_versions,
+   identity_change_notices from/to, identity_change_acks,
+   matrices). That's a separate "purge device" operation — mixing
+   it with "issue token" would make the destructive path too easy
+   to trigger accidentally. Purge remains a manual procedure
+   documented in §3 Session R-4. Script rejects re-ghosting a
+   device whose public_key is already `ff..ff` (the original is
+   unrecoverable, user must generate a fresh QR).
+
+**Verification — all three modes tested against the real DB:**
+
+- `--device`: token for 943fbeeb created, `pk_matches_device=t`
+  (byte-for-byte 7500bd...), cleaned up.
+- `--pubkey`: base64url dQC9F5p... decoded to 7500bd... hex
+  correctly, `matches_expected=t`, cleaned up.
+- `--ghost`: scratch device with ab..ab key captured, mutated to
+  ff..ff + revoked, token bound to original ab..ab, re-run guard
+  rejects with clear error, cleaned up.
+- Validation: missing --org (exit 1), bad UUID (exit 1), mutually
+  exclusive modes (exit 1), missing mode (exit 1) — all named
+  messages.
+- Cleanup verified: zero scratch devices, zero stray tokens.
+
+**Portability:** `sha256sum` on Linux/GNU, falls back to
+`shasum -a 256` on macOS. Both work.
+
+**Counts.** Android JVM 198 unchanged. Backend 250 unchanged.
+Script-only session.
+
 ---
 
 ## 4. Known issues
@@ -3032,27 +3090,9 @@ Original phrasing preserved below for history:
 - `canonicalJson` deduplication between `audit/log.ts` and
   `audit/verify.ts` (KI-008).
 - Backend current-matrix-version tracking (KI-018).
-- **`scripts/bootstrap-enrollment-token.sh` — SPEC COMPLETE,
-  IMPLEMENT NEXT.** Five occurrences of the manual procedure
-  through Session R-4; the sixth (state recovery from
-  `devices_key_unique` + `devices_pkey` collision + 6 NO ACTION
-  FK dependencies) established the full specification:
-  - Takes: device public_key (or reads from existing
-    `devices` row), org_id, admin device_id (for `created_by`).
-  - Handles both fresh-enrollment and re-enrollment-from-broken-
-    state cases. The latter requires ordered DELETE of 6 NO
-    ACTION FKs before `DELETE FROM devices` (enrollment_tokens
-    used_by/created_by, org_matrix_versions asserted_by,
-    identity_change_notices from/to, identity_change_acks
-    acking, matrices).
-  - Generates token via `secrets.token_urlsafe(32)`; inserts
-    with `bound_public_key = decode(public_key_hex, 'hex')`,
-    `role='user'`, `created_by=<admin>`,
-    `expires_at = now() + interval '1 hour'`.
-  - Prints the raw token (what goes into the app's Enrollment
-    field) and the token_hash hex (for post-insert verification).
-  - ~40-line Python or shell script. Every ad-hoc psql session
-    since Session A is the same 4-query pattern.
+- **`scripts/bootstrap-enrollment-token.sh` — DONE Session S-1.**
+  See §3 Session S-1 entry. Eliminated the manual psql procedure
+  that recurred 5x across Sessions A–R-4.
 - **Dedupe the double-matrix-fetch after 401-triggered reauth**
   (Session R-5 observation). Two paths fetch `/me/matrix` on the
   Reauthenticating → Authenticated transition: the interceptor's
@@ -3691,6 +3731,18 @@ Rebuild after flipping — read at HttpClient construction time.
   the guard prevents the duplicate from mattering -- but a future
   session looking at request logs should expect the pair and not
   chase a bug. Session R-5.
+- **Choose script language by scope, not habit.** The
+  `scripts/sign-test-*.ts` helpers are TypeScript because they
+  share backend JCS/Ed25519 primitives — re-deriving that crypto in
+  shell would be a second implementation. `bootstrap-enrollment-
+  token.sh` is shell because it needs psql + `secrets.token_urlsafe`
+  + `sha256sum` and nothing else. Python appears twice in the shell
+  script for one-line base64url/hex transforms, but the file's
+  identity is bash. **Rule:** before picking language for a script,
+  name the library you'd need — crypto goes TypeScript, DB/OS goes
+  shell, small transforms go Python one-liners. Mixing habits
+  (Python-for-everything, shell-for-everything) produces scripts
+  that are correct but wrong-shaped for their job. Session S-1.
 
 Current verified state: **198 Android JVM tests** (2026-10-18),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
