@@ -1,7 +1,7 @@
 # US-TASK-P1-001-v0.7 — Phase 1 Task Registry Reconciliation
 
 Document ID: US-TASK-P1-001
-Version: 0.7
+Version: 0.8
 Date: October 2026
 Supersedes: v0.6
 Purpose: Reconcile the Phase 1 task registry with UMOJA-SECURE-BUILD-MASTER.md v1.4.2.
@@ -452,7 +452,7 @@ Authority: Derived from US-MASTER-001 + US-ADD-001. Cannot override them.
 - TEST-REVOCATION-RECONCILES-AFTER-RECONNECT
 - TEST-REVOCATION-STOP-CANCELS-RECONNECT
 
-**Status:** Proposed — filed from KI-005 AUTH-SPEC-001 sweep, 2026-10-18
+**Status:** DONE — fixed at commit 07cc2b4 (2026-10-18). WS revocation listener reconnects on connection loss (5s fixed interval); reconciles on every successful connect; stop() cancels pending reconnect. Three named tests pass (TEST-REVOCATION-RECONNECT-ON-ERROR, -RECONCILES-AFTER-RECONNECT, -STOP-CANCELS-RECONNECT). Three docs (AUTH-SPEC-001 §9.3, THREAT-MODEL-001 §8, US-MASTER-001 §3.5) amended to v0.3 referencing this commit.
 
 ---
 
@@ -676,7 +676,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-039 | Release-build hardening | 1 | Proposed |
 | TASK-P1-040 | Session lifecycle & revocation UX | 1 | Proposed |
 | TASK-P1-041 | Failed-verification operator logging | 1 | Proposed |
-| TASK-P1-042 | WS revocation listener reconnect + re-reconcile | 1 | Proposed |
+| TASK-P1-042 | WS revocation listener reconnect + re-reconcile | 1 | DONEProposed
 
 **Total Phase 1 task identifiers:** 43 (001–020, 021a, 021b, 022–042).
 
