@@ -39,11 +39,13 @@ import com.umoja.secure.auth.SessionStateManager
 import com.umoja.secure.auth.StoredSession
 import com.umoja.secure.messaging.MessagingService
 import com.umoja.secure.storage.SecureStorage
+import com.umoja.secure.transport.AdminApi
 import com.umoja.secure.transport.EnrollmentApi
 import com.umoja.secure.transport.EnrollmentException
 import com.umoja.secure.transport.EnrollmentRequest
 import com.umoja.secure.transport.HttpClient
 import com.umoja.secure.ui.admin.AdminScreen
+import com.umoja.secure.ui.admin.AdminScreenState
 import com.umoja.secure.ui.common.LoadingScreen
 import com.umoja.secure.ui.common.TerminalMessageScreen
 import com.umoja.secure.ui.diagnostics.DiagnosticsScreen
@@ -469,12 +471,28 @@ fun AppRoot(lifecycle: Lifecycle) {
             matrixStore = matrixStore,
         )
 
-        AppScreen.Admin -> AdminScreen(
-            onBack = {
-                android.util.Log.d("UmojaNavigation", "Admin Back callback invoked")
-                screen = AppScreen.Authenticated
-            },
-        )
+        AppScreen.Admin -> {
+            val adminApi = remember { AdminApi(HttpClient(HttpClient.DEV_BASE_URL)) }
+            val adminSessionToken = remember(deviceId) {
+                SecureStorage(context).get("session_token")
+            }
+            val adminState = remember(deviceId) {
+                AdminScreenState(
+                    sessionToken = adminSessionToken,
+                    listDevicesFn = adminApi::listDevices,
+                    listContactsFn = adminApi::listContacts,
+                    createTokenFn = adminApi::createEnrollmentToken,
+                    authorizeContactFn = adminApi::authorizeContact,
+                )
+            }
+            AdminScreen(
+                onBack = {
+                    android.util.Log.d("UmojaNavigation", "Admin Back callback invoked")
+                    screen = AppScreen.Authenticated
+                },
+                state = adminState,
+            )
+        }
 
         AppScreen.Diagnostics -> DiagnosticsScreen(
             wsState = wsState,
