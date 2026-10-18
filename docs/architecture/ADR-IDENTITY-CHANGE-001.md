@@ -457,6 +457,39 @@ where a spec-then-code divergence was caught by the test layer rather
 than reaching production — the process is doing what it is designed to
 do.
 
+### v0.4 (2026-10-18) — §10 v0.3 route-level claim superseded
+
+V0.3 established "§8's route-level assertion is 401 `unauthorized`
+(middleware blocks)." That claim was accurate for the pre-040-A
+middleware: `lookupSession` joined `devices` with `status = 'active'`
+in the WHERE clause, so a revoked device produced a null session and
+`requireSession` collapsed it to 401 `unauthorized`.
+
+Post-TASK-P1-040 (Session R), `lookupSession` returns a
+discriminated union `{ session | device_revoked | no_session }`. The
+middleware surfaces `device_revoked` directly when the session row
+matches but the device status is not active. The route-level
+assertion is now 401 `device_revoked`.
+
+`TEST-ACK-REVOKED-DEVICE` (Session R) updated its assertion from
+`unauthorized` to `device_revoked`; its KDoc was rewritten to
+record both realities:
+- middleware-level signal (post-040-A): 401 `device_revoked` via
+  `lookupSession`'s union
+- service-level defense-in-depth (unchanged): the `acks.ts` service
+  branch fires in the narrow race window where the session is valid
+  at middleware time but the device is revoked before the service's
+  DB query — both layers now return `device_revoked` to the client
+
+V0.3's defense-in-depth reasoning for `acks.ts`'s service branch
+remains correct. This v0.4 entry supersedes only the wire-assertion
+finding, not the service-layer design.
+
+The wire contract — 401 with `{ unauthorized | device_revoked }`
+depending on which rejection path fires — is stable. The client's
+state machine (ADR-HARDENING-001 §2) uses `device_revoked` as a
+terminal signal.
+
 ### Non-blocking
 
 None blocking. Any that arise during implementation get resolved in
