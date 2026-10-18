@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session Z-2 — Compose refactor arc, session A: AdminScreen extracted to `AdminScreenState` plain-class state holder at `2804427`. Behavior-preserving: JVM 212/212 pass, compile clean, backend log shows same-port paired GETs (devices+contacts) twice across two Admin entries — identical to pre-refactor — and manual 9-step walk rendered identically. Pattern is **Option C** (plain Kotlin class + `MutableStateFlow` + injected lambdas, matching ChatViewModel precedent) — **not** androidx ViewModel as the Z-1 §4 note had sketched; §4 corrected in this same handoff edit so session B (AdminScreenStateTest) opens with the accurate pattern. Arc: B = JVM state tests, C = ChatScreen refactor, D = ChatScreen test. Backend 254, Android JVM 212, androidTest 57 — all unchanged. **No blocking work remains.** Next: session B OR nothing — choice, not obligation.)
+Last updated: 2026-10-18 (Session Z-3 — Compose refactor arc, session B: `AdminScreenStateTest` at `a6de609`, 22 JVM tests. Covers load, loadBundle, createTokenForScannedDevice, authorize, buildMatrix, setStatusMessage — happy, error, and null-guard paths. `runBlocking` + lambda injection, mirroring MatrixApiTest and IdentityChangeControllerTest. One test-setup fix during the session: `buildMatrix clears prior error` used `clearance = ""` where the success path needs a non-empty string (`MatrixBuilder`'s own contract); fix was `"" -> "SECRET"` on that one test call, class and assertion unchanged. Backend 254, Android JVM 212 -> 234, androidTest 57. **No blocking work remains.** Arc: A + B done; C = ChatScreen refactor, D = ChatScreen test pending. Next: session C OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -93,7 +93,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 212** (verified 2026-10-18 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests.)
+- **JVM unit tests: 234** (verified 2026-10-18 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests as the next-to-last addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests. Session Z-3: AdminScreenStateTest, 22 JVM tests.)
 - **androidTest: 7 files, 57 tests** (verified 2026-10-18 from
   connectedAndroidTest XML; Session Z-1 added `AckDialogTest.kt` with
   11 Compose tests — first non-crypto androidTest and first Compose
@@ -3334,6 +3334,59 @@ exercise it.
 **Counts.** All unchanged: Backend 254, Android JVM 212, androidTest
 57. This session adds no tests — that's session B and D.
 
+
+### Session Z-3 — Compose refactor arc, session B: AdminScreenStateTest (2026-10-18)
+
+Second of four planned sessions for the Compose test coverage deferral
+(§4). Session A refactored AdminScreen to AdminScreenState; this session
+writes the tests that refactor exists for. One commit:
+
+- `a6de609` — **test(admin): AdminScreenStateTest -- 22 JVM tests.**
+  New file at `android/app/src/test/java/com/umoja/secure/ui/admin/`.
+  No production code changed. No new dependencies.
+
+**COVERAGE.** 22 tests grouped by method-under-test: load (4),
+loadBundle (3), createTokenForScannedDevice (5), authorize (4),
+buildMatrix (5), setStatusMessage (1). Every method's happy path, error
+path, and null-guard path covered. Method-level breakdown and evidence
+types are in the commit message.
+
+**TEST SHAPE.** `runBlocking` -- kotlinx-coroutines-test is not on the
+classpath; same precedent as IdentityChangeControllerTest (Session K)
+and SessionStateManagerTest (Session R-2). Lambda injection (5 injected
+lambdas from AdminScreenState's constructor). JUnit4 + backtick method
+names + per-group sections, mirroring MatrixApiTest. Fake helpers:
+`device()`, `contact()`, `token()`, `validBundleJson()`, `stateWith()`.
+
+**ONE TEST-SETUP FIX DURING THE SESSION.** First scoped run: 21/22.
+`buildMatrix clears prior error on success` failed on
+`expected null, but was:<Build failed: clearance: empty string not
+permitted>`. MatrixBuilder correctly rejects empty clearance (its own
+contract from Session A); AdminScreenState correctly propagated. The
+test's second buildMatrix call used `clearance = ""` when it intended
+to assert the success path. Fix: `"" -> "SECRET"` on that one call.
+Class unchanged. Assertion unchanged. The alternative -- "fix the class
+by removing clearance validation" -- would have been catastrophic;
+naming it because the response to a failing test is to distinguish
+test-setup vs assertion vs class bug, and here it was test-setup.
+
+**Verification.** Scoped: 22/22 pass. Full suite: 234/234 pass
+(212 + 22). Aggregate count from XML, not from "new test file should
+add 22" inference.
+
+**Counts.** Android JVM 212 -> 234 (+22). androidTest 57 unchanged.
+Backend 254 unchanged.
+
+**Arc status.** A done (`2804427`, `8da90d7`). B done (this session,
+`a6de609`). C = ChatScreen refactor pending. D = ChatScreen Compose test
+pending. C is a bigger session than A -- ChatScreen has 3 concrete
+controller/store params + 6 LaunchedEffects + MessagingService.
+messagesVersion companion subscription. Block-1 recon evidence is in
+Z-2's §3 entry.
+
+**One §7 lesson earned** (the "already exists?" check must target the
+new entry identifier, not strings the entry references). See §7 below.
+
 ---
 
 ## 4. Known issues
@@ -4062,21 +4115,15 @@ Original phrasing preserved below for history:
       double-matrix-fetch dedupe (R-5 §7 note).
 
 **Backlog items (not scheduled):**
-- ~~Instrumented Compose tests for admin flows~~ — **IN PROGRESS,
-  re-scoped 2026-10-18 twice (Z-1 then Z-2).** AckDialog coverage
-  shipped at `bf13dcc` (11 Compose tests). AdminScreen refactored at
-  `2804427` (Session Z-2, arc session A) — state and logic extracted
-  into `AdminScreenState` as a **plain Kotlin class**, ChatViewModel
-  precedent: `MutableStateFlow` + injected lambdas, no androidx
-  ViewModel, no new dependency. **Correction to Z-1's wording:**
-  Z-1 said this "requires ViewModel extraction." The actual pattern
-  is Option C (plain-class state holder), not androidx ViewModel —
-  the codebase's own "ViewModel" is a plain class; androidx
-  lifecycle-viewmodel-compose would be a bigger dependency change
-  than the refactor itself. Arc: B = AdminScreenStateTest (JVM), C =
-  ChatScreen refactor (same pattern), D = ChatScreen test. Admin/
-  ChatScreen tests are not yet written — refactor enables them, does
-  not deliver them.
+- ~~Instrumented Compose tests for admin flows~~ — **3 of 5
+  sub-deliverables landed; 2 remaining in the arc.** Delivered:
+  AckDialog (11 Compose tests, `bf13dcc`), AdminScreen →
+  `AdminScreenState` refactor (`2804427`), AdminScreenStateTest
+  (22 JVM tests, `a6de609`). Remaining: ChatScreen refactor (Option C,
+  same pattern as session A) + ChatScreen Compose test (arc sessions
+  C, D). No blocking work; both remaining items are one session each.
+  Session B's 22 JVM tests brought Android JVM from 212 to 234 (already
+  reflected in §2 and §7 counts).
 - Deduplicate base64url validators (KI-016).
 - `canonicalJson` deduplication between `audit/log.ts` and
   `audit/verify.ts` (KI-008).
@@ -5093,7 +5140,25 @@ Rebuild after flipping — read at HttpClient construction time.
   count==1 discipline caught this in preflight before any corruption
   landed -- preflight-paid-for-itself at the exact moment it mattered.
 
-Current verified state: **212 Android JVM tests** (2026-10-18),
+- **The "already exists?" check must target the new entry identifier,
+  not strings the entry references.** Session Z-3's block B5 preflight
+  used `AdminScreenStateTest` as the check that the new §3 entry had
+  not yet been written. But that string already appeared 3 times in the
+  handoff -- Z-2's header, Z-2's §3 arc-plan, and Z-2's §4 deferral
+  re-scope all named the future test class as a forward reference.
+  Preflight returned count=3, which blocked the write (correctly), but
+  for the wrong reason: the string was expected in the file already.
+  **Rule: the "already exists?" indicator must be a string that ONLY
+  the current edit produces** -- for a session entry, that's
+  `### Session Z-N`, not any class/file/commit name the session will
+  reference. Forward references from prior sessions are legitimate
+  content, not drift. When the count is nonzero, grep the occurrences
+  before concluding; the file may already contain the reference by
+  design. Same family as the eighth lesson (substring anchors match
+  prefixes) and the seventh (grep returning 0 is ambiguous) -- the
+  pattern or the check assumption is not the content.
+
+Current verified state: **234 Android JVM tests** (2026-10-18),
 **57 androidTest** (2026-10-18, 7 files, from connectedAndroidTest XML),
 and **254 backend tests** (2026-10-18, 20 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
