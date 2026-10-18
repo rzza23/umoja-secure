@@ -38,6 +38,7 @@ import com.umoja.secure.crypto.ProvisioningKeys
 import com.umoja.secure.messaging.MessagingService
 import com.umoja.secure.storage.SecureStorage
 import com.umoja.secure.transport.WebSocketClient
+import com.umoja.secure.ui.common.SecureScreen
 import java.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -51,6 +52,7 @@ fun DiagnosticsScreen(
     onDisconnectWs: () -> Unit,
     onBack: () -> Unit,
 ) {
+    SecureScreen()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 

@@ -45,6 +45,7 @@ import com.umoja.secure.crypto.IdentityChangeController
 import com.umoja.secure.crypto.MatrixStore
 import com.umoja.secure.crypto.ReplacementNoticeStore
 import com.umoja.secure.crypto.SendGate
+import com.umoja.secure.ui.common.SecureScreen
 import com.umoja.secure.messaging.MessagingService
 import com.umoja.secure.storage.local.Message
 import com.umoja.secure.storage.local.MessageDirection
@@ -62,6 +63,7 @@ fun ChatScreen(
     identityChangeController: IdentityChangeController,
     matrixStore: MatrixStore,
 ) {
+    SecureScreen()
     BackHandler(enabled = true) { onBack() }
 
     val scope = rememberCoroutineScope()

@@ -43,6 +43,7 @@ import com.umoja.secure.storage.SecureStorage
 import com.umoja.secure.transport.AdminApi
 import com.umoja.secure.transport.AdminApiException
 import com.umoja.secure.transport.HttpClient
+import com.umoja.secure.ui.common.SecureScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -52,6 +53,7 @@ fun AdminScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    SecureScreen()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
