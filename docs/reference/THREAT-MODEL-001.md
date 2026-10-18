@@ -1,7 +1,7 @@
 # THREAT-MODEL-001 — Umoja Secure Phase 1
 
 Document ID: THREAT-MODEL-001
-Version: 0.1 (draft for owner review)
+Version: 0.2 (conformance-swept 2026-10-18)
 Date: 2026-10-14
 Authority: Derived from UMOJA-SECURE-BUILD-MASTER.md v1.4.2, plus project-owner attestation on the same date.
 Status: Draft. Not yet in force. Subject to revision.
@@ -95,7 +95,7 @@ matrix verification. STRIDE applied to that subsystem.
 | **S**poofing | Attacker impersonates admin to push matrices | Matrix signed by organization provisioning key; device verifies against pinned pubkey | None if key custody holds |
 | **T**ampering | Matrix modified in transit | Signature verification (§3.8) | None |
 | **T**ampering | Matrix modified by compromised backend | Same | None |
-| **R**epudiation | Admin denies issuing a token | Audit log, hash-chained (TASK-P1-031) | If audit log itself compromised |
+| **R**epudiation | Admin denies issuing a token | Audit log, HMAC hash-chained (`backend/src/audit/log.ts`); chain *verification* endpoint is TASK-P1-031 | If audit log itself compromised |
 | **I**nformation disclosure | Matrix contents reveal contact graph | Matrix is end-to-end between offline signer and device; backend sees it too | Backend sees the matrix by design — documented |
 | **I**nformation disclosure | QR code photographed by third party | QR carries public keys only | None — public keys are public |
 | **D**enial of service | Attacker floods enrollment endpoint | Rate limiting (§3.7 step 6, token TTL) | DoS not fully prevented — accepted |
@@ -135,8 +135,17 @@ Three sub-cases, all resolved:
 issuance to the device's public keys. Transport is Tor-only in Phase 1.
 
 **Concurrent consumption.** Consumption uses
-`UPDATE ... WHERE used_at IS NULL RETURNING`. Row lock gives
-single-consumer semantics. Two concurrent consumes: exactly one succeeds.
+`SELECT ... FOR UPDATE` → `INSERT INTO devices` → `UPDATE
+enrollment_tokens`, inside `withTransaction`. The `FOR UPDATE` row lock
+gives single-consumer semantics. Two concurrent consumes: exactly one
+succeeds.
+
+> *v0.2 correction (2026-10-18):* The v0.1 text described a single
+> `UPDATE ... RETURNING` and did not mention the intermediate INSERT
+> or the outer transaction. Actual behavior verified against
+> `backend/src/enrollment/consume.ts`. Same correction as
+> AUTH-SPEC-001 §10.3 v0.2. Single-consumer property holds; the
+> mechanism description was imprecise.
 
 **Key substitution.** `enrollment_tokens.bound_public_key` matched at
 consumption. Mismatch → reject, token not consumed.
@@ -159,6 +168,12 @@ What the app **does** guarantee:
 - Private keys live in Android Keystore (TEE-backed where available)
 - Local storage is AES-GCM encrypted with a Keystore-held key
 - Duress wipe (TASK-P1-021b) destroys keys and session material in ≤5s
+  — **planned; not yet shipped.** TASK-P1-021b status is "Updated",
+  implementation pending. The wipe-confirmation key manager exists
+  (Session A, `8bd4ab5`); the wipe flow that consumes it is designed
+  but not implemented. Until P1-021b lands, the app's erasure
+  guarantee is delivered by uninstall / `pm clear` behavior, not by
+  duress wipe.
 - Wipe-confirmation notification is best-effort (see §6.4)
 
 What the app does **not** guarantee:
@@ -177,6 +192,17 @@ This is honest in the backend: the event is recorded as
 `device_reported_wipe_complete`, never as `verified_erasure`. The admin
 UI must not imply success. Build Master §3.3 requires the states
 `REQUESTED`, `ACKNOWLEDGED`, `FAILED`, `STATUS_UNKNOWN`.
+
+> *v0.2 status correction (2026-10-18):* The protocol above is
+> **designed and specified but not yet implemented.** Current state:
+> `WipeConfirmationKeyManager` exists (83 lines, Session A); the
+> wipe-confirmation public key is embedded in the enrollment QR
+> payload; **no backend endpoint accepts the notification, no client
+> code sends it.** Zero `device_reported_wipe` matches in either
+> codebase. The backend endpoint + client sender are part of
+> TASK-P1-021b (status: Updated). Until that lands, wipe notifications
+> are silent no-ops — the app's erasure flow operates on Keystore
+> erasure alone, without reporting.
 
 A forged notification (by a compromised device that has not actually
 wiped) causes the backend to mark the wipe as reported. It does not
@@ -209,6 +235,17 @@ is rejected. Replacement-device enrollment uses an inclusive floor:
 enrollment, strictly-greater thereafter.
 
 ### §6.7 — Provisioning key compromise (Q6)
+
+> *v0.2 status note (2026-10-18):* The rotation and recovery-key
+> revocation flow described here is **designed and specified but not
+> yet implemented.** TASK-P1-036 status is "Proposed." Current state:
+> `ProvisioningKeys.kt` carries `CURRENT_PROVISIONING_PUBKEY_B64U`,
+> `RECOVERY_PUBKEY_B64U`, and a `provisioning.highest_recovery_key_version`
+> storage key — the structural seams are in place. No client notice
+> handler, no `key_rotation` or `key_revocation` parsing, no device-side
+> recovery-key rotation exists. Until P1-036 lands, a compromised
+> provisioning key cannot be rotated; the only recovery is offline
+> re-provisioning of every device.
 
 Fully specified in Build Master §3.6. Recovery key signs a
 `key_revocation` notice; devices verify against the pinned recovery
@@ -264,8 +301,25 @@ every protected request. `LISTEN/NOTIFY` is a prompt-wake mechanism only.
 Missed notifications are covered by:
 
 1. The per-request status check (authoritative)
-2. Full reconciliation on listener reconnect, querying
-   `status = 'revoked' AND revoked_at > last_reconciliation_time`
+2. Full reconciliation on listener **startup**, querying
+   `SELECT device_id FROM devices WHERE status = 'revoked'` (unconditional)
+
+> *v0.2 correction (2026-10-18):* The v0.1 text claimed (a)
+> reconciliation on listener *reconnect*, and (b) a query filtered by
+> `revoked_at > last_reconciliation_time`. Actual code in
+> `backend/src/ws/revocation.ts`: reconciliation runs once on
+> *startup* (not on reconnect); the query has no `revoked_at` filter
+> (unconditional scan of `status = 'revoked'`). The `on('error')`
+> handler logs but does not reconnect or re-reconcile.
+>
+> **This is a real gap**, not just doc-drift: when the listener
+> connection drops and reconnects (Postgres restart, connection
+> timeout), no reconciliation runs. The 5-minute revalidation cycle
+> (defense 3) is the mid-run backstop for revocation enforcement,
+> not reconciliation-on-reconnect. Filed as TASK-P1-042 from the
+> AUTH-SPEC-001 §9.3 sweep (Session U-3); P1-042 closes this gap.
+> Until P1-042 lands, the WS-close timing claim in §8 is ≤5s when
+> the listener is healthy, ≤5min when it is disconnected.
 
 **Consequences for the offline gap:** If Device B is offline and holds a
 stale matrix showing revoked Device A as a contact, then when B returns
@@ -333,6 +387,8 @@ Explicitly not covered by this threat model:
 | Version | Date | Change |
 |---------|------|--------|
 | 0.1 | 2026-10-14 | Initial draft. Authored from Build Master v1.4.2 + owner attestation. |
+| 0.2 | 2026-10-18 | Conformance sweep (KI-005, Session V-1). Eight findings: §6.2 consumption mechanism corrected (matches AUTH-SPEC-001 §10.3 v0.2); §8 reconciliation prose corrected (startup not reconnect, unconditional not incremental query) + P1-042 cross-reference for the reconnect gap; §6.3, §6.4, §6.7 marked **planned-not-shipped** with current-state notes (P1-021b, P1-036); §5 STRIDE precision on P1-031's scope. Ten claims verified as holding (§6.5, §6.6, §7 trust boundaries, §8 per-request check, §9 composition). Three refuted-hypotheses candidates (§6.2 mechanism, §7 pinned-key assertion, §9 composition) confirmed by reading actual code. |
+
 
 ---
 
