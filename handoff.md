@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-17 (Session Q — TASK-P1-039 DONE: R8 + buildConfig + libsignal keep rules, TransportConfig immutability + startup assertion, FLAG_SECURE on Chat/Admin/Diagnostics, RELEASE-ACCEPTANCE.md. Cold-start acceptance passed: crash buffer empty, Tor transport active, four-screen FLAG_SECURE matrix green. Next: TASK-P1-040 — session lifecycle & revocation UX.)
+Last updated: 2026-10-18 (Session R — TASK-P1-040-A DONE: backend device_revoked disambiguation. LookupSession returns discriminated union {session | device_revoked | no_session}; middleware/challenge/verify/ws all handle device_revoked; curl verified active→200, revoked→401 device_revoked. ADR-IDENTITY-CHANGE-001 v0.4 amendment. Next: TASK-P1-040-B — Android SessionStateManager.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -1874,6 +1874,81 @@ check). Per ADR §9 v0.2 item 2, `lookupSession` does not
 currently differentiate expired from revoked; the backend change
 is confirmed needed.
 
+
+### Session R — TASK-P1-040-A DONE (2026-10-18)
+
+Backend half of ADR-HARDENING-001 §2's revoked-vs-expired ruling
+landed. 040-B (Android state manager), 040-C (AppRoot routing
+rewrite), 040-D (interceptor), 040-E (emulator acceptance) defer to
+R-2/R-3. Two commits:
+
+- `db9fe72` — **040-A: backend device_revoked disambiguation.** Five
+  source files + two test files. `lookupSession` returns
+  `LookupSessionResult`, a discriminated union of
+  `{ session | device_revoked | no_session }`. Session-level
+  filters (revoked_at, expires_at) preserved verbatim per registry
+  §B "Do NOT re-review lookupSession's filter." Device status is
+  projected into the SELECT and branched in JS — **one query, not
+  two**, contra ADR §9 v0.2 item 2's predicted "two queries in
+  the revoked-or-expired path." Same ruling, simpler mechanism,
+  no race window. The ADR prediction was written before the JOIN
+  was read.
+
+  `middleware.ts`: three-branch handler.
+  `challenge.ts` + `verify.ts`: throw `AuthError('device_revoked')`
+  when status !== 'active' (was `unauthorized`). `ws/server.ts`:
+  union handling for initial auth + `device_revoked` in the
+  revalidation branch's strict-equality check — the previous code
+  happened to work because `challenge.ts` threw `unauthorized` on
+  revocation, but after the split that path would have fallen
+  through to close 1011 instead of 4403. Caught by TypeScript
+  compile, not test.
+
+  3 new tests in `auth.test.ts`
+  (TEST-AUTH-CHALLENGE-REVOKED-DEVICE,
+  TEST-AUTH-VERIFY-REVOKED-DEVICE,
+  TEST-AUTH-SESSION-DEVICE-REVOKED). Backend 247 → 250.
+
+- `5d24621` — **ADR-IDENTITY-CHANGE-001 v0.4 amendment.**
+  Supersedes v0.3's "route-level assertion is 401 unauthorized"
+  claim (accurate pre-040-A). TEST-ACK-REVOKED-DEVICE updated to
+  assert `device_revoked`; KDoc rewritten to record both the
+  middleware-level signal (post-040-A) and the service-level
+  defense-in-depth (unchanged). V0.3's text preserved; v0.4 names
+  the supersession — same versioning pattern as ADR-HARDENING-001's
+  own v0.2 correction.
+
+**The one test that failed during the change** — TEST-ACK-REVOKED-
+DEVICE, asserting the pre-040-A middleware contract — was the
+decision point, not a bug. It proves the test was testing the
+actual wire contract, not just the status code. Had it been
+written to pass regardless, the ADR-vs-code divergence would have
+shipped silently. This is "do it right the first time" as a
+demonstrated property, not a slogan.
+
+**Curl verification on rebuilt container** (KI-002 rule: any
+backend source change requires `docker compose up -d --build
+backend` before any test that hits the running server):
+
+- Active device `POST /auth/challenge` → 200 + JSON challenge
+- Revoked device `POST /auth/challenge` → **401 +
+  `{"error": "device_revoked"}`** — the load-bearing evidence
+
+**Design note — union return is compile-time-enforced
+correctness.** TypeScript discriminated unions are the caller-side
+equivalent of `noUncheckedIndexedAccess` (Session H §7). The
+`ws/server.ts` bug (#2 above) was caught by compile, not test. A
+nullable return (`SessionRecord | null`) would have silently
+passed through `if (!session)`; the union forces every caller to
+branch on `kind`.
+
+**Scope honestly stated.** 040-A completes the backend half. The
+Android half — 7-state SessionStateManager, single-flight mutex,
+recursion guard, retry-original-call interceptor, AppRoot routing
+rewrite — is 040-B through 040-E, each comparable to 040-A in
+scope. Session R closes with the backend half done and verified,
+not with the task marked complete.
+
 ---
 
 ## 4. Known issues
@@ -2477,17 +2552,19 @@ Original phrasing preserved below for history:
     `src/release/keepRules/*.keep` per AGP 9.4.1 docs. See
     `docs/ops/RELEASE-ACCEPTANCE.md` for the reproduction procedure.
 
-    **Next task: TASK-P1-040 — session lifecycle & revocation UX.**
-    Per ADR-HARDENING-001 §2 + §6 Order: `037 → 038 → 039 → 040 →
-    041`. Scope: 7-state SessionStateManager, single-flight re-auth
-    mutex, recursion guard, retry-original-call interceptor,
-    backend `device_revoked` code on 401 path, AppRoot routing
-    replaced (`sessionExpiresAt < now()` → re-auth, not the current
-    `== null` check). Per ADR §9 v0.2 item 2, `lookupSession`
-    currently does not differentiate expired from revoked — the
-    backend change is confirmed needed. Two
-    `[VERIFY AT IMPLEMENTATION]` items for 040's session start:
-    `lookupSession` shape, `AppRoot` routing.
+    **TASK-P1-040-A DONE 2026-10-18.** Backend device_revoked
+    disambiguation (`db9fe72`) + ADR-IDENTITY-CHANGE-001 v0.4
+    amendment (`5d24621`). `lookupSession` returns discriminated
+    union; middleware/challenge/verify/ws all handle device_revoked.
+    Backend 247 → 250. Curl verified active→200, revoked→401
+    `device_revoked`. See §3 Session R entry.
+
+    **TASK-P1-040-B next.** Android SessionStateManager: 7 states,
+    single-flight re-auth mutex, recursion guard, retry-original-
+    call interceptor. Then 040-C AppRoot routing rewrite
+    (`sessionExpiresAt < now()` → re-auth, not the current `== null`
+    check); 040-D interceptor integration into HttpClient; 040-E
+    emulator acceptance (expired / revoked / network-failure paths).
 
 **Backlog items (not scheduled):**
 - Instrumented Compose tests for admin flows (no test rule configured;
@@ -2978,10 +3055,30 @@ Rebuild after flipping — read at HttpClient construction time.
   not within. Four `screencap` commands in one paste all capture
   the same framebuffer. One paste, one probe, one navigation
   between probes. Session Q.
+- **Discriminated-union return types force caller updates at
+  compile time.** Session R changed `lookupSession`'s return from
+  `SessionRecord | null` to `{ kind: 'session' | 'device_revoked' |
+  'no_session' }`. A nullable return silently passes through
+  `if (!session)`; a union forces every caller to branch on `kind`.
+  The `ws/server.ts` bug — strict-equality `err.code ===
+  'unauthorized'` that would have fallen through after the new
+  `device_revoked` code landed, closing with 1011 instead of 4403 —
+  was caught by TypeScript compile, not by test. Same class of
+  safety as Session H's `tx.query<T>()` note: the compiler enforces
+  what an `any` return hides. Session R.
+- **A test failing during a contract change is evidence the test is
+  real.** Session R's TEST-ACK-REVOKED-DEVICE failed with
+  `unauthorized != device_revoked` when the middleware's 401 code
+  split. The failing assertion is what proved the test asserts the
+  actual wire contract, not just `statusCode === 401`. Had it
+  passed (e.g. only asserted status), the ADR-vs-code divergence
+  would have shipped silently. A test that breaks when the contract
+  changes is doing its job; a test that would pass regardless is
+  not testing the contract. Session R.
 
 Current verified state: **178 Android JVM tests** (2026-10-17),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
-and **247 backend tests** (2026-10-17, 16 files), all from runner output.
+and **250 backend tests** (2026-10-18, 16 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
 infrastructure (Mac vs emulator) and must not be summed.
 
