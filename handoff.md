@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session U-3 — KI-005 conformance sweep: AUTH-SPEC-001 v0.1 → v0.2 + TASK-P1-042 filed. One real gap (WS revocation listener reconnect per §9.3 defense 2 unimplemented; 5-min revalidation is the mid-run backstop) — filed as P1-042. Four spec amendments (§6.2 precision, §9.2/§9.3 split+rephrase, §10.2 nullability, §10.3 mechanism). Three refuted hypotheses (LISTEN/NOTIFY prompt-wake exists in ws/revocation.ts and is wired; 5-min revalidation IS a per-connection timer; single-consumer property holds). Backend 251, Android JVM 212, androidTest 46 — all unchanged (doc-only). KI-005 now 1 of 4 docs swept. **No blocking work remains.** Next: KI-005 continuation (US-ADD-001 / US-MASTER-001 / THREAT-MODEL-001) OR TASK-P1-042 OR Phase 2 OR nothing — choice, not obligation.)
+Last updated: 2026-10-18 (Session V-1 — KI-005 sweep continued: THREAT-MODEL-001 v0.1 → v0.2. Eight amendments across six sections: two doc-drifts (§6.2 consumption mechanism, §8 reconciliation query), one real gap cross-referenced (§8 reconciliation-on-reconnect — already filed as TASK-P1-042 from U-3), three completeness markers (§6.3 duress wipe via P1-021b, §6.4 wipe notification via P1-021b, §6.7 rotation via P1-036 — all designed-not-shipped, marked as such), one precision amendment (§5 STRIDE R-repudiation P1-031 scope), ten claims verified holding. Backend 251, Android JVM 212, androidTest 46 — all unchanged (doc-only). KI-005 now 2 of 4 docs swept. **No blocking work remains.** Next: KI-005 continuation (US-ADD-001 / US-MASTER-001) OR TASK-P1-042 OR Phase 2 OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -2790,6 +2790,113 @@ US-ADD-001, US-MASTER-001, THREAT-MODEL-001. Each is same-shape
 reconnaissance (session per document). No blocking work depends on
 any of them.
 
+### Session V-1 — KI-005 sweep: THREAT-MODEL-001 v0.1 → v0.2 (2026-10-18)
+
+Second document of the KI-005 four-document conformance sweep
+(AUTH-SPEC-001 was first, Session U-3). Method: read the doc
+verbatim, inventory every specific claim, read the actual code the
+claim references, classify. Doc-only session; no code, no tests.
+One commit:
+
+- `5655318` — **THREAT-MODEL-001 v0.1 → v0.2.** Eight amendments
+  across six sections, one real gap cross-referenced, ten claims
+  verified holding.
+
+**Sweep verdict — a different shape than U-3.**
+
+AUTH-SPEC-001 (U-3) was almost entirely *shipped behavior*: findings
+were mostly precision corrections to prose that described the actual
+code imprecisely. The one real gap (reconciliation-on-reconnect)
+came from a claim that described intended-but-unimplemented behavior.
+
+THREAT-MODEL-001 spans a broader surface that includes **design
+intent for unimplemented features.** Three of its six threat
+sections (§6.3 duress wipe, §6.4 wipe notification, §6.7
+rotation/recovery) describe Phase 1 features that are specified but
+not shipped:
+
+- §6.3 — TASK-P1-021b status "Updated"; the wipe-confirmation key
+  exists (Session A, `8bd4ab5`), the destroy-keys-in-≤5s flow is
+  designed but not built.
+- §6.4 — same dependency; no backend endpoint accepts a wipe
+  notification and no client sends one. Zero `device_reported_wipe`
+  matches in either codebase.
+- §6.7 — TASK-P1-036 status "Proposed"; `ProvisioningKeys.kt`
+  carries structural seams but no notice handler, no
+  `key_rotation`/`key_revocation` parsing exists.
+
+**This required a fourth classification bucket in the sweep
+methodology: `completeness`** — prose describes a feature the code
+doesn't yet implement. Not "doc-drift" (code contradicts prose); the
+prose is the target and the code is behind. The v0.2 amendments
+mark these `planned-not-shipped` with current-state notes rather
+than weakening the claims — the doc keeps its authority as the
+design spec while stating what's actually true today.
+
+**Two doc-drifts found:**
+
+- §6.2 consumption mechanism: v0.1 described a single
+  `UPDATE ... RETURNING`. Actual: `SELECT ... FOR UPDATE` →
+  `INSERT INTO devices` → `UPDATE enrollment_tokens`, inside
+  `withTransaction`. **Same correction U-3 made to AUTH-SPEC-001
+  §10.3 v0.2.** The doc-drift was already corrected in a sibling
+  document; V-1 propagated the fix.
+- §8 reconciliation query: v0.1 said `status = 'revoked' AND
+  revoked_at > last_reconciliation_time`. Actual: unconditional
+  `SELECT device_id FROM devices WHERE status = 'revoked'`. No
+  incremental filter.
+
+**One real gap cross-referenced (not re-filed):**
+
+§8's "full reconciliation on listener reconnect" — same gap
+AUTH-SPEC-001 §9.3 defense 2 named. `ws/revocation.ts`'s
+`on('error')` handler logs but does not reconnect or re-reconcile.
+Mid-run coverage is via the 5-minute revalidation timer (defense
+3), not reconciliation-on-reconnect. Cross-references the existing
+TASK-P1-042 rather than filing a duplicate.
+
+**One precision amendment:**
+
+§5 STRIDE R-repudiation cell said "audit log, hash-chained
+(TASK-P1-031)". Actual: the chain is implemented in
+`audit/log.ts` (HMAC + `pg_advisory_xact_lock`, verified end-to-end
+at U-1's extraction); TASK-P1-031 tracks the *verification
+endpoint* (`GET /admin/audit/verify`), not chain creation. Amended
+to name both.
+
+**Three predicted holes refuted by reading:**
+
+1. §6.2 mechanism — assumed wrong; was, but *already corrected* in
+   AUTH-SPEC-001 v0.2. Sibling-doc drift propagation.
+2. §7 pinned-key assertion — assumed incomplete; fully implemented
+   in `ProvisioningKeys.kt` (both pubkeys + `highest_recovery_key_
+   version` slot).
+3. §9 composition with AUTH-SPEC-001 — assumed decoupled; verified
+   correctly coupled (`pub_device_auth_key` and
+   `pub_messaging_identity_key` remain distinct keys in distinct
+   systems; matrix cannot conflate them).
+
+The refutation shape is the same as U-3's: the case that
+distinguishes correct from sticky-open was not in the initial
+hypothesis set. §6.2 looked wrong (it was, corrected elsewhere);
+§8 reconciliation looked fine in prose but the *query shape* was
+wrong; the completeness markers in §6.3/§6.4/§6.7 were visible
+only after checking task status.
+
+**Cross-document propagation as a sweep discipline.** §6.2's fix
+duplicates U-3's AUTH-SPEC-001 §10.3 fix because both docs made the
+same claim about the same code. **This is the pattern the sweep
+exists to catch** — when a claim is corrected in one doc, sibling
+docs with the same claim need the same fix *in the same pass*, not
+in a follow-up session. V-1 grep'd the doc set for the offending
+claim's phrasing before closing (see §7 addition below).
+
+**Scope honestly stated.** Two of four documents swept
+(AUTH-SPEC-001, THREAT-MODEL-001). Remaining: US-ADD-001,
+US-MASTER-001. Each is one session of reconnaissance-plus-
+amendment. No blocking work depends on any of them.
+
+
 ---
 
 ## 4. Known issues
@@ -2810,20 +2917,29 @@ Resolved by commit `e6eed9b`. File has `generated: true`, all six
 W-series vectors populated.
 
 ### KI-005 (PARTIAL SWEEP 2026-10-18): Requirements layer authored after the code
-One of four canonical documents swept. AUTH-SPEC-001 v0.1 → v0.2
-(commit `349b268`, 2026-10-18, Session U-3). Findings: one real
-gap (§9.3 defense 2, reconciliation-on-listener-reconnect, filed
-as TASK-P1-042), two doc-drift amendments (§10.2 floor
-nullability, §10.3 consumption mechanism), one precision amendment
-(§6.2). Three hypotheses from the sweep's prediction table refuted
-by reading the actual code.
+**Two of four canonical documents swept.**
 
-**Remaining:** US-ADD-001, US-MASTER-001, THREAT-MODEL-001. Each
-is a session of reconnaissance-plus-amendment, same shape as U-3.
-No blocking work depends on any of them. When a future session
-sweeps one of the remaining three, that session replaces this
-entry with its findings. When all four are swept this entry
-becomes RESOLVED.
+AUTH-SPEC-001 v0.1 → v0.2 (commit `349b268`, Session U-3):
+mechanism correction to §10.3 consumption, nullability correction
+to §10.2 floor, precision amendment to §6.2, one real gap
+(reconciliation-on-reconnect, §9.3 defense 2) filed as
+TASK-P1-042.
+
+THREAT-MODEL-001 v0.1 → v0.2 (commit `5655318`, Session V-1): two
+doc-drifts corrected (§6.2 mechanism, §8 reconciliation query),
+three completeness markers (§6.3 duress wipe, §6.4 wipe
+notification, §6.7 rotation/recovery — all designed-not-shipped,
+P1-021b/P1-036 pending), one real gap cross-referenced (P1-042
+again), one precision amendment (§5 P1-031 scope), ten claims
+verified holding.
+
+**Remaining:** US-ADD-001, US-MASTER-001. Each is a session of
+reconnaissance-plus-amendment, same shape as U-3/V-1 but with a
+potential fourth classification bucket (`completeness`) given
+US-ADD-001's amendment-based scope. When a future session sweeps
+one of the remaining two, that session replaces this entry with
+its findings. When all four are swept this entry becomes
+RESOLVED.
 
 ### KI-006 (RESOLVED 2026-10-18, Session U-2): USER-ONBOARDING.md written
 `docs/reference/USER-ONBOARDING.md` written at Session U-2.
@@ -3483,11 +3599,15 @@ Original phrasing preserved below for history:
 
     **No blocking tasks remain.** The next session's shape is a
     choice, not a backlog obligation:
-    - **KI-005 continuation** — sweep one of US-ADD-001,
-      US-MASTER-001, THREAT-MODEL-001 (AUTH-SPEC-001 done
-      2026-10-18, U-3). Same reconnaissance-plus-amendment shape
-      as U-3: read spec verbatim, read code at HEAD, classify
-      each divergence, amend + file. One document per session.
+    - **KI-005 continuation** — sweep US-ADD-001 or
+      US-MASTER-001 (AUTH-SPEC-001 done U-3, THREAT-MODEL-001
+      done V-1). Same reconnaissance-plus-amendment shape as
+      U-3/V-1: read spec verbatim, read code at HEAD, classify
+      each divergence, amend + file. THREAT-MODEL-001's sweep
+      surfaced a fourth classification bucket (`completeness`
+      — prose describes a not-yet-shipped feature) which is
+      likely applicable to US-ADD-001's amendment scope. One
+      document per session.
     - **TASK-P1-042** — WS revocation listener reconnect +
       re-reconcile. Filed from the AUTH-SPEC-001 sweep. Medium
       priority, small scope (~20 lines + 3 tests). Closes the gap
@@ -4291,6 +4411,33 @@ Rebuild after flipping — read at HttpClient construction time.
   padding) or `| tr -d ' '`. Any shell count-check that compares
   command substitution against a bare number needs this.
   Portable across every repo; not a Umoja-specific fix.
+
+- **Sweep findings aren't uniform across documents — allow for
+  a fourth classification bucket: `completeness`.** Session U-3's
+  AUTH-SPEC-001 sweep was almost entirely shipped behavior:
+  findings were precision and one real gap. The bucket set
+  (holds / doc-drift / real-gap / hypothesis-refuted) was
+  sufficient. Session V-1's THREAT-MODEL-001 sweep needed
+  `completeness` — prose describes a feature that is specified
+  but not yet built (§6.3 duress wipe, §6.4 wipe notification,
+  §6.7 rotation/recovery). Without the bucket, "the doc says
+  this works" reads as "this works" when it means "this is the
+  design target." The distinction matters because the fix
+  differs: doc-drift amends the prose; completeness adds a
+  status note without weakening the claim. Both preserve the
+  document's authority; only one writes code eventually.
+
+- **Cross-document fix propagation is part of a sweep pass, not
+  a follow-up.** Session V-1's §6.2 mechanism correction
+  duplicated U-3's AUTH-SPEC-001 §10.3 v0.2 correction because
+  both documents made the same claim about the same code.
+  Without checking the sibling documents' phrasing before
+  closing V-1, the drift would have been "fixed" in one doc and
+  left standing in another — a re-audit would then find the
+  same drift twice. Rule: after classifying a doc-drift,
+  `grep -r` the doc set for the offending phrase before closing
+  the sweep. Cost is one grep; cost of skipping is a future
+  session's finding.
 
 Current verified state: **212 Android JVM tests** (2026-10-18),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
