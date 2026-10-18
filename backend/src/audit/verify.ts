@@ -1,15 +1,12 @@
 import { createHmac } from 'node:crypto';
 import { pool } from '../db/client.js';
 import { env } from '../config/env.js';
+import { canonicalJson } from './canonicalJson.js';
 
 export interface VerifyResult {
   intact: boolean;
   broken_at?: number;
   total_events: number;
-}
-
-function canonicalJson(obj: Record<string, unknown>): string {
-  return JSON.stringify(obj, Object.keys(obj).sort());
 }
 
 export async function verifyAuditChain(): Promise<VerifyResult> {

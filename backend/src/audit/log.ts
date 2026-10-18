@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { env } from '../config/env.js';
+import { canonicalJson } from './canonicalJson.js';
 
 export interface AuditInput {
   event_type: string;
@@ -9,10 +10,6 @@ export interface AuditInput {
   target_type?: string | null;
   target_id?: string | null;
   payload?: Record<string, unknown>;
-}
-
-function canonicalJson(obj: Record<string, unknown>): string {
-  return JSON.stringify(obj, Object.keys(obj).sort());
 }
 
 /**
