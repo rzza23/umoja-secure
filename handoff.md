@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session W-1 — KI-005 sweep COMPLETE: US-ADD-001 v0.2 → v0.3 + US-MASTER-001 v0.1 → v0.2. **All four canonical docs now swept.** US-ADD-001: 4 completeness markers on build-time-target parameter rows (§5 SQLCipher/Tor, §6 attestation, §7 recovery version) + stale end-of-doc v0.1 → v0.3. US-MASTER-001: cross-doc propagation of THREAT-MODEL-001 §8's reconciliation drift into §3.5 + USER-ONBOARDING.md added to §7 canonical set. **KI-005 RESOLVED.** Backend 251, Android JVM 212, androidTest 46 — all unchanged (doc-only). **No blocking work remains.** Next: TASK-P1-042 (revocation listener reconnect — 3 docs cross-reference the gap) OR Phase 2 OR nothing — choice, not obligation.)
+Last updated: 2026-10-18 (Session X-1 — TASK-P1-042 DONE: WS revocation listener reconnect + re-reconcile. Extracted listener into createRevocationListener(deps) factory; reconnect on 'end' event (5s fixed interval); reconcile on every successful connect; stop() cancels pending reconnect. Three named tests pass. All three sweep-named docs amended to v0.3 cross-referencing commit 07cc2b4. Backend 251 → 254. Android JVM 212, androidTest 46 — unchanged. **The KI-005 sweep's one real gap is closed.** **No blocking work remains.** Next: Phase 2 OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -2999,6 +2999,135 @@ mentioned as needed (U-2 wrote it; the sweep confirmed its inclusion
 in US-MASTER-001 §7).
 
 
+### Session X-1 — TASK-P1-042 DONE: WS revocation listener reconnect + re-reconcile (2026-10-18)
+
+**The one real gap identified across the KI-005 sweep, closed.**
+Fix + tests at `07cc2b4`; three doc amendments at `ed47e7a`
+(AUTH-SPEC-001), `f2371c0` (US-MASTER-001), `5259aec`
+(THREAT-MODEL-001). Code change + doc amendments in one session
+because the docs' current "filed as P1-042" notes were stale the
+moment the fix shipped.
+
+**The gap.** `ws/revocation.ts` opened one LISTEN connection and
+reconciled once at process startup. On connection loss the
+`error` handler logged but did not reconnect; reconciliation
+never ran again. A device revoked during the listener-disconnected
+window stayed connected until the next 5-minute revalidation
+cycle — violating the ≤5s closure guarantee for that window.
+Named in three docs at their v0.2: AUTH-SPEC-001 §9.2/§9.3,
+THREAT-MODEL-001 §8, US-MASTER-001 §3.5.
+
+**The fix.** Extracted the listener into
+`createRevocationListener(deps)` factory with injected `connect` /
+`reconcile` / `scheduleReconnect` / `cancelReconnect` /
+`onNotification` / `logger`. The factory:
+
+- **Reconnects on `end` event, not `error`** — pg emits both on
+  connection loss; `error` fires on transient issues that don't
+  always mean disconnect. `end` is definitive.
+- **Reconciles on every successful connect** — startup is a
+  connect; reconnects are connects; same reconcile path. Task
+  acceptance: "reconciliation runs before the listener resumes
+  consuming notifications."
+- **Reconcile ordering intentional** — LISTEN first, then
+  reconcile. A revocation during the gap is caught by the
+  reconcile query; a revocation after reconcile-start fires the
+  notification handler. No window where both are off.
+- **`stop()` cancels pending reconnect** — both at post-await and
+  timer-fire via `isStopping` guard; a stop-mid-connect releases
+  the client without storing it.
+- **5-min revalidation cycle untouched** — per task non-goals;
+  remains the independent mid-run backstop.
+
+Production wiring at file bottom with real deps. Exports
+`startRevocationListener` / `stopRevocationListener` /
+`notifyDeviceRevoked` unchanged — zero call-site churn in
+`src/server.ts` and `test/ws.test.ts`.
+
+**Tests (3 named, per registry).**
+`TEST-REVOCATION-RECONNECT-ON-ERROR` (connect throws, timer
+advances, second connect succeeds);
+`TEST-REVOCATION-RECONCILES-AFTER-RECONNECT` (connect,
+`error` + `end` emits, timer advances, `reconcileCount` goes
+1 → 2); `TEST-REVOCATION-STOP-CANCELS-RECONNECT` (connect fails,
+reconnect pending, `stop()` cancels, advancing timers does not
+re-connect). `vi.useFakeTimers()` + real `setTimeout` in the
+harness lets `vi.advanceTimersByTimeAsync(5000)` fire the
+reconnect AND await its continuations — assertions see
+fully-executed state, not a racy snapshot. Backend 251 → 254 (+3).
+
+**Doc amendments.** Each of the three sweep-named docs gets a
+v0.3 commit:
+- AUTH-SPEC-001 (`ed47e7a`): §9.2 listener-disconnected row
+  updated to reflect the reconnect mechanism; §9.3 defense 2
+  rewritten to describe fixed behavior with cross-reference to
+  commit.
+- THREAT-MODEL-001 (`5259aec`): §8 v0.2 correction blockquote
+  gains a v0.3 fix blockquote. **End-of-doc line also fixed** —
+  V-1 left it at "v0.1" while bumping the header to v0.2 — same
+  class as US-ADD-001's stale end-of-doc line fixed at W-1.
+- US-MASTER-001 (`f2371c0`): §3.5 v0.2 correction blockquote
+  gains a v0.3 fix blockquote.
+
+**The three-doc cross-reference is now a fix-reference, not a
+"filed as" placeholder.** U-3 filed P1-042, V-1 seconded the gap
+from THREAT-MODEL-001, W-1 propagated it to US-MASTER-001. X-1
+fixed it and amended all three docs to say "fixed at 07cc2b4"
+instead of "filed as P1-042." **The sweep's mechanism carried all
+the way to a code fix** — naming the gap in three docs is what
+made it hard to lose.
+
+**§7 additions from this session:**
+
+1. **Per-block preflight is not a top-level abort.** A shell
+   block with multiple `python3 <<'PYEOF'` heredocs runs each
+   independently. A top-level preflight that `sys.exit`s stops
+   only its own process; the shell continues to the next
+   heredoc. Session X-1's Command 5 demonstrated this: the
+   top-level preflight failed on THREAT-MODEL-001's end-of-doc
+   anchor, but the AUTH-SPEC-001 and US-MASTER-001 write blocks
+   each ran because their own internal anchors passed, while
+   THREAT-MODEL-001's write block aborted on its own check.
+   Two of three files landed. The advisory
+   `PREFLIGHT FAILED — no writes will run` message was literally
+   false. **Fix: `set -e` at the top of the shell block, or a
+   single Python process per file (all-or-nothing per file), or
+   one process for the whole batch. The advisory line pattern
+   is misleading — drop it or `set -e`.** Command 8 (this
+   session close) uses `set -e`.
+
+2. **End-of-doc version lines are a staleness surface separate
+   from header and revision history.** V-1's THREAT-MODEL-001
+   v0.1 → v0.2 bump updated the header and revision-history row
+   but left `— end of THREAT-MODEL-001 v0.1 draft —` unchanged.
+   X-1's v0.2 → v0.3 bump assumed the line was v0.2 and the
+   preflight failed on that assumption (fixed in the corrected
+   Command 6, which anchored on the actual `v0.1` text). W-1's
+   US-ADD-001 v0.2 → v0.3 bump caught the same staleness
+   because its end-of-doc anchor was `v0.1` and the file
+   actually said `v0.1` — accidental alignment, not prevention.
+   **Rule for any version-bump commit: preflight all three
+   surfaces — header (`^Version:`), revision-history row
+   (`| X.Y |`), end-of-doc line (`— end of DOC vX.Y draft —`).
+   When one is stale relative to the others, fix the staleness
+   in the same commit that bumps the others; don't ship a bump
+   that leaves the file's own version metadata inconsistent
+   across sections.**
+
+**Counts.** Backend 251 → 254 (+3 named tests). Android JVM
+212 unchanged. androidTest 46 unchanged.
+
+**Project state at X-1 close.** No blocking work. The 037-041
+hardening chain closed at T-1. The one real defect (SQLite leak)
+fixed at U-1. Three dedup/extraction backlog items closed at
+U-1/U-2. KI-005 (conformance sweep) closed at W-1; **the sweep's
+one real gap (P1-042) closed at X-1.** The sweep's findings are
+fully resolved. Remaining: Phase 2 preparation (choice) and the
+three standing conditions (double-fetch dedupe, instrumented
+Compose tests, KI-005 re-sweep cadence as needed). No task in
+the registry is `Proposed` for a blocking gap.
+
+
 ---
 
 ## 4. Known issues
@@ -3715,10 +3844,6 @@ Original phrasing preserved below for history:
 
     **No blocking tasks remain.** The next session's shape is a
     choice, not a backlog obligation:
-    - **TASK-P1-042** — WS revocation listener reconnect +
-      re-reconcile. Filed from the AUTH-SPEC-001 sweep. Medium
-      priority, small scope (~20 lines + 3 tests). Closes the gap
-      AUTH-SPEC-001 §9.3 defense 2 names.
     - **Phase 2 preparation** — dependency version review, libsignal
       upgrade path, networking layer suspend refactor (removes the
       runBlocking bridge in HttpClient.executeWithRetry per 040-D-1's
@@ -4577,6 +4702,39 @@ Rebuild after flipping — read at HttpClient construction time.
   **when a §7 addition names a pre-write action, the next session
   must run that action in its first command block, not somewhere
   mid-sweep.**
+
+- **Per-block preflight is not a top-level abort.** A shell block
+  with multiple `python3 <<'PYEOF'` heredocs runs each independently.
+  A top-level preflight that `sys.exit`s stops only its own process;
+  the shell continues to the next heredoc. Session X-1's Command 5
+  demonstrated this: the top-level preflight failed on
+  THREAT-MODEL-001's end-of-doc anchor, but AUTH-SPEC-001 and
+  US-MASTER-001 write blocks each ran because their own internal
+  anchors passed, while THREAT-MODEL-001's write block aborted on
+  its own check. Two of three files landed; the advisory
+  `PREFLIGHT FAILED — no writes will run` message was literally
+  false. **Fix: `set -e` at the top of the shell block, or a
+  single Python process per file (all-or-nothing per file), or
+  one process for the whole batch. The advisory-line pattern is
+  misleading — either `set -e` or drop the advisory text.** The
+  session close's Command 8 uses `set -e`.
+
+- **End-of-doc version lines are a staleness surface separate
+  from header and revision history.** V-1's THREAT-MODEL-001
+  v0.1 → v0.2 bump updated header + revision-history row but left
+  the trailing `— end of THREAT-MODEL-001 v0.1 draft —`
+  unchanged. X-1's v0.2 → v0.3 bump assumed the line was v0.2
+  and preflight failed on that assumption; corrected Command 6
+  anchored on actual `v0.1` text and fixed it in the same commit.
+  W-1's US-ADD-001 v0.2 → v0.3 caught the same staleness by
+  accidental alignment (end-of-doc anchor was `v0.1`, file said
+  `v0.1`). **Rule for any version-bump commit: preflight all
+  three surfaces** — header (`^Version:`), revision-history row
+  (`| X.Y |`), end-of-doc line (`— end of DOC vX.Y draft —`).
+  When one is stale relative to the others, fix staleness in the
+  same commit that bumps the others; don't ship a bump that
+  leaves the file's own version metadata inconsistent across
+  sections.
 
 Current verified state: **212 Android JVM tests** (2026-10-18),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
