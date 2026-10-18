@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session Z-1 — two standing deferrals addressed. (1) Double-matrix-fetch dedupe RESOLVED via routing-layer fix at `2637610`: Reauthenticating branch becomes no-op; screen is preserved during silent reauth; /me/matrix count dropped 3 -> 2 per 401-triggered reauth cycle. The U-2 cost > payoff ruling was correct given that ruling's assumed MutableStateFlow fix; the actual fix was smaller and also corrected a UX drift from ADR-HARDENING-001 §2's "silent reauth" intent. (2) Instrumented Compose tests PARTIAL at `bf13dcc`: AckDialog covered (11 Compose tests, first Compose test in the project), Espresso bumped 3.5.1 → 3.7.0 to fix an InputManager.getInstance removal on API 33+. Admin/ChatScreen coverage re-scoped to require ViewModel extraction — a refactor, not a test. Backend 254, Android JVM 212, androidTest 46 → 57. **No blocking work remains.** Next: Phase 2 OR Compose refactor session OR nothing — choice, not obligation.)
+Last updated: 2026-10-18 (Session Z-2 — Compose refactor arc, session A: AdminScreen extracted to `AdminScreenState` plain-class state holder at `2804427`. Behavior-preserving: JVM 212/212 pass, compile clean, backend log shows same-port paired GETs (devices+contacts) twice across two Admin entries — identical to pre-refactor — and manual 9-step walk rendered identically. Pattern is **Option C** (plain Kotlin class + `MutableStateFlow` + injected lambdas, matching ChatViewModel precedent) — **not** androidx ViewModel as the Z-1 §4 note had sketched; §4 corrected in this same handoff edit so session B (AdminScreenStateTest) opens with the accurate pattern. Arc: B = JVM state tests, C = ChatScreen refactor, D = ChatScreen test. Backend 254, Android JVM 212, androidTest 57 — all unchanged. **No blocking work remains.** Next: session B OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -3253,6 +3253,87 @@ Each was caught by a verification step rather than shipped, which is
 the honest summary: the discipline worked, the initial assumptions did
 not always hold.
 
+
+### Session Z-2 — Compose refactor arc, session A: AdminScreen extract (2026-10-18)
+
+First of four planned sessions for the Compose test coverage deferral
+(§4). This session delivers the refactor that makes AdminScreen
+testable at the JVM layer; sessions B, C, D deliver the tests. One
+commit:
+
+- `2804427` — **refactor(admin): extract AdminScreenState from
+  composable.** AdminScreen.kt 425 → 326 lines; new
+  AdminScreenState.kt 191 lines; MainActivity.kt call site rewired
+  (~17-line block replacing 6-line single expression).
+
+**THE PATTERN (this is what the handoff needs to know).** Option C
+— plain Kotlin class, ChatViewModel precedent: `MutableStateFlow`
+backing, no androidx ViewModel, no lifecycle awareness, no Context
+dependency. Five injected lambdas (`sessionToken`, `listDevicesFn`,
+`listContactsFn`, `createTokenFn`, `authorizeContactFn`) give tests
+control over every backend call. Nine `StateFlow`s expose
+server/action state. Methods: `load`, `loadBundle`,
+`createTokenForScannedDevice`, `authorize`, `buildMatrix`,
+`setStatusMessage`.
+
+**THE CORRECTION THIS SESSION OWES THE HANDOFF.** Z-1's §4 re-scope
+said the remaining Compose coverage "requires ViewModel extraction."
+The actual pattern used is **not** androidx ViewModel — it's the
+ChatViewModel-style plain class. Reasoning: the codebase's own
+existing "ViewModel" is a plain class with `MutableStateFlow`, no
+androidx.lifecycle dependency; adding `lifecycle-viewmodel-compose`
+for a behavior-preserving refactor would be a bigger dependency
+change than the refactor itself. Option A (lambda injection with
+state still in the composable) was rejected because the logic is
+exactly where bugs live — leaving `load`/`createToken`/
+`authorize`/`buildMatrix` untestable at JVM layer defeats the
+purpose. Option C is the correct target. §4 is being corrected in
+this same handoff edit (block 4h) so session B opens with the
+accurate pattern.
+
+**BEHAVIOR-PRESERVATION EVIDENCE** (the refactor's correctness
+criterion is *behavior-preserving*, not *feature-adding*):
+
+  JVM: 212/212 pass, no collateral regression. Compile: BUILD
+  SUCCESSFUL. API call pattern from a two-Admin-entry walk on
+  emulator-5556 (backend log, /admin/* endpoints only):
+    req-1lp  GET /admin/devices   port 60268
+    req-1lq  GET /admin/contacts  port 60268
+    req-1m3  GET /admin/devices   port 62882  (post-Back, re-entry)
+    req-1m4  GET /admin/contacts  port 62882
+  Same-port pairs = `state.load()` ran `listDevices` + `listContacts`
+  in sequence twice. Identical to pre-refactor. Zero 4xx/5xx on any
+  admin endpoint. Manual walk (9 steps): Settings → Admin; device
+  list rendered with data; Provision section showed scan button +
+  debug paste + Enrollment JSON input; Authorize section showed both
+  fields + button; Back returned to Conversations; re-entry
+  re-fetched. All rendered identically to pre-refactor.
+
+**MULTI-SESSION ARC, NAMED.** This session is A. Remaining:
+  B — `AdminScreenStateTest` (JVM): 15-20 tests exercising load
+      success/error, createToken, authorize, buildMatrix, null
+      sessionToken. The class exists for this. Fast, deterministic,
+      no emulator, no backend.
+  C — ChatScreen refactor (same Option C pattern). Block-1 recon
+      confirmed ChatScreen is a genuinely different shape (3 concrete
+      controller/store params + 6 LaunchedEffects + MessagingService.
+      messagesVersion companion subscription) — hence its own session,
+      not folded in.
+  D — ChatScreen Compose test.
+
+**SCOPE EXCLUSIONS, NAMED.** No androidx ViewModel. No new
+dependencies. No ChatScreen touch. No AdminApi/SecureStorage changes.
+Form-input state (ownerDeviceId, contactDeviceId, provisionClearance,
+provisionVersion, provisionContacts, debugPasteText) stays in the
+composable — UI input is not state-class concern; Compose tests
+exercise it.
+
+**One §7 lesson earned** (block 4c's substring-anchor bug) — see
+§7 below.
+
+**Counts.** All unchanged: Backend 254, Android JVM 212, androidTest
+57. This session adds no tests — that's session B and D.
+
 ---
 
 ## 4. Known issues
@@ -3981,13 +4062,21 @@ Original phrasing preserved below for history:
       double-matrix-fetch dedupe (R-5 §7 note).
 
 **Backlog items (not scheduled):**
-- ~~Instrumented Compose tests for admin flows~~ — **PARTIAL,
-  re-scoped 2026-10-18.** AckDialog coverage shipped at `bf13dcc`
-  (11 Compose tests). Remaining scope: AdminScreen and ChatScreen
-  integration. Both require ViewModel extraction (AdminScreen
-  self-constructs AdminApi/SecureStorage; ChatScreen takes 3
-  concrete controller/store objects as params). That's a refactor
-  session, not a test session. Scope recon done; refactor not started.
+- ~~Instrumented Compose tests for admin flows~~ — **IN PROGRESS,
+  re-scoped 2026-10-18 twice (Z-1 then Z-2).** AckDialog coverage
+  shipped at `bf13dcc` (11 Compose tests). AdminScreen refactored at
+  `2804427` (Session Z-2, arc session A) — state and logic extracted
+  into `AdminScreenState` as a **plain Kotlin class**, ChatViewModel
+  precedent: `MutableStateFlow` + injected lambdas, no androidx
+  ViewModel, no new dependency. **Correction to Z-1's wording:**
+  Z-1 said this "requires ViewModel extraction." The actual pattern
+  is Option C (plain-class state holder), not androidx ViewModel —
+  the codebase's own "ViewModel" is a plain class; androidx
+  lifecycle-viewmodel-compose would be a bigger dependency change
+  than the refactor itself. Arc: B = AdminScreenStateTest (JVM), C =
+  ChatScreen refactor (same pattern), D = ChatScreen test. Admin/
+  ChatScreen tests are not yet written — refactor enables them, does
+  not deliver them.
 - Deduplicate base64url validators (KI-016).
 - `canonicalJson` deduplication between `audit/log.ts` and
   `audit/verify.ts` (KI-008).
@@ -4991,6 +5080,18 @@ Rebuild after flipping — read at HttpClient construction time.
   for leading-dash patterns. The block that writes and the block
   that verifies should use different pattern shapes so a pattern bug
   in one does not mask a content bug in the other.
+
+- **Substring anchors match prefixes of longer identifiers.**
+  Session Z-2's block 4c-fix used anchor
+  `import com.umoja.secure.transport.MatrixApi` which also matches
+  `import com.umoja.secure.transport.MatrixApiException` -- preflight
+  returned `count=2`, aborted before any write. The fix: newline-
+  terminated anchors on import lines specifically, because imports
+  always end with `\n`, so `\nimport X\n` is unique. Same family as
+  Z-1's `--since` grep-pattern bug: pattern bugs are not content
+  bugs; fix the pattern, do not conclude the content is wrong. The
+  count==1 discipline caught this in preflight before any corruption
+  landed -- preflight-paid-for-itself at the exact moment it mattered.
 
 Current verified state: **212 Android JVM tests** (2026-10-18),
 **57 androidTest** (2026-10-18, 7 files, from connectedAndroidTest XML),
