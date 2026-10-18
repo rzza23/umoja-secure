@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session S-1 — bootstrap-enrollment-token.sh DONE: ~250-line bash script replacing the ad-hoc psql procedure that recurred 5x (Sessions A–R-4). Three modes (--device, --pubkey, --ghost) tested against real DB, all cleanup verified. Backlog item closed. Next: TASK-P1-041 — failed-verification operator logging, deferred non-blocking.)
+Last updated: 2026-10-18 (Session T-1 — TASK-P1-041 DONE: VerificationFailureStore + 3-site wiring + DiagnosticsScreen section + reactivity StateFlow. All six registry §B acceptance criteria met, emulator acceptance verified. Android JVM 198 → 212. **037–041 hardening pass fully closed.** Next: backlog hygiene (MessageStore SQLite leak, KI-016/008/018, migration 017) or Phase 2 preparation — no blocking tasks remain.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -93,7 +93,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 198** (verified 2026-10-18 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes.)
+- **JVM unit tests: 212** (verified 2026-10-18 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests.)
 - **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
   connectedAndroidTest XML; was wrongly recorded as 0 files in an
   earlier handoff — see KI-013)
@@ -2421,6 +2421,121 @@ Three modes:
 **Counts.** Android JVM 198 unchanged. Backend 250 unchanged.
 Script-only session.
 
+
+### Session T-1 — TASK-P1-041 DONE (2026-10-18)
+
+Failed-verification operator logging. **Closes the 037–041
+hardening chain end-to-end.** One implementation commit
+(`1baff75`, 10 files, +521/−7) plus the ADR amendment
+(`29ff6cc`) and this handoff follow-up.
+
+**VerificationFailureStore.kt** (~150 lines, crypto package):
+
+- Three-way `ArtifactType { MATRIX, NOTICE, ACK }`, bounded
+  `FailureEntry { timestampMs, artifactType, reason,
+  canonicalTruncated }`
+- MAX_ENTRIES = 20 (Phase 1; older entries age out)
+- `record / entries / clear / clearOf` — all `@Synchronized`
+  (concurrent write sites on Main and IO)
+- Single JSON envelope under `verification.failure.log`
+
+**Three write sites wired** via `failureLog:
+VerificationFailureStore? = null` optional constructor param —
+default-null is invisible to existing tests, construction sites,
+and callers. Production wires at MainActivity's three sites:
+
+- `MatrixStore.accept` — all four Rejected reasons
+- `ReplacementNoticeStore.recordNotice` — Invalid signature +
+  malformed
+- `IdentityChangeController.ackAndPost` — all three Failure paths
+
+**Filtered clear** (`clearOf`) — registry §B requires
+matrix-store wipe to clear only matrix-failure entries;
+`MatrixStore.clear()` calls `clearOf(MATRIX)` and
+`ReplacementNoticeStore.clear()` calls `clearOf(NOTICE)`. Full
+`clear()` is reserved for the DiagnosticsScreen debug control
+where the operator wants a full-wipe view.
+
+**Reactivity — third instance of the write-notification
+pattern.** `VerificationFailureStore.version: StateFlow<Long>`
+bumped on record / clear / clearOf. DiagnosticsScreen collects
+via `collectAsState` and remember-keys the entry list on it.
+Precedents: `IdentityChangeController.version` (Session K) and
+`MatrixStore.version` (Session P D-1). Third instance
+establishes the pattern as a codebase convention (§7 bullet
+below).
+
+**DiagnosticsScreen** — new "Verification failures (debug)"
+section after Matrix (debug). Empty state: "No failures
+recorded." Non-empty: reversed newest-first list of
+`artifactType · reason · fingerprint @ HH:MM:SS` in monospace
+plus "Clear failure log" button. Fingerprint =
+`base64url(canonical).take(8)` matching AckDialog precedent.
+
+**Tests — 14 new (Android JVM 198 → 212):**
+
+`VerificationFailureStoreTest` (10, isolated):
+- record/entries roundtrip, expected fields
+- trim to MAX_ENTRIES, oldest-first
+- empty state, clear-all, clearOf filtering both directions
+- clearOf on absent type does not error
+- empty canonical → empty fingerprint
+- malformed JSON resilience, recovery-after-malformed
+
+Wiring tests (4, in existing test files):
+- `TEST-DIAG-VERIFICATION-FAILURE-LOGGED` (matrix) —
+  registry-named
+- `TEST-DIAG-VERIFICATION-LOG-CLEARED-ON-WIPE` (matrix) —
+  registry-named
+- `TEST-DIAG-NOTICE-FAILURE-LOGGED` (notice) — supporting
+- `TEST-DIAG-ACK-FAILURE-LOGGED` (ack) — supporting
+
+**Emulator acceptance** (all pass):
+- Settings → Diagnostics → Matrix (debug)
+- Paste bad canonical + signature → tap Verify and store
+- Observed: `Rejected(signature)` + `matrix · signature ·
+  AAAAAAAA @ 12:13:02` in the new section
+- Tap Clear failure log → "No failures recorded" (reactivity
+  proof — section updates without navigation)
+
+**§7 additions earned** (three):
+
+1. **Write-notification pattern is now a codebase convention.**
+   Three instances: `IdentityChangeController.version` (K),
+   `MatrixStore.version` (P D-1),
+   `VerificationFailureStore.version` (T-1). When a fourth store
+   class needs to notify observers, use
+   `MutableStateFlow<Long>` + `StateFlow<Long>` + bump on every
+   write + `collectAsState` + remember-key. Not "consider" —
+   assume.
+
+2. **Kotlin call-site edits with trailing-comma style defeat
+   exact-string anchors.** Three attempts this session: paren-
+   matcher appended after a trailing comma → double comma;
+   whitespace anchor missed 24 leading spaces → ABORT with
+   `count=0`; **line-level manipulation using the file's own
+   indentation** → fixed. Rule: for multi-line call sites,
+   anchor on stripped-content of the target line and compute
+   indentation from the previous line; never paste whitespace
+   into a Python string.
+
+3. **Compile is the acceptance for Kotlin source; grep "^e:"
+   not `tail -4`.** Three compile failures this session, three
+   named errors, three one-line fixes: `/auth/*` nested-comment
+   in R-4; `when` branch without `{ }` in R-4; missing
+   `collectAsState` import in T-1. `tail -4` hides the error
+   list; `grep "^e:"` shows every error at line:col. Zero
+   guessing when the compiler reports precisely.
+
+**Commit-split note:** `29ff6cc`'s message describes both the
+ADR amendment and this handoff close, but only the ADR landed
+(the handoff edit aborted on a prose anchor in the same Python
+script). This follow-up commit lands the handoff edits with
+range-based structural anchors. Same class as Session C's
+`8adde6b` (commit message overstates scope); not amended
+because already pushed. The correct fix is the follow-up with
+honest framing, not a force-push.
+
 ---
 
 ## 4. Known issues
@@ -3075,13 +3190,25 @@ Original phrasing preserved below for history:
     accounted for. ADR-HARDENING-001 §9 v0.3 amendment lands
     with this handoff.
 
-    **Next task: TASK-P1-041 — failed-verification operator
-    logging.** Deferred per ADR §6 (non-blocking; benefits from
-    040's state manager being in place since 041's log surface
-    sits inside verification failure paths the state manager
-    already touches). Local user-visible log of verification
-    failures; DiagnosticsScreen surfaces last N; entries cleared
-    by corresponding store's clear().
+    **TASK-P1-041 DONE 2026-10-18. The 037-041 hardening pass is
+    fully closed.** VerificationFailureStore + 3-site wiring (matrix,
+    notice, ack) + DiagnosticsScreen section + reactivity StateFlow.
+    14 new JVM tests (Android JVM 198 → 212). Emulator acceptance
+    verified. See §3 Session T-1 entry. ADR-HARDENING-001 §9 v0.4
+    amendment lands via commit `29ff6cc`.
+
+    **No blocking tasks remain.** The next session's shape is a
+    choice, not a backlog obligation:
+    - **Phase 2 preparation** — dependency version review, libsignal
+      upgrade path, networking layer suspend refactor (removes the
+      runBlocking bridge in HttpClient.executeWithRetry per 040-D-1's
+      KDoc), reference doc refresh.
+    - **Backlog hygiene** — `MessageStore` SQLite connection leak
+      (production bug, dozens/sec during cold launch); KI-016
+      base64url validator dedupe; KI-008 `canonicalJson` dedupe;
+      KI-018 backend current-matrix-version tracking; migration 017
+      for `enrollment_tokens.used_by_device_id ON DELETE SET NULL`;
+      double-matrix-fetch dedupe (R-5 §7 note).
 
 **Backlog items (not scheduled):**
 - Instrumented Compose tests for admin flows (no test rule configured;
@@ -3743,8 +3870,49 @@ Rebuild after flipping — read at HttpClient construction time.
   shell, small transforms go Python one-liners. Mixing habits
   (Python-for-everything, shell-for-everything) produces scripts
   that are correct but wrong-shaped for their job. Session S-1.
+- **Write-notification pattern is now a codebase convention.**
+  Three instances: `IdentityChangeController.version` (Session K,
+  `eea1af7`), `MatrixStore.version` (Session P D-1, `475d75b`),
+  `VerificationFailureStore.version` (Session T-1). When a fourth
+  store class needs to notify observers of state changes: use
+  `private val _version = MutableStateFlow(0L)` + `val version:
+  StateFlow<Long> = _version.asStateFlow()`, bump on every write
+  path (`record` / `clear` / `clearOf` / `accept` / `markAcked`),
+  and have the UI collect via `collectAsState` + remember-key the
+  derived state on the version value. **Not "consider" — assume.**
+  Three precedents is enough for the pattern to be load-bearing;
+  reinventing a fourth mechanism would be a regression.
+- **Kotlin call-site edits with trailing-comma style defeat
+  exact-string anchors.** Three attempts in Session T-1: paren-
+  matcher appended after a trailing comma → double comma;
+  whitespace anchor missed 24 leading spaces → ABORT with
+  `count=0`; **line-level manipulation using the file's own
+  indentation** (stripped-content match on the broken line,
+  compute indentation from the previous line, write back with
+  computed whitespace) → fixed. Rule: for multi-line call sites,
+  anchor on stripped-content and compute whitespace from
+  neighbors; never paste whitespace into a Python string.
+- **Compile is the acceptance for Kotlin source; grep "^e:" not
+  `tail -4`.** Three compile failures this session, three named
+  errors, three one-line fixes: `/auth/*` nested-comment in R-4
+  (Kotlin block comments nest); `when` branch without `{ }` in
+  R-4 (single-expression branches cannot be extended); missing
+  `collectAsState` import in T-1 (Compose Runtime extension not
+  auto-imported). `tail -4` hides the error list; `grep "^e:"`
+  shows every error at line:col. Zero guessing when the
+  compiler reports precisely.
+- **Prose anchors wrapping mid-phrase defeat single-line
+  `src.find()`.** Session T-1's §5 item 16 anchor
+  `**Next task: TASK-P1-041 — failed-verification operator
+  logging.**` wrapped across a line break in the file, so
+  `src.find()` returned -1 before any edit ran and the whole
+  handoff edit block aborted. **Range-based anchors** (start
+  marker + end marker, replace the whole span) are the robust
+  form for multi-line prose. Same class as R-3/R-4's grep
+  patterns that didn't match JSON log format — anchors on
+  assumed text shape, not actual text shape.
 
-Current verified state: **198 Android JVM tests** (2026-10-18),
+Current verified state: **212 Android JVM tests** (2026-10-18),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
 and **250 backend tests** (2026-10-18, 16 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
