@@ -67,18 +67,24 @@ export const wsRoutes: FastifyPluginAsync = async (app) => {
           socket.close(4401, 'invalid auth frame');
           return;
         }
-        let session;
+        let result;
         try {
-          session = await lookupSession(f.session_token);
+          result = await lookupSession(f.session_token);
         } catch {
           socket.close(1011, 'lookup failed');
           return;
         }
-        if (!session) {
+        if (result.kind === 'device_revoked') {
+          socket.send(JSON.stringify({ type: 'auth_fail', reason: 'device_revoked' }));
+          socket.close(4401, 'device revoked');
+          return;
+        }
+        if (result.kind !== 'session') {
           socket.send(JSON.stringify({ type: 'auth_fail', reason: 'invalid_session' }));
           socket.close(4401, 'invalid session');
           return;
         }
+        const session = result.session;
 
         authed = true;
         if (authTimer) {
@@ -121,7 +127,15 @@ export const wsRoutes: FastifyPluginAsync = async (app) => {
               };
               socket.send(JSON.stringify({ type: 'revalidate', challenge }));
             } catch (err) {
-              if (err instanceof AuthError && err.code === 'unauthorized') {
+              // device_revoked: createChallenge threw because the
+              // device is no longer active. Terminal — close 4403.
+              // unauthorized: createChallenge couldn't find the device
+              // row at all, which for a live WS connection means the
+              // device was deleted mid-session. Same terminal close.
+              if (
+                err instanceof AuthError &&
+                (err.code === 'device_revoked' || err.code === 'unauthorized')
+              ) {
                 socket.close(4403, 'device revoked');
               } else {
                 logger.error({ err }, 'revalidate schedule failed');

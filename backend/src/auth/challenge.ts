@@ -22,8 +22,15 @@ export async function createChallenge(
       'SELECT status FROM devices WHERE device_id = $1',
       [device_id],
     );
-    if (dev.rowCount !== 1 || dev.rows[0].status !== 'active') {
+    if (dev.rowCount !== 1) {
+      // No device row: treat as unauthorized (preserved).
       throw new AuthError('unauthorized');
+    }
+    if (dev.rows[0].status !== 'active') {
+      // Distinct code for revoked device, per ADR-HARDENING-001 §2.
+      // The client's re-auth flow distinguishes this from a generic
+      // 401 and routes to AppScreen.Revoked rather than retrying.
+      throw new AuthError('device_revoked');
     }
 
     const challenge_id = randomUUID();

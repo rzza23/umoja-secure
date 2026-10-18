@@ -33,8 +33,15 @@ export async function verifyChallenge(
        FROM devices WHERE device_id = $1`,
       [row.device_id],
     );
-    if (dev.rowCount !== 1 || dev.rows[0].status !== 'active') {
+    if (dev.rowCount !== 1) {
+      // No device row: treat as unauthorized (preserved).
       throw new AuthError('unauthorized');
+    }
+    if (dev.rows[0].status !== 'active') {
+      // Device revoked between challenge issue and verify consumption.
+      // Narrow race window; still worth distinguishing so the client
+      // routes to AppScreen.Revoked rather than retrying.
+      throw new AuthError('device_revoked');
     }
     const device = dev.rows[0];
 

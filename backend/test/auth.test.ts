@@ -314,4 +314,84 @@ describe('device authentication', () => {
       expect(after.statusCode).toBe(401);
     });
   });
+
+  describe('revoked-device disambiguation (TASK-P1-040 A)', () => {
+    it('TEST-AUTH-CHALLENGE-REVOKED-DEVICE returns device_revoked', async () => {
+      const dev = await createTestDevice();
+      await pool.query(
+        `UPDATE devices
+         SET status = 'revoked', revoked_at = now(), revoke_reason = 'test'
+         WHERE device_id = $1`,
+        [dev.device_id],
+      );
+      const res = await app.inject({
+        method: 'POST',
+        url: '/auth/challenge',
+        payload: { device_id: dev.device_id, purpose: 'auth' },
+      });
+      expect(res.statusCode).toBe(401);
+      expect(res.json().error).toBe('device_revoked');
+    });
+
+    it('TEST-AUTH-VERIFY-REVOKED-DEVICE returns device_revoked', async () => {
+      const dev = await createTestDevice();
+      const challenge = await requestChallenge(app, dev.device_id);
+      const message = canonicalizeChallenge(challenge);
+      const signature = await ed.signAsync(message, dev.private_key);
+      // Revoke AFTER challenge issued, BEFORE verify consumed.
+      await pool.query(
+        `UPDATE devices
+         SET status = 'revoked', revoked_at = now(), revoke_reason = 'test'
+         WHERE device_id = $1`,
+        [dev.device_id],
+      );
+      const res = await app.inject({
+        method: 'POST',
+        url: '/auth/verify',
+        payload: {
+          challenge_id: challenge.challenge_id,
+          signature: Buffer.from(signature).toString('base64url'),
+        },
+      });
+      expect(res.statusCode).toBe(401);
+      expect(res.json().error).toBe('device_revoked');
+    });
+
+    it('TEST-AUTH-SESSION-DEVICE-REVOKED returns device_revoked via lookupSession', async () => {
+      const dev = await createTestDevice();
+      const challenge = await requestChallenge(app, dev.device_id);
+      const message = canonicalizeChallenge(challenge);
+      const signature = await ed.signAsync(message, dev.private_key);
+      const verifyRes = await app.inject({
+        method: 'POST',
+        url: '/auth/verify',
+        payload: {
+          challenge_id: challenge.challenge_id,
+          signature: Buffer.from(signature).toString('base64url'),
+        },
+      });
+      const token = verifyRes.json().session_token;
+      // Session works before revocation.
+      const before = await app.inject({
+        method: 'GET',
+        url: '/me',
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(before.statusCode).toBe(200);
+      // Revoke device; lookupSession now surfaces device_revoked.
+      await pool.query(
+        `UPDATE devices
+         SET status = 'revoked', revoked_at = now(), revoke_reason = 'test'
+         WHERE device_id = $1`,
+        [dev.device_id],
+      );
+      const after = await app.inject({
+        method: 'GET',
+        url: '/me',
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(after.statusCode).toBe(401);
+      expect(after.json().error).toBe('device_revoked');
+    });
+  });
 });

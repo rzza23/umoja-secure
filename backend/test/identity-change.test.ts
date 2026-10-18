@@ -392,13 +392,16 @@ describe('identity-change routes', () => {
   it('TEST-ACK-REVOKED-DEVICE', async () => {
     // Layer reality: lookupSession (auth/sessions.ts) filters by
     // device status, so a revoked-device session is rejected at the
-    // middleware before the ack service is reached. The service's own
-    // device_revoked branch (acks.ts) is defense-in-depth for the race
-    // window (session valid at middleware time, device revoked before
-    // the service's DB query). Not reachable via HTTP in normal
-    // operation. Per ADR v0.3 §10, route-level assertion is 401;
-    // the 403 device_revoked service branch remains in code for the
-    // race case.
+    // middleware before the ack service is reached. Post-TASK-P1-040,
+    // the middleware surfaces device_revoked directly from
+    // lookupSession's discriminated union (Session R's
+    // ADR-HARDENING-001 §2 implementation) — the client uses this to
+    // route to AppScreen.Revoked rather than retrying. The service's
+    // own device_revoked branch (acks.ts) remains defense-in-depth
+    // for the race window (session valid at middleware time, device
+    // revoked before the service's DB query). Both paths return
+    // device_revoked to the client; the wire contract is stable
+    // regardless of which layer fires.
     const admin = await createAuthedDevice('admin', TEST_ORG);
     const from = await createDeviceInDb('user', TEST_ORG);
     const to = await createDeviceInDb('user', TEST_ORG);
@@ -420,7 +423,7 @@ describe('identity-change routes', () => {
       payload: ackPayload,
     });
     expect(res.statusCode).toBe(401);
-    expect(res.json().error).toBe('unauthorized');
+    expect(res.json().error).toBe('device_revoked');
 
     // Confirm nothing landed — the request was rejected before write.
     const count = await pool.query<{ c: number }>(

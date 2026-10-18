@@ -22,16 +22,20 @@ export function requireSession(roles?: Role[]) {
     }
     const token = auth.slice('Bearer '.length).trim();
 
-    let session;
+    let result;
     try {
-      session = await lookupSession(token);
+      result = await lookupSession(token);
     } catch {
       // Fail closed on DB error
       return reply.code(503).send({ error: 'service_unavailable' });
     }
-    if (!session) {
+    if (result.kind === 'device_revoked') {
+      return reply.code(401).send({ error: 'device_revoked' });
+    }
+    if (result.kind !== 'session') {
       return reply.code(401).send({ error: 'unauthorized' });
     }
+    const session = result.session;
 
     const role = session.role as Role;
     if (roles && !roles.includes(role)) {
