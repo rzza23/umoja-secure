@@ -42,7 +42,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.umoja.secure.crypto.AckDecision
 import com.umoja.secure.crypto.IdentityChangeController
+import com.umoja.secure.crypto.MatrixStore
 import com.umoja.secure.crypto.ReplacementNoticeStore
+import com.umoja.secure.crypto.SendGate
 import com.umoja.secure.messaging.MessagingService
 import com.umoja.secure.storage.local.Message
 import com.umoja.secure.storage.local.MessageDirection
@@ -58,6 +60,7 @@ fun ChatScreen(
     onBack: () -> Unit,
     viewModel: ChatViewModel,
     identityChangeController: IdentityChangeController,
+    matrixStore: MatrixStore,
 ) {
     BackHandler(enabled = true) { onBack() }
 
@@ -77,7 +80,20 @@ fun ChatScreen(
     val version by identityChangeController.version.collectAsState()
     val gateState: IdentityChangeController.GateState =
         remember(version, peerDeviceId) { identityChangeController.gateFor(peerDeviceId) }
-    val isBlocked = gateState is IdentityChangeController.GateState.Blocked
+    val isIdentityBlocked = gateState is IdentityChangeController.GateState.Blocked
+    // Authorization gate (TASK-P1-038 C). Derived at composition time
+    // from the accepted matrix via SendGate (tested predicate, not a
+    // duplicated inline check). No reactivity signal because the matrix
+    // cannot change while ChatScreen is composed: AppRoot's only
+    // MatrixStore.accept call sits in LaunchedEffect(screen, deviceId),
+    // and ChatScreen's presence suppresses screen transitions. If P1-036
+    // (rotation) introduces push-based matrix updates, this remember key
+    // set needs a matrix version flow — added reactively, not
+    // speculatively here.
+    val isAuthorized = remember(peerDeviceId, matrixStore) {
+        SendGate.authorized(matrixStore.permittedContacts(), peerDeviceId)
+    }
+    val isBlocked = isIdentityBlocked || !isAuthorized
 
     LaunchedEffect(peerDeviceId) {
         viewModel.observe(peerDeviceId)
@@ -164,6 +180,10 @@ fun ChatScreen(
                 state = blocked,
                 onOpenDetails = { showDialog = true },
             )
+        }
+
+        if (!isAuthorized) {
+            NotAuthorizedBanner()
         }
 
         Surface(color = MaterialTheme.colorScheme.surface) {
@@ -268,6 +288,25 @@ private fun IdentityChangeBanner(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun NotAuthorizedBanner() {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+        ) {
+            Text(
+                "You are not authorized to message this device. " +
+                    "Contact your admin to resolve.",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

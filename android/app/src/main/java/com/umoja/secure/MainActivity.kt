@@ -97,6 +97,15 @@ fun AppRoot(lifecycle: Lifecycle) {
     var envelopesReceived by remember { mutableStateOf(0) }
     var openEnrollmentQr by remember { mutableStateOf(false) }
 
+    // MatrixStore (TASK-P1-026 authority). Remembered per deviceId to
+    // mirror identityChangeController's shape. The store is stateless
+    // from a Compose perspective (reads SecureStorage on each call), so
+    // multiple MatrixStore(SecureStorage(context)) instances are
+    // equivalent. Hoisting one instance here gives the ChatScreen gate
+    // a single reference and a natural seam for future reactivity
+    // (MatrixStore.version StateFlow) if P1-036 rotation ever needs it.
+    val matrixStore = remember(deviceId) { MatrixStore(SecureStorage(context)) }
+
     val wsState by app.webSocketClient.state.collectAsState()
     val coroutineScope = rememberCoroutineScope()
 
@@ -294,6 +303,7 @@ fun AppRoot(lifecycle: Lifecycle) {
             onSelectTab = { selectedTab = it },
             identityChangeController = identityChangeController
                 ?: error("Authenticated without identityChangeController"),
+            matrixStore = matrixStore,
         )
 
         AppScreen.Admin -> AdminScreen(

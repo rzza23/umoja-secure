@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.umoja.secure.ui.chat.ChatScreen
 import com.umoja.secure.ui.chat.ChatViewModel
 import com.umoja.secure.crypto.IdentityChangeController
+import com.umoja.secure.crypto.MatrixStore
 import com.umoja.secure.ui.contacts.ContactsScreen
 import com.umoja.secure.ui.conversations.ConversationsScreen
 import com.umoja.secure.ui.provisioning.EnrollmentQrScreen
@@ -43,6 +44,7 @@ fun MainNavigation(
     selectedTab: Tab,
     onSelectTab: (Tab) -> Unit,
     identityChangeController: IdentityChangeController,
+    matrixStore: MatrixStore,
 ) {
     var openChat by remember { mutableStateOf<OpenChat?>(null) }
     var openEnrollmentQr by remember { mutableStateOf(false) }
@@ -67,6 +69,7 @@ fun MainNavigation(
             onBack = { openChat = null },
             viewModel = chatViewModel,
             identityChangeController = identityChangeController,
+            matrixStore = matrixStore,
         )
         return
     }
