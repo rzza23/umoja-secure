@@ -676,7 +676,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-039 | Release-build hardening | 1 | Proposed |
 | TASK-P1-040 | Session lifecycle & revocation UX | 1 | Proposed |
 | TASK-P1-041 | Failed-verification operator logging | 1 | Proposed |
-| TASK-P1-042 | WS revocation listener reconnect + re-reconcile | 1 | DONEProposed
+| TASK-P1-042 | WS revocation listener reconnect + re-reconcile | 1 | DONE |
 
 **Total Phase 1 task identifiers:** 43 (001–020, 021a, 021b, 022–042).
 
