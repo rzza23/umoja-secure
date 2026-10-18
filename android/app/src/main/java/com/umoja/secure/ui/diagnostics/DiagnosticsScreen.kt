@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,12 +35,16 @@ import com.umoja.secure.auth.PreKeyUploader
 import com.umoja.secure.auth.SessionManager
 import com.umoja.secure.crypto.MatrixSigner
 import com.umoja.secure.crypto.MatrixStore
+import com.umoja.secure.crypto.VerificationFailureStore
 import com.umoja.secure.crypto.ProvisioningKeys
 import com.umoja.secure.messaging.MessagingService
 import com.umoja.secure.storage.SecureStorage
 import com.umoja.secure.transport.WebSocketClient
 import com.umoja.secure.ui.common.SecureScreen
+import java.text.SimpleDateFormat
 import java.util.Base64
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,6 +60,11 @@ fun DiagnosticsScreen(
     SecureScreen()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    // Verification-failure log (TASK-P1-041). Shared across the three
+    // MatrixStore constructions below (verify-and-store, clear, read-back)
+    // so their failure entries and clearOf operations see the same log.
+    val failureLog = remember { VerificationFailureStore(SecureStorage(context)) }
 
     var deviceId by remember { mutableStateOf<String?>(null) }
     var sessionExpiresAt by remember { mutableStateOf<String?>(null) }
@@ -259,7 +269,7 @@ fun DiagnosticsScreen(
             // composition (per navigation into Diagnostics).
             LaunchedEffect(Unit) {
                 matrixReadBack = try {
-                    val store = MatrixStore(SecureStorage(context))
+                    val store = MatrixStore(SecureStorage(context), failureLog)
                     "highestSeenVersion=" + store.highestSeenVersion() +
                         " contacts=" + (store.permittedContacts()?.size ?: "null")
                 } catch (e: Exception) {
@@ -293,6 +303,7 @@ fun DiagnosticsScreen(
                             context,
                             matrixCanonicalB64.trim(),
                             matrixSignatureB64.trim(),
+                            failureLog,
                         )
                         withContext(Dispatchers.Main) {
                             isBusy = false
@@ -311,7 +322,7 @@ fun DiagnosticsScreen(
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
                 onClick = {
-                    MatrixStore(SecureStorage(context)).clear()
+                    MatrixStore(SecureStorage(context), failureLog).clear()
                     matrixResult = "Cleared"
                     matrixReadBack = null
                 },
@@ -334,6 +345,41 @@ fun DiagnosticsScreen(
         }
 
         Spacer(Modifier.height(24.dp))
+
+        Text(
+            "Verification failures (debug)",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(Modifier.height(8.dp))
+        val failureLogVersion by failureLog.version.collectAsState()
+        val failures = remember(failureLogVersion) { failureLog.entries() }
+        if (failures.isEmpty()) {
+            Text(
+                "No failures recorded.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            failures.reversed().forEach { entry ->
+                val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                    .format(Date(entry.timestampMs))
+                Text(
+                    "${entry.artifactType.name.lowercase()} · ${entry.reason} · " +
+                        "${entry.canonicalTruncated} @ $time",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(vertical = 2.dp),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { failureLog.clear() },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Clear failure log")
+            }
+        }
     }
 }
 
@@ -341,10 +387,11 @@ private suspend fun verifyAndStoreMatrix(
     context: Context,
     canonicalB64: String,
     signatureB64: String,
+    failureLog: VerificationFailureStore,
 ): Pair<String, String?> = withContext(Dispatchers.IO) {
     try {
         val canonical = Base64.getUrlDecoder().decode(canonicalB64)
-        val store = MatrixStore(SecureStorage(context))
+        val store = MatrixStore(SecureStorage(context), failureLog)
         val rawPub = Base64.getUrlDecoder()
             .decode(ProvisioningKeys.CURRENT_PROVISIONING_PUBKEY_B64U)
         val pub = MatrixSigner.publicKeyFromRaw(rawPub)

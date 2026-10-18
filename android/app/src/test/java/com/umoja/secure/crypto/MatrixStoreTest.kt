@@ -332,4 +332,51 @@ class MatrixStoreTest {
         assertTrue("expected accepted post-wipe, got $result",
             result is MatrixStore.AcceptResult.Accepted)
     }
+
+    @Test
+    fun `TEST-DIAG-VERIFICATION-FAILURE-LOGGED records matrix signature failure`() {
+        MatrixSigner.matrixDigestRaw(byteArrayOf())  // load BouncyCastle
+        val underlying = InMemoryStore()
+        val failureLog = VerificationFailureStore(underlying)
+        val store = MatrixStore(underlying, failureLog)
+        val kp = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
+
+        val result = store.accept(
+            canonical = "not-a-valid-matrix".toByteArray(),
+            signatureBase64url = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(ByteArray(64)),
+            trustedKeys = setOf(kp.public),
+        )
+        assertTrue(result is MatrixStore.AcceptResult.Rejected)
+        assertEquals("signature", (result as MatrixStore.AcceptResult.Rejected).reason)
+
+        val entries = failureLog.entries()
+        assertEquals(1, entries.size)
+        assertEquals(
+            VerificationFailureStore.ArtifactType.MATRIX,
+            entries[0].artifactType,
+        )
+        assertEquals("signature", entries[0].reason)
+    }
+
+    @Test
+    fun `TEST-DIAG-VERIFICATION-LOG-CLEARED-ON-WIPE matrix clear wipes matrix log`() {
+        MatrixSigner.matrixDigestRaw(byteArrayOf())
+        val underlying = InMemoryStore()
+        val failureLog = VerificationFailureStore(underlying)
+        val store = MatrixStore(underlying, failureLog)
+        val kp = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
+
+        store.accept(
+            canonical = "bad".toByteArray(),
+            signatureBase64url = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(ByteArray(64)),
+            trustedKeys = setOf(kp.public),
+        )
+        assertEquals(1, failureLog.entries().size)
+
+        store.clear()
+
+        assertEquals(0, failureLog.entries().size)
+    }
 }

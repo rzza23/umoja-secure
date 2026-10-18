@@ -55,6 +55,7 @@ import com.umoja.secure.crypto.DeviceIdStore
 import com.umoja.secure.crypto.DeviceIdentity
 import com.umoja.secure.crypto.DeviceKeyManager
 import com.umoja.secure.crypto.MatrixStore
+import com.umoja.secure.crypto.VerificationFailureStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -114,7 +115,13 @@ fun AppRoot(lifecycle: Lifecycle) {
     // equivalent. Hoisting one instance here gives the ChatScreen gate
     // a single reference and a natural seam for future reactivity
     // (MatrixStore.version StateFlow) if P1-036 rotation ever needs it.
-    val matrixStore = remember(deviceId) { MatrixStore(SecureStorage(context)) }
+    // Verification-failure log (TASK-P1-041). Shared across MatrixStore,
+    // ReplacementNoticeStore, and IdentityChangeController so every
+    // rejection (signature failure, malformed payload, rollback, ack
+    // POST failure) lands in one queryable place. One instance per
+    // composition; same SecureStorage backing as the stores.
+    val failureStore = remember { VerificationFailureStore(SecureStorage(context)) }
+    val matrixStore = remember(deviceId) { MatrixStore(SecureStorage(context), failureStore) }
 
     // Session state machine (TASK-P1-040). Single source of truth for
     // authentication state. Fresh instance per deviceId; reauth and
@@ -214,11 +221,13 @@ fun AppRoot(lifecycle: Lifecycle) {
                     store = SecureStorage(context),
                     signingFn = { digest -> keyManager.sign(digest) },
                     ackingDeviceId = id,
+                    failureLog = failureStore,
                 ),
                 sessionTokenProvider = {
                     SessionManager(context).currentSession()?.sessionToken
                 },
                 trustedKeys = setOf(provisioningPublicKey()),
+                failureLog = failureStore,
             )
         }
     }

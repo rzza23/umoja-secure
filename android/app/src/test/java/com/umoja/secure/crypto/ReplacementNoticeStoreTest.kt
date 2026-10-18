@@ -262,4 +262,40 @@ class ReplacementNoticeStoreTest {
         assertEquals(0, store.pendingNotices().size)
         assertTrue(store.blockStateFor("device-new-002") is ReplacementNoticeStore.BlockState.Unblocked)
     }
+
+    @Test
+    fun `TEST-DIAG-NOTICE-FAILURE-LOGGED records notice signature failure`() {
+        MatrixSigner.matrixDigestRaw(byteArrayOf())
+        val underlying = InMemoryStore()
+        val failureLog = VerificationFailureStore(underlying)
+        val kp = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
+        val signingFn: (ByteArray) -> ByteArray = { digest ->
+            val sig = java.security.Signature.getInstance("Ed25519")
+            sig.initSign(kp.private)
+            sig.update(digest)
+            sig.sign()
+        }
+        val store = ReplacementNoticeStore(
+            store = underlying,
+            signingFn = signingFn,
+            ackingDeviceId = "self-device",
+            failureLog = failureLog,
+        )
+
+        val result = store.recordNotice(
+            canonical = "not-a-notice".toByteArray(),
+            signatureBase64url = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(ByteArray(64)),
+            trustedKeys = setOf(kp.public),
+        )
+        assertTrue(result is ReplacementNoticeStore.RecordResult.Invalid)
+
+        val entries = failureLog.entries()
+        assertEquals(1, entries.size)
+        assertEquals(
+            VerificationFailureStore.ArtifactType.NOTICE,
+            entries[0].artifactType,
+        )
+        assertEquals("signature", entries[0].reason)
+    }
 }

@@ -43,7 +43,10 @@ import java.util.Base64
  * Build Master: §3.6, §3.7, §3.8
  * ADR: §3, §4, §7.1.4
  */
-class MatrixStore(private val store: KeyValueStore) {
+class MatrixStore(
+    private val store: KeyValueStore,
+    private val failureLog: VerificationFailureStore? = null,
+) {
 
     /**
      * Write-notification, not a data cache. Bumped after every successful
@@ -99,21 +102,25 @@ class MatrixStore(private val store: KeyValueStore) {
         trustedKeys: Set<PublicKey>,
     ): AcceptResult {
         if (!MatrixVerifier.verify(canonical, signatureBase64url, trustedKeys)) {
+            failureLog?.record(VerificationFailureStore.ArtifactType.MATRIX, "signature", canonical)
             return AcceptResult.Rejected("signature")
         }
         val parsed = try {
             parseSigned(canonical)
         } catch (_: Exception) {
+            failureLog?.record(VerificationFailureStore.ArtifactType.MATRIX, "malformed", canonical)
             return AcceptResult.Rejected("malformed")
         }
         val current = highestSeenVersion()
         if (current != null) {
             if (parsed.matrix.version <= current) {
+                failureLog?.record(VerificationFailureStore.ArtifactType.MATRIX, "rollback", canonical)
                 return AcceptResult.Rejected("rollback")
             }
         } else {
             val floor = enrollmentFloor()
             if (floor != null && parsed.matrix.version < floor) {
+                failureLog?.record(VerificationFailureStore.ArtifactType.MATRIX, "below_floor", canonical)
                 return AcceptResult.Rejected("below_floor")
             }
         }
@@ -182,6 +189,7 @@ class MatrixStore(private val store: KeyValueStore) {
     fun clear() {
         store.remove(KEY)
         store.remove(KEY_ENROLLMENT_FLOOR)
+        failureLog?.clearOf(VerificationFailureStore.ArtifactType.MATRIX)
         _version.value = _version.value + 1
     }
 

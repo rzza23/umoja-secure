@@ -320,4 +320,33 @@ class IdentityChangeControllerTest {
         val blocked = g as IdentityChangeController.GateState.Blocked
         assertEquals("2026-10-17T00:00:00Z", blocked.notice.issuedAt)
     }
+
+    @Test
+    fun `TEST-DIAG-ACK-FAILURE-LOGGED records ack POST failure`() = runBlocking {
+        MatrixSigner.matrixDigestRaw(byteArrayOf())
+        val kp = keyPair()
+        val (canonical, sig) = signedNoticeBytes(kp)
+        val failureLog = VerificationFailureStore(InMemoryStore())
+        val store = newStore(kp)
+        val c = IdentityChangeController(
+            listNotices = { listOf(remoteNotice(canonical, sig)) },
+            postAck = { _, _, _ -> throw IdentityChangeApiException("invalid_signature") },
+            store = store,
+            sessionTokenProvider = defaultTokenProvider,
+            trustedKeys = setOf(kp.public),
+            failureLog = failureLog,
+        )
+        c.refresh()
+        val notice = store.pendingNotices().single()
+        val r = c.ackAndPost(notice, AckDecision.ACCEPT)
+        assertTrue(r.getOrNull() is IdentityChangeController.AckResult.Failure)
+
+        val entries = failureLog.entries()
+        assertEquals(1, entries.size)
+        assertEquals(
+            VerificationFailureStore.ArtifactType.ACK,
+            entries[0].artifactType,
+        )
+        assertEquals("invalid_signature", entries[0].reason)
+    }
 }

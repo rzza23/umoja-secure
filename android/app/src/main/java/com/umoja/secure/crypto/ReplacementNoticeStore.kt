@@ -54,6 +54,7 @@ class ReplacementNoticeStore(
     private val store: KeyValueStore,
     private val signingFn: (ByteArray) -> ByteArray,
     private val ackingDeviceId: String,
+    private val failureLog: VerificationFailureStore? = null,
 ) {
 
     companion object {
@@ -109,6 +110,7 @@ class ReplacementNoticeStore(
         trustedKeys: Set<PublicKey>,
     ): RecordResult {
         if (!ReplacementNoticeVerifier.verify(canonical, signatureBase64url, trustedKeys)) {
+            failureLog?.record(VerificationFailureStore.ArtifactType.NOTICE, "signature", canonical)
             return RecordResult.Invalid("signature")
         }
         val parsed = try {
@@ -116,6 +118,7 @@ class ReplacementNoticeStore(
                 jsonObjectToPlainMap(JSONObject(String(canonical, Charsets.UTF_8))),
             )
         } catch (_: Exception) {
+            failureLog?.record(VerificationFailureStore.ArtifactType.NOTICE, "malformed", canonical)
             return RecordResult.Invalid("malformed")
         }
         val noticeHash = sha256B64u(canonical)
@@ -229,6 +232,7 @@ class ReplacementNoticeStore(
     /** Remove all stored notices and ack state. Only the duress-wipe flow should call. */
     fun clear() {
         store.remove(KEY)
+        failureLog?.clearOf(VerificationFailureStore.ArtifactType.NOTICE)
     }
 
     // ---------- persistence ----------

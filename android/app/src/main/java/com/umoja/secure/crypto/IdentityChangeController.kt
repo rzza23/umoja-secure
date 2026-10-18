@@ -57,6 +57,7 @@ class IdentityChangeController(
     private val store: ReplacementNoticeStore,
     private val sessionTokenProvider: () -> String?,
     private val trustedKeys: Set<PublicKey>,
+    private val failureLog: VerificationFailureStore? = null,
 ) {
     private val _version = MutableStateFlow(0L)
     val version: StateFlow<Long> = _version.asStateFlow()
@@ -109,15 +110,20 @@ class IdentityChangeController(
         decision: AckDecision,
     ): Result<AckResult> = withContext(Dispatchers.IO) {
         val token = sessionTokenProvider()
-            ?: return@withContext Result.success(AckResult.Failure("no_session"))
+            ?: run {
+                failureLog?.record(VerificationFailureStore.ArtifactType.ACK, "no_session", ByteArray(0))
+                return@withContext Result.success(AckResult.Failure("no_session"))
+            }
         val signed = try {
             store.ack(notice.noticeHash, decision)
         } catch (_: Exception) {
+            failureLog?.record(VerificationFailureStore.ArtifactType.ACK, "ack_sign_failed", ByteArray(0))
             return@withContext Result.success(AckResult.Failure("ack_sign_failed"))
         }
         try {
             postAck(signed.canonicalUtf8, signed.signatureBase64url, token)
         } catch (e: IdentityChangeApiException) {
+            failureLog?.record(VerificationFailureStore.ArtifactType.ACK, e.code, signed.canonicalUtf8.toByteArray())
             return@withContext Result.success(AckResult.Failure(e.code))
         }
         store.markAcked(notice.noticeHash, decision)
