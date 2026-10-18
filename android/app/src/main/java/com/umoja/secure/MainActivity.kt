@@ -393,6 +393,18 @@ fun AppRoot(lifecycle: Lifecycle) {
                 // Authenticated, triggering the routing effect.
                 coroutineScope.launch { sessionStateManager.initialize() }
             },
+            onAuthFailed = { _code ->
+                // EnrollmentScreen's direct SessionManager.authenticate()
+                // call bypasses the state machine. On failure, re-invoke
+                // reauthenticate() so the state machine's AuthOutcome ->
+                // ReauthOutcome mapping fires (device_revoked ->
+                // State.Revoked, device_key_missing -> EnrollmentRequired,
+                // other -> NetworkFailure) and the routing effect sets the
+                // appropriate terminal screen. Without this, a revoked
+                // device shows "Auth error: device_revoked" on Enrollment
+                // and strands the user there.
+                coroutineScope.launch { sessionStateManager.reauthenticate() }
+            },
             onOpenEnrollmentQr = { openEnrollmentQr = true },
         )
 
@@ -449,15 +461,25 @@ fun AppRoot(lifecycle: Lifecycle) {
         AppScreen.Revoked -> TerminalMessageScreen(
             title = "Device revoked",
             message = "This device's access has been revoked by an " +
-                "administrator. Contact your administrator. If re-enrollment " +
-                "is authorized, you can re-enroll this device below.",
-            primaryLabel = "Re-enroll this device",
+                "administrator. Contact your administrator to request " +
+                "reactivation. Once they have reactivated this device, " +
+                "tap below and authenticate again.",
+            primaryLabel = "Log out and try again",
             onPrimary = {
+                // Revoked is a terminal state per ADR §2 — only the
+                // admin can move the device back to 'active' via
+                // POST /admin/devices/:id/resume. This button clears
+                // local session state so the device can re-authenticate
+                // once the admin has acted. Critically it does NOT
+                // remove device_id — doing so forces the next enrollment
+                // to POST /enrollment with the same public key, which
+                // collides on devices_key_unique (23505) and returns
+                // 409 device_already_enrolled. Preserving device_id
+                // keeps the device's identity intact so the next
+                // attempt is 'Authenticate', not 'Enroll'.
                 coroutineScope.launch {
                     SessionManager(context).clearSession()
                     sessionStateManager.clear()
-                    SecureStorage(context).remove("device_id")
-                    deviceId = null
                 }
             },
         )
@@ -501,6 +523,7 @@ fun EnrollmentScreen(
     deviceId: String?,
     onEnrolled: (String) -> Unit,
     onAuthenticated: () -> Unit,
+    onAuthFailed: (code: String) -> Unit,
     onOpenEnrollmentQr: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -591,8 +614,16 @@ fun EnrollmentScreen(
                                 isBusy = false
                                 when (outcome) {
                                     is SessionManager.AuthOutcome.Success -> onAuthenticated()
-                                    is SessionManager.AuthOutcome.Failure ->
+                                    is SessionManager.AuthOutcome.Failure -> {
                                         status = "Auth error: ${outcome.code}"
+                                        // Route failure through the state machine so a
+                                        // revoked device lands on the informative terminal
+                                        // screen instead of stranding here with a cryptic
+                                        // "Auth error: device_revoked" string. The state
+                                        // machine maps the code to State.Revoked and the
+                                        // routing effect sets AppScreen.Revoked.
+                                        onAuthFailed(outcome.code)
+                                    }
                                     SessionManager.AuthOutcome.NotEnrolled ->
                                         status = "Device not enrolled"
                                 }
