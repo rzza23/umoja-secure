@@ -1,7 +1,7 @@
 # US-ADD-001 — Approved Decisions and Parameters
 
 Document ID: US-ADD-001
-Version: 0.2 (draft for owner review)
+Version: 0.3 (conformance-swept 2026-10-18)
 Date: 2026-10-14
 Authority: Highest authority for approved decisions and parameters. Per UMOJA-SECURE-BUILD-MASTER.md §0, this document wins over US-MASTER-001 in any conflict.
 Status: Draft. Not yet in force. Subject to revision.
@@ -125,8 +125,8 @@ Do not implement, do not plan, do not add:
 | libsignal (Java client) | `org.signal:libsignal-client` | |
 | libsignal — prohibited | `@signalapp/libsignal-client` (npm) | Not the Android dependency. |
 | libsignal version policy | Pin exact after compatibility + security review | Maven latest 0.86.5; upstream 0.99.3; Signal-Android uses 0.94.0. Review in `docs/crypto/LIBSIGNAL-REVIEW.md`. |
-| Tor | `tor-android` (embedded) | **Not Orbot.** |
-| Local storage | SQLCipher | |
+| Tor | `tor-android` (embedded) | **Not Orbot.** *Build-time target; not yet shipped.* Current build uses `Socks5Bridge` to route SOCKS to host Tor (dev-mode via adb-reverse; release-mode via `TransportConfig.useTor = !BuildConfig.DEBUG`). Embedded `tor-android` pending. |
+| Local storage | SQLCipher | *Build-time target; not yet shipped.* Current build uses framework `SQLiteOpenHelper` with per-row AES-GCM plaintext (`MessageCrypto`, `LocalDatabaseHelper`); SQLCipher integration pending. |
 | Session token storage | Android Keystore-backed AES-256-GCM (direct) | DataStore may hold encrypted blob; key in Keystore; token never plaintext. |
 | Session token storage — prohibited | `androidx.security:security-crypto` / EncryptedSharedPreferences | Deprecated 1.1.0-alpha07, no drop-in replacement. |
 | Session token storage — prohibited | Tink (`com.google.crypto.tink:tink-android`) | Google runtime dependency. |
@@ -148,7 +148,7 @@ a specific task requires bulk query semantics.
 |---|---|---|
 | Supported hardware | Pixel 6a or newer | |
 | OS | GrapheneOS stable | |
-| Enrollment attestation | Android Key Attestation | GrapheneOS compatibility verified during TASK-P1-004. Fall back to admin-verified enrollment if attestation fails; document limitation. |
+| Enrollment attestation | Android Key Attestation | *Build-time target; not yet shipped.* Current enrollment is token-bound public key without attestation. GrapheneOS compatibility check via TASK-P1-004. Fall back to admin-verified enrollment if attestation fails; document limitation. |
 | MDM | None in Phase 1 | See Build Master §3.1. |
 
 ### §6.1 GrapheneOS OS-level controls (user-configured, not admin-controlled)
@@ -175,7 +175,7 @@ The app assumes they may or may not be enabled.
 | Signature encoding | base64url, no padding | |
 | Matrix version | Monotonic integer | Post-enrollment: `version ≤ highest_seen_version` rejected. |
 | Replacement enrollment | `enrollment_matrix_version_floor`, inclusive minimum | Accepted once at `version = floor`; strictly-greater thereafter. |
-| Recovery key version | Monotonic integer | `recovery_key_version ≤ highest_recovery_key_version` rejected. |
+| Recovery key version | Monotonic integer | `recovery_key_version ≤ highest_recovery_key_version` rejected. *Designed; no flow exercises it yet.* `ProvisioningKeys.kt` has the storage slot; TASK-P1-036 (Proposed) delivers the rotation/revocation notice handler. |
 | Hardware-backed Ed25519 | TEE-backed Keystore sufficient | **StrongBox is not required.** Tested separately. |
 
 ---
@@ -269,7 +269,8 @@ Do not guess.
 |---------|------|--------|
 | 0.1 | 2026-10-14 | Initial draft. Authored from Build Master v1.4.2 §3, §4, §6, §11 + owner attestation. |
 | 0.2 | 2026-10-14 | §8.1 added: interprets the `com.google.*` prohibition as covering Google-the-company runtime services, not every matching Maven groupId. Named carve-out: `com.google.zxing:core` (community Apache-2.0, no Google services). Future matching artifacts require individual review. |
+| 0.3 | 2026-10-18 | Conformance sweep (KI-005, Session W-1). Four amendments to the parameter register: §5 `Local storage` and `Tor` rows, §6 `Enrollment attestation` row, §7 `Recovery key version` row each marked build-time-target-or-designed, not-yet-shipped, with current-implementation notes. End-of-doc version line corrected from stale v0.1 to v0.3. Ten other parameter claims verified holding (Node.js 24, Fastify 5.12.5, PostgreSQL 16, session storage, minSdk 30, targetSdk 35/36 split, cryptographic protocol rules, prohibitions §8/§8.1). |
 
 ---
 
-— end of US-ADD-001 v0.1 draft —
+— end of US-ADD-001 v0.3 draft —
