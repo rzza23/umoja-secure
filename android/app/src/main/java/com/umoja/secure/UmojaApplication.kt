@@ -17,6 +17,19 @@ class UmojaApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // ADR-HARDENING-001 §3 startup assertion. Today
+        // TransportConfig.useTor is `val = !BuildConfig.DEBUG`, so
+        // this check is satisfied by construction — tautological on
+        // the current code. Its purpose is canary, not validation:
+        // it fails closed if a future change reintroduces mutability
+        // or adds a debug hook that a release build could
+        // accidentally inherit. Release builds must not operate
+        // over clearnet.
+        check(BuildConfig.DEBUG || TransportConfig.useTor) {
+            "Release build must use Tor (ADR-HARDENING-001 §3). " +
+                "TransportConfig.useTor=${TransportConfig.useTor}, " +
+                "BuildConfig.DEBUG=${BuildConfig.DEBUG}"
+        }
         webSocketClient = WebSocketClient(
             url = TransportConfig.wsUrl,
             appContext = applicationContext,
