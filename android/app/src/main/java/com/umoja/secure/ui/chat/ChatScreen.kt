@@ -81,16 +81,26 @@ fun ChatScreen(
     val gateState: IdentityChangeController.GateState =
         remember(version, peerDeviceId) { identityChangeController.gateFor(peerDeviceId) }
     val isIdentityBlocked = gateState is IdentityChangeController.GateState.Blocked
-    // Authorization gate (TASK-P1-038 C). Derived at composition time
-    // from the accepted matrix via SendGate (tested predicate, not a
-    // duplicated inline check). No reactivity signal because the matrix
-    // cannot change while ChatScreen is composed: AppRoot's only
-    // MatrixStore.accept call sits in LaunchedEffect(screen, deviceId),
-    // and ChatScreen's presence suppresses screen transitions. If P1-036
-    // (rotation) introduces push-based matrix updates, this remember key
-    // set needs a matrix version flow — added reactively, not
-    // speculatively here.
-    val isAuthorized = remember(peerDeviceId, matrixStore) {
+    // Authorization gate (TASK-P1-038 C, D-1). Derived via SendGate
+    // (tested predicate, not an inline check). Keyed on
+    // matrixStore.version so that AppRoot's async matrix fetch — which
+    // completes after the chat may already be composed on cold start —
+    // propagates a re-derivation when it lands in MatrixStore.accept().
+    //
+    // Without the version key this was a real bug, not a trade-off:
+    // the initial fetch runs inside a LaunchedEffect(screen, deviceId)
+    // in AppRoot. A user navigating into chat before that fetch
+    // completes composes with the stale matrix, computes
+    // isAuthorized=false, and — because neither peerDeviceId nor
+    // matrixStore changes when the fetch eventually lands — never
+    // re-derives. The banner stayed visible until ChatScreen was
+    // unmounted and re-composed. Caught in emulator acceptance of
+    // Case 2 (authorized peer still showed banner).
+    //
+    // Same version-flow idiom as IdentityChangeController.version
+    // (Session K, eea1af7): write-notification, not a data cache.
+    val matrixVersion by matrixStore.version.collectAsState()
+    val isAuthorized = remember(peerDeviceId, matrixVersion) {
         SendGate.authorized(matrixStore.permittedContacts(), peerDeviceId)
     }
     val isBlocked = isIdentityBlocked || !isAuthorized

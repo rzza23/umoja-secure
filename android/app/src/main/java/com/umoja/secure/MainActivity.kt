@@ -208,7 +208,7 @@ fun AppRoot(lifecycle: Lifecycle) {
                         }
                         val remote = api.fetch(token)
                         if (remote != null) {
-                            MatrixStore(SecureStorage(context)).accept(
+                            matrixStore.accept(
                                 canonical = remote.canonicalUtf8.toByteArray(Charsets.UTF_8),
                                 signatureBase64url = remote.signatureBase64url,
                                 trustedKeys = setOf(provisioningPublicKey()),

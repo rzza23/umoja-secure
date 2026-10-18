@@ -1,6 +1,9 @@
 package com.umoja.secure.crypto
 
 import com.umoja.secure.storage.KeyValueStore
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.PublicKey
@@ -41,6 +44,22 @@ import java.util.Base64
  * ADR: §3, §4, §7.1.4
  */
 class MatrixStore(private val store: KeyValueStore) {
+
+    /**
+     * Write-notification, not a data cache. Bumped after every successful
+     * [accept] and [clear]. UI observers use it to re-derive state
+     * (e.g. ChatScreen's send-gate banner) rather than caching the
+     * matrix contents. Same pattern as
+     * [com.umoja.secure.crypto.IdentityChangeController.version].
+     *
+     * TASK-P1-038 D-1: without this signal, ChatScreen's composition-time
+     * derivation goes stale when AppRoot's async matrix fetch completes
+     * after the chat is already open. The initial-fetch race is not
+     * hypothetical — it fires on every cold start where the user
+     * navigates into chat before the fetch round-trip completes.
+     */
+    private val _version = MutableStateFlow(0L)
+    val version: StateFlow<Long> = _version.asStateFlow()
 
     companion object {
         /** SecureStorage key holding the JSON envelope. */
@@ -99,6 +118,7 @@ class MatrixStore(private val store: KeyValueStore) {
             }
         }
         store.put(KEY, encodeEnvelope(canonical, signatureBase64url))
+        _version.value = _version.value + 1
         return AcceptResult.Accepted(parsed.matrix.version)
     }
 
@@ -162,6 +182,7 @@ class MatrixStore(private val store: KeyValueStore) {
     fun clear() {
         store.remove(KEY)
         store.remove(KEY_ENROLLMENT_FLOOR)
+        _version.value = _version.value + 1
     }
 
     // ---------- envelope encoding ----------
