@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session U-2 — backlog finish: migration 017 (enrollment_tokens FK ON DELETE SET NULL) + test, USER-ONBOARDING.md written (closes KI-006), KI-005 marked standing condition, double-fetch dedupe + Compose-test note named as standing deferrals. Backend 250 → 251. Android JVM 212 unchanged. **No blocking work remains; backlog is closed except for standing conditions.** Next: Phase 2 preparation or nothing — choice, not obligation.)
+Last updated: 2026-10-18 (Session U-3 — KI-005 conformance sweep: AUTH-SPEC-001 v0.1 → v0.2 + TASK-P1-042 filed. One real gap (WS revocation listener reconnect per §9.3 defense 2 unimplemented; 5-min revalidation is the mid-run backstop) — filed as P1-042. Four spec amendments (§6.2 precision, §9.2/§9.3 split+rephrase, §10.2 nullability, §10.3 mechanism). Three refuted hypotheses (LISTEN/NOTIFY prompt-wake exists in ws/revocation.ts and is wired; 5-min revalidation IS a per-connection timer; single-consumer property holds). Backend 251, Android JVM 212, androidTest 46 — all unchanged (doc-only). KI-005 now 1 of 4 docs swept. **No blocking work remains.** Next: KI-005 continuation (US-ADD-001 / US-MASTER-001 / THREAT-MODEL-001) OR TASK-P1-042 OR Phase 2 OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -2729,6 +2729,67 @@ backlog items closed at U-1 and U-2. USER-ONBOARDING.md closed at
 U-2. What remains is Phase 2 preparation (choice, not obligation)
 and standing conditions (KI-005, double-fetch, instrumented tests).
 
+
+### Session U-3 — KI-005 sweep: AUTH-SPEC-001 v0.1 → v0.2 + TASK-P1-042 filed (2026-10-18)
+
+First document of the KI-005 four-document conformance sweep. Method:
+read every auth-related file at HEAD, compare each spec claim against
+actual behavior, classify each divergence. Doc-only session; no code
+written, no tests run. One commit:
+
+- `349b268` — **AUTH-SPEC-001 v0.1 → v0.2 + TASK-P1-042 filed.**
+  Four claims amended to match code, one real gap filed, three
+  hypotheses refuted. US-TASK-P1-001 v0.6 → v0.7 (total count
+  42 → 43).
+
+**Sweep verdict.** One real gap (F13): §9.3 defense (2) — "full
+reconciliation on listener reconnect" — is unimplemented.
+`ws/revocation.ts`'s `on('error')` handler logs but does not
+reconnect or re-reconcile. Mid-run listener drops are covered by
+the 5-minute revalidation cycle (defense 3), not by
+reconciliation-on-reconnect. The WS-close timing claim in §9.2 is
+≤5s when the listener is healthy, ≤5min when it's disconnected.
+Filed as TASK-P1-042 with three named tests.
+
+Two doc-drift findings. §10.2 floor nullability: migration 014's
+nullable-INTEGER-with-CHECK is correct; the spec's `NOT NULL` would
+make fresh-org first enrollment impossible. §10.3 consumption
+mechanism: `SELECT FOR UPDATE` + INSERT + UPDATE inside
+`withTransaction`; single-consumer property holds, the spec's
+single-UPDATE prose was wrong.
+
+One precision finding. §6.2 gains v0.2 notes on the 64-byte sig
+length check, the `public_key_alg !== 'ed25519' → 501
+unsupported_algorithm` branch, and the `session_context` field
+(always null in Phase 1, but in canonical bytes).
+
+**Three hypotheses from the prediction table refuted by reading:**
+
+1. §10.3 atomicity "hole" — `FOR UPDATE` serializes; no TOCTOU.
+2. §6.3 revalidation "hole" — the 5-min revalidation loop IS a real
+   `setInterval` in `ws/server.ts`, not replaced by 040's reactive
+   auth.
+3. §9.2 LISTEN/NOTIFY "hole" — exists in `ws/revocation.ts`,
+   started from `src/server.ts:14`, fired by `admin/devices.ts:95`
+   on revocation. My block-2 conclusion of "no LISTEN/NOTIFY
+   anywhere" was a scope error: read `ws/server.ts` alone,
+   concluded about `ws/` as a directory. `ws/revocation.ts` sat
+   next to it unread.
+
+**The refutation worth remembering.** Two of the three predicted
+"holes" were false because the code is more careful than the spec
+prose. The real gap (F13) was the one I hadn't emphasized —
+reconciliation-on-reconnect was named in the spec, but I didn't
+read `ws/revocation.ts`'s error handler carefully enough to catch
+it until block 4. Same shape as Session P's D-1 finding: the case
+that distinguishes correct from sticky-open is the one not in the
+initial hypothesis set.
+
+**Scope honestly stated.** One document of four swept. Remaining:
+US-ADD-001, US-MASTER-001, THREAT-MODEL-001. Each is same-shape
+reconnaissance (session per document). No blocking work depends on
+any of them.
+
 ---
 
 ## 4. Known issues
@@ -2748,18 +2809,21 @@ Shut down emulator cleanly (menu -> Power off). Or accept re-enrollment.
 Resolved by commit `e6eed9b`. File has `generated: true`, all six
 W-series vectors populated.
 
-### KI-005 (STANDING CONDITION): Requirements layer authored after the code
-The four canonical documents were written 2026-10-14. Conformance
-sweeps have been partial.
+### KI-005 (PARTIAL SWEEP 2026-10-18): Requirements layer authored after the code
+One of four canonical documents swept. AUTH-SPEC-001 v0.1 → v0.2
+(commit `349b268`, 2026-10-18, Session U-3). Findings: one real
+gap (§9.3 defense 2, reconciliation-on-listener-reconnect, filed
+as TASK-P1-042), two doc-drift amendments (§10.2 floor
+nullability, §10.3 consumption mechanism), one precision amendment
+(§6.2). Three hypotheses from the sweep's prediction table refuted
+by reading the actual code.
 
-**Standing condition, not a closable task.** A full conformance
-sweep means re-reading every canonical document (US-ADD-001,
-US-MASTER-001, AUTH-SPEC-001, THREAT-MODEL-001) against the current
-codebase and either closing gaps or amending the docs. This has
-never been scheduled as a session; it's a multi-session project.
-Nothing in the current backlog is blocked on it. If a future
-session runs the sweep, that session replaces this entry with its
-findings.
+**Remaining:** US-ADD-001, US-MASTER-001, THREAT-MODEL-001. Each
+is a session of reconnaissance-plus-amendment, same shape as U-3.
+No blocking work depends on any of them. When a future session
+sweeps one of the remaining three, that session replaces this
+entry with its findings. When all four are swept this entry
+becomes RESOLVED.
 
 ### KI-006 (RESOLVED 2026-10-18, Session U-2): USER-ONBOARDING.md written
 `docs/reference/USER-ONBOARDING.md` written at Session U-2.
@@ -3419,6 +3483,15 @@ Original phrasing preserved below for history:
 
     **No blocking tasks remain.** The next session's shape is a
     choice, not a backlog obligation:
+    - **KI-005 continuation** — sweep one of US-ADD-001,
+      US-MASTER-001, THREAT-MODEL-001 (AUTH-SPEC-001 done
+      2026-10-18, U-3). Same reconnaissance-plus-amendment shape
+      as U-3: read spec verbatim, read code at HEAD, classify
+      each divergence, amend + file. One document per session.
+    - **TASK-P1-042** — WS revocation listener reconnect +
+      re-reconcile. Filed from the AUTH-SPEC-001 sweep. Medium
+      priority, small scope (~20 lines + 3 tests). Closes the gap
+      AUTH-SPEC-001 §9.3 defense 2 names.
     - **Phase 2 preparation** — dependency version review, libsignal
       upgrade path, networking layer suspend refactor (removes the
       runBlocking bridge in HttpClient.executeWithRetry per 040-D-1's
@@ -4181,6 +4254,43 @@ Rebuild after flipping — read at HttpClient construction time.
   structure (line positions, brace depth) and compute
   indentation from the file, never paste whitespace or full
   bodies into Python strings.**
+
+- **Scope a negative finding to files actually read, not to the
+  directory they're in.** Session U-3's block-2 read of
+  `ws/server.ts` produced the statement "no `LISTEN/NOTIFY`
+  anywhere in `ws/`" — true of `server.ts`, generalized to the
+  directory. The mechanism lives in `ws/revocation.ts`, which
+  block 3's `find` listed and I did not read before concluding.
+  When a negative finding drives a session decision (file a task,
+  amend a spec), verify the negative against every file in the
+  scope the finding covers, not just the one you read. Cost of
+  one extra `cat` is trivial; cost of a wrong classification is
+  a session's worth of follow-up. Same class as Session M's
+  "empty logcat is not evidence of absence" — but at the
+  conclusion layer, not the search layer.
+
+- **Preflight-first re-earns its keep on prose-anchor wrap bugs.**
+  Session U-3's first edit script anchored on "the newly enrolled
+  device will accept at first enrollment" — the file wraps the
+  sentence at "the\nnewly". Preflight returned `count=0` for that
+  anchor; nothing was written. This is §7's existing "prose anchors
+  wrapping mid-phrase" rule re-earned — which is the point.
+  Discipline rules don't survive by citation; they survive by
+  costing nothing when they fire. The pattern generalizes: when
+  the file's own wrapping is unknown, anchor on a fragment
+  entirely on one line, or use a full-line anchor with explicit
+  `\n` boundaries.
+
+- **macOS `wc -l` pads output to 8 columns; `$(... | wc -l)` is
+  not comparable to a bare `"2"`.** Session U-3's block-8 first
+  attempt: `if [ "$(git status ... | wc -l)" != "2" ]` fired
+  `ABORT: expected exactly 2 modified files` on a clean tree
+  because the actual value was `"       2"` (7 spaces + `2`). The
+  abort was correct behavior from a broken gate — no writes
+  reached the repo. Fix: `grep -c .` (counts non-empty lines, no
+  padding) or `| tr -d ' '`. Any shell count-check that compares
+  command substitution against a bare number needs this.
+  Portable across every repo; not a Umoja-specific fix.
 
 Current verified state: **212 Android JVM tests** (2026-10-18),
 **46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
