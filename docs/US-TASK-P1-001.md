@@ -1,9 +1,9 @@
-# US-TASK-P1-001-v0.6 — Phase 1 Task Registry Reconciliation
+# US-TASK-P1-001-v0.7 — Phase 1 Task Registry Reconciliation
 
 Document ID: US-TASK-P1-001
-Version: 0.6
+Version: 0.7
 Date: October 2026
-Supersedes: v0.5
+Supersedes: v0.6
 Purpose: Reconcile the Phase 1 task registry with UMOJA-SECURE-BUILD-MASTER.md v1.4.2.
 Authority: Derived from US-MASTER-001 + US-ADD-001. Cannot override them.
 
@@ -410,6 +410,50 @@ Authority: Derived from US-MASTER-001 + US-ADD-001. Cannot override them.
 
 ---
 
+### TASK-P1-042: WS revocation listener reconnect + re-reconcile
+
+**Phase:** 1
+**Priority:** Medium
+**Dependencies:** TASK-P1-040
+**Security classification:** Internal
+
+**Objective and non-goals:**
+- Close AUTH-SPEC-001 §9.3 defense (2) gap identified in the
+  2026-10-18 conformance sweep. The `ws/revocation.ts` listener is a
+  single `LISTEN device_revoked` connection. On connection error, the
+  listener logs the error and does not reconnect. The reconciliation
+  pass (`reconcileRevokedDevices`) runs only at process startup, not
+  on listener reconnect. A revocation that lands during the
+  listener-disconnected window closes on the next 5-minute
+  revalidation cycle, not within the ≤5s guarantee.
+- Do NOT change the notification payload or channel name. Do NOT
+  touch the 5-minute revalidation cycle (current backstop; remains
+  in place).
+- Do NOT introduce a second LISTEN connection or a Pub/Sub
+  replacement. The fix is a reconnect + re-reconcile loop on the
+  same single connection.
+
+**Acceptance criteria:**
+- [ ] On `LISTEN` connection error, the listener schedules a bounded
+      reconnect (fixed interval or exponential backoff; implementation
+      choice) without restarting the backend process.
+- [ ] On successful reconnect, `reconcileRevokedDevices()` runs before
+      the listener resumes consuming notifications, so any revocation
+      that landed during the gap closes active connections immediately.
+- [ ] `stopRevocationListener()` cancels any pending reconnect so the
+      process shuts down cleanly.
+- [ ] AUTH-SPEC-001 §9.3 is amended (v0.3) to describe the
+      reconnect-and-reconcile behavior. The v0.2 amendment
+      (2026-10-18) states the current startup-only behavior; this
+      task closes that stated gap.
+
+**Required tests:**
+- TEST-REVOCATION-RECONNECT-ON-ERROR
+- TEST-REVOCATION-RECONCILES-AFTER-RECONNECT
+- TEST-REVOCATION-STOP-CANCELS-RECONNECT
+
+**Status:** Proposed — filed from KI-005 AUTH-SPEC-001 sweep, 2026-10-18
+
 ---
 
 ## §B — UPDATED TASKS
@@ -586,7 +630,7 @@ comparison is admin-error-catching, not adversary-catching.
 
 ---
 
-## §C — REGISTRY INDEX (v0.6 FINAL)
+## §C — REGISTRY INDEX (v0.7 FINAL)
 
 | ID | Title | Stage | Status |
 |----|-------|-------|--------|
@@ -632,8 +676,9 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-039 | Release-build hardening | 1 | Proposed |
 | TASK-P1-040 | Session lifecycle & revocation UX | 1 | Proposed |
 | TASK-P1-041 | Failed-verification operator logging | 1 | Proposed |
+| TASK-P1-042 | WS revocation listener reconnect + re-reconcile | 1 | Proposed |
 
-**Total Phase 1 task identifiers:** 42 (001–020, 021a, 021b, 022–041).
+**Total Phase 1 task identifiers:** 43 (001–020, 021a, 021b, 022–042).
 
 **Execution order (dependency-respecting):**
 TASK-P1-001 → TASK-P1-002 → TASK-P1-027 → TASK-P1-032 → TASK-P1-003 → TASK-P1-034 → TASK-P1-004 → TASK-P1-005 → TASK-P1-006 → TASK-P1-013 → TASK-P1-007 → TASK-P1-008 → TASK-P1-025 → TASK-P1-026 → TASK-P1-029 → TASK-P1-033 → TASK-P1-035 → TASK-P1-014 → TASK-P1-015 → TASK-P1-016 → TASK-P1-009 → TASK-P1-010 → TASK-P1-011 → TASK-P1-012 → TASK-P1-019 → TASK-P1-020 → TASK-P1-021a → TASK-P1-021b → TASK-P1-030 → TASK-P1-017 → TASK-P1-018 → TASK-P1-022 → TASK-P1-023 → TASK-P1-024 → TASK-P1-028 → TASK-P1-031
