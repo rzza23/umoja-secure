@@ -13,7 +13,12 @@ import java.util.UUID
  */
 class MessageStore(context: Context) {
 
-    private val helper = LocalDatabaseHelper(context)
+    // Singleton helper (LocalDatabaseHelper.get) — all MessageStore
+    // instances share one SQLiteDatabase handle. Previously each
+    // construction opened its own handle with no close(), leaking a
+    // SQLiteConnection per MessageStore instance. Session U-1 fix;
+    // see LocalDatabaseHelper KDoc for the leak reproduction.
+    private val helper = LocalDatabaseHelper.get(context)
     private val crypto = MessageCrypto()
 
     // ============================================================

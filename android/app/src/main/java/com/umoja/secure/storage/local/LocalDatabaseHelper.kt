@@ -16,7 +16,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * Migration to SQLCipher is a drop-in replacement of this helper; the schema
  * and repository API stay unchanged.
  */
-class LocalDatabaseHelper(context: Context) :
+class LocalDatabaseHelper private constructor(context: Context) :
     SQLiteOpenHelper(context.applicationContext, DB_NAME, null, DB_VERSION) {
 
     companion object {
@@ -25,6 +25,34 @@ class LocalDatabaseHelper(context: Context) :
 
         const val TABLE_MESSAGES = "messages"
         const val TABLE_PEERS = "peers"
+
+        @Volatile
+        private var INSTANCE: LocalDatabaseHelper? = null
+
+        /**
+         * Process-wide singleton accessor. SQLiteOpenHelper owns one
+         * SQLiteDatabase handle; constructing a fresh helper per caller
+         * opens a fresh handle, and if no one closes it the
+         * SQLiteConnectionPool logs "was leaked!" at finalization. That
+         * was Session Q's observation, reproduced Session U-1: two
+         * leaked connections after a ChatScreen visit + GC.
+         *
+         * This accessor is the fix. All MessageStore instances share
+         * the one helper, one handle, one connection pool. MessageStore
+         * still constructs per-call (its `helper` field reads this
+         * singleton), so call sites are unchanged.
+         *
+         * Double-checked locking matches the standard Android pattern
+         * for this (e.g. the SQLiteOpenHelper in architecture samples).
+         * `@Volatile` ensures the reads-after-publish see a fully
+         * constructed instance. Synchronized block only on the
+         * cold-start path.
+         */
+        fun get(context: Context): LocalDatabaseHelper =
+            INSTANCE ?: synchronized(this) {
+                INSTANCE ?: LocalDatabaseHelper(context.applicationContext)
+                    .also { INSTANCE = it }
+            }
     }
 
     override fun onCreate(db: SQLiteDatabase) {
