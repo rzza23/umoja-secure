@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.umoja.secure.auth.SessionManager
+import com.umoja.secure.auth.SessionStateManager
+import com.umoja.secure.auth.StoredSession
 import com.umoja.secure.messaging.MessagingService
 import com.umoja.secure.storage.SecureStorage
 import com.umoja.secure.transport.EnrollmentApi
@@ -42,6 +44,8 @@ import com.umoja.secure.transport.EnrollmentException
 import com.umoja.secure.transport.EnrollmentRequest
 import com.umoja.secure.transport.HttpClient
 import com.umoja.secure.ui.admin.AdminScreen
+import com.umoja.secure.ui.common.LoadingScreen
+import com.umoja.secure.ui.common.TerminalMessageScreen
 import com.umoja.secure.ui.diagnostics.DiagnosticsScreen
 import com.umoja.secure.ui.navigation.MainNavigation
 import com.umoja.secure.ui.navigation.Tab
@@ -82,6 +86,13 @@ private sealed class AppScreen {
     object Authenticated : AppScreen()
     object Admin : AppScreen()
     object Diagnostics : AppScreen()
+    // TASK-P1-040-C additions. Loading covers Authenticating and
+    // Reauthenticating (transient); Revoked/EnrollmentRequired are
+    // terminal per ADR §2; NetworkFailure is retryable per ADR §1.
+    object Loading : AppScreen()
+    object Revoked : AppScreen()
+    object NetworkFailure : AppScreen()
+    object EnrollmentRequired : AppScreen()
 }
 
 @Composable
@@ -90,7 +101,6 @@ fun AppRoot(lifecycle: Lifecycle) {
     val app = context.applicationContext as UmojaApplication
 
     var deviceId by remember { mutableStateOf<String?>(null) }
-    var sessionExpiresAt by remember { mutableStateOf<String?>(null) }
     var role by remember { mutableStateOf<String?>(null) }
     var screen by remember { mutableStateOf<AppScreen>(AppScreen.Enrollment) }
     var selectedTab by remember { mutableStateOf(Tab.Conversations) }
@@ -105,6 +115,53 @@ fun AppRoot(lifecycle: Lifecycle) {
     // a single reference and a natural seam for future reactivity
     // (MatrixStore.version StateFlow) if P1-036 rotation ever needs it.
     val matrixStore = remember(deviceId) { MatrixStore(SecureStorage(context)) }
+
+    // Session state machine (TASK-P1-040). Single source of truth for
+    // authentication state. Fresh instance per deviceId; reauth and
+    // session provider capture a per-instance SessionManager.
+    // Non-null even pre-enrollment -- initialize() returns
+    // Unauthenticated when no session exists, which the state-driven
+    // routing effect translates to AppScreen.Enrollment. Kept in
+    // lockstep with matrixStore and identityChangeController: all
+    // three re-created when deviceId transitions null -> non-null.
+    //
+    // AuthOutcome -> ReauthOutcome mapping rationale (named here so
+    // it is not re-litigated in 040-D):
+    //   - Success                -> Success (1:1)
+    //   - Failure("device_revoked")  -> DeviceRevoked (040-A backend code)
+    //   - Failure("device_key_missing") -> EnrollmentRequired (local state corrupt)
+    //   - NotEnrolled            -> EnrollmentRequired (device_id gone)
+    //   - Failure(other codes)   -> NetworkFailure (retryable)
+    // The "other" bucket includes `unauthorized` on purpose: the
+    // client cannot distinguish active+sig-fail from a genuine
+    // session invalid without more information than the wire carries.
+    // Mapping it to EnrollmentRequired would strand a user for a
+    // transient issue (clock skew, challenge expiry). Retryable is
+    // the safer default; ADR §1 invariant (never strand fielded
+    // user) drives the choice.
+    val sessionStateManager = remember(deviceId) {
+        val sessionManager = SessionManager(context)
+        SessionStateManager(
+            reauth = {
+                when (val outcome = sessionManager.authenticate()) {
+                    is SessionManager.AuthOutcome.Success ->
+                        SessionStateManager.ReauthOutcome.Success(
+                            StoredSession(outcome.sessionToken, outcome.expiresAt, outcome.role)
+                        )
+                    is SessionManager.AuthOutcome.Failure ->
+                        when (outcome.code) {
+                            "device_revoked" -> SessionStateManager.ReauthOutcome.DeviceRevoked
+                            "device_key_missing" -> SessionStateManager.ReauthOutcome.EnrollmentRequired
+                            else -> SessionStateManager.ReauthOutcome.NetworkFailure(outcome.code)
+                        }
+                    SessionManager.AuthOutcome.NotEnrolled ->
+                        SessionStateManager.ReauthOutcome.EnrollmentRequired
+                }
+            },
+            sessionProvider = { sessionManager.currentSession() },
+        )
+    }
+    val sessionState by sessionStateManager.state.collectAsState()
 
     val wsState by app.webSocketClient.state.collectAsState()
     val coroutineScope = rememberCoroutineScope()
@@ -222,30 +279,53 @@ fun AppRoot(lifecycle: Lifecycle) {
         }
     }
 
-    // Initial state load
+    // Initial state load: read device_id for the remember(deviceId)
+    // blocks (matrixStore, identityChangeController,
+    // sessionStateManager). Session lifecycle is driven by the state
+    // machine below; this effect only populates the compose-side
+    // deviceId that the remembered instances key off.
     LaunchedEffect(Unit) {
-        val s = SecureStorage(context)
-        deviceId = s.get("device_id")
-        sessionExpiresAt = s.get("session_expires_at")
-        role = s.get("session_role")
-        screen = when {
-            deviceId == null -> AppScreen.Enrollment
-            sessionExpiresAt == null -> AppScreen.Enrollment
-            else -> AppScreen.Authenticated
+        deviceId = SecureStorage(context).get("device_id")
+    }
+
+    // Initialize the state machine whenever the remembered instance
+    // changes. Triggered by deviceId null -> non-null (post-enroll)
+    // and non-null -> null (post re-enroll reset). initialize() reads
+    // sessionProvider, checks expiry, and either lands on
+    // Authenticated or fires reauth. Per ADR-HARDENING-001 §2's
+    // app-start ruling: an expired session re-authenticates silently
+    // rather than routing the user to a button tap.
+    LaunchedEffect(deviceId, sessionStateManager) {
+        if (deviceId != null) {
+            sessionStateManager.initialize()
         }
     }
 
-    // Re-evaluate when the session changes
-    LaunchedEffect(sessionExpiresAt, deviceId) {
-        val s = SecureStorage(context)
-        role = s.get("session_role")
-        if (sessionExpiresAt != null && deviceId != null &&
-            screen !is AppScreen.Admin && screen !is AppScreen.Diagnostics
-        ) {
-            screen = AppScreen.Authenticated
-        }
-        if (sessionExpiresAt == null && screen is AppScreen.Authenticated) {
-            screen = AppScreen.Enrollment
+    // State-driven routing. This is the ONLY place that derives
+    // `screen` from session state. The Authenticated branch preserves
+    // UI sub-navigation (Admin, Diagnostics) so a reauth cycle does
+    // not kick the user out of a sub-screen mid-flow. `role` is
+    // re-read on Authenticated so onOpenAdmin gating tracks a
+    // reauthenticated session without extra state.
+    LaunchedEffect(sessionState, deviceId) {
+        when (val s = sessionState) {
+            is SessionStateManager.State.Unauthenticated -> {
+                role = null
+                screen = AppScreen.Enrollment
+            }
+            is SessionStateManager.State.Authenticating,
+            is SessionStateManager.State.Reauthenticating -> {
+                screen = AppScreen.Loading
+            }
+            is SessionStateManager.State.Authenticated -> {
+                role = SecureStorage(context).get("session_role")
+                if (screen !is AppScreen.Admin && screen !is AppScreen.Diagnostics) {
+                    screen = AppScreen.Authenticated
+                }
+            }
+            is SessionStateManager.State.Revoked -> screen = AppScreen.Revoked
+            is SessionStateManager.State.NetworkFailure -> screen = AppScreen.NetworkFailure
+            is SessionStateManager.State.EnrollmentRequired -> screen = AppScreen.EnrollmentRequired
         }
     }
 
@@ -270,27 +350,37 @@ fun AppRoot(lifecycle: Lifecycle) {
         AppScreen.Enrollment -> EnrollmentScreen(
             deviceId = deviceId,
             onEnrolled = { newDeviceId ->
+                // Update the compose-side deviceId; the
+                // remember(deviceId) blocks reconstruct, and
+                // LaunchedEffect(deviceId) fires initialize() which
+                // routes via the state-driven effect.
                 deviceId = newDeviceId
-                screen = AppScreen.Enrollment  // will re-route to auth on next state read
             },
             onAuthenticated = {
-                val store = SecureStorage(context)
-                sessionExpiresAt = store.get("session_expires_at")
-                role = store.get("session_role")
-                screen = AppScreen.Authenticated
+                // SessionManager.authenticate() already wrote the
+                // token to storage. initialize() reads it back
+                // through sessionProvider and transitions state to
+                // Authenticated, triggering the routing effect.
+                coroutineScope.launch { sessionStateManager.initialize() }
             },
             onOpenEnrollmentQr = { openEnrollmentQr = true },
         )
 
         AppScreen.Authenticated -> MainNavigation(
             onLogout = {
-                val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
-                scope.launch {
+                // clearSession() removes the token; clear() resets the
+                // state machine so its StateFlow stops reporting
+                // Authenticated. The routing effect (keyed on
+                // sessionState) transitions to AppScreen.Enrollment.
+                // Wrapped in coroutineScope.launch so the state reset
+                // sequences after storage clear -- the previous
+                // version created an unbounded CoroutineScope(IO)
+                // and fire-and-forgot, which was a lifecycle leak
+                // (survives navigation past the composable).
+                coroutineScope.launch {
                     SessionManager(context).clearSession()
+                    sessionStateManager.clear()
                 }
-                sessionExpiresAt = null
-                role = null
-                screen = AppScreen.Enrollment
             },
             onOpenAdmin = if (role == "admin" || role == "owner") {
                 {
@@ -322,6 +412,56 @@ fun AppRoot(lifecycle: Lifecycle) {
             },
             onDisconnectWs = { app.webSocketClient.disconnect() },
             onBack = { screen = AppScreen.Authenticated },
+        )
+
+        AppScreen.Loading -> LoadingScreen()
+
+        AppScreen.Revoked -> TerminalMessageScreen(
+            title = "Device revoked",
+            message = "This device's access has been revoked by an " +
+                "administrator. Contact your administrator. If re-enrollment " +
+                "is authorized, you can re-enroll this device below.",
+            primaryLabel = "Re-enroll this device",
+            onPrimary = {
+                coroutineScope.launch {
+                    SessionManager(context).clearSession()
+                    sessionStateManager.clear()
+                    SecureStorage(context).remove("device_id")
+                    deviceId = null
+                }
+            },
+        )
+
+        AppScreen.NetworkFailure -> TerminalMessageScreen(
+            title = "Connection lost",
+            message = "Could not reach the server. Check your network " +
+                "connection and try again.",
+            primaryLabel = "Retry",
+            onPrimary = {
+                coroutineScope.launch { sessionStateManager.reauthenticate() }
+            },
+            secondaryLabel = "Log out",
+            onSecondary = {
+                coroutineScope.launch {
+                    SessionManager(context).clearSession()
+                    sessionStateManager.clear()
+                }
+            },
+        )
+
+        AppScreen.EnrollmentRequired -> TerminalMessageScreen(
+            title = "Re-enrollment required",
+            message = "The local session state is inconsistent. " +
+                "Re-enrollment is required to continue.",
+            primaryLabel = "Re-enroll this device",
+            onPrimary = {
+                coroutineScope.launch {
+                    SessionManager(context).clearSession()
+                    sessionStateManager.clear()
+                    SecureStorage(context).remove("device_id")
+                    deviceId = null
+                }
+            },
         )
     }
 }
