@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session Y-1 — doc-hygiene pass closing X-1's own last paragraph. Two pending §7 lessons added (set -e + grep -c interaction; regex capture-group failure mode). §2 backend count corrected 247 → 254 / 16 → 20 files. §7 verified state corrected 251 → 254. R-4's `bfe9fee` placeholder filled with `bfe9fee` (two occurrences). Backend 254, Android JVM 212, androidTest 46 — all unchanged (doc-only). **No blocking work remains.** Next: Phase 2 OR nothing — choice, not obligation.)
+Last updated: 2026-10-18 (Session Z-1 — two standing deferrals addressed. (1) Double-matrix-fetch dedupe RESOLVED via routing-layer fix at `2637610`: Reauthenticating branch becomes no-op; screen is preserved during silent reauth; /me/matrix count dropped 3 -> 2 per 401-triggered reauth cycle. The U-2 cost > payoff ruling was correct given that ruling's assumed MutableStateFlow fix; the actual fix was smaller and also corrected a UX drift from ADR-HARDENING-001 §2's "silent reauth" intent. (2) Instrumented Compose tests PARTIAL at `bf13dcc`: AckDialog covered (11 Compose tests, first Compose test in the project), Espresso bumped 3.5.1 → 3.7.0 to fix an InputManager.getInstance removal on API 33+. Admin/ChatScreen coverage re-scoped to require ViewModel extraction — a refactor, not a test. Backend 254, Android JVM 212, androidTest 46 → 57. **No blocking work remains.** Next: Phase 2 OR Compose refactor session OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -94,9 +94,11 @@ Endpoints:
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
 - **JVM unit tests: 212** (verified 2026-10-18 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests as the most recent addition. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests.)
-- **androidTest: 6 files, 46 tests** (verified 2026-10-15 from
-  connectedAndroidTest XML; was wrongly recorded as 0 files in an
-  earlier handoff — see KI-013)
+- **androidTest: 7 files, 57 tests** (verified 2026-10-18 from
+  connectedAndroidTest XML; Session Z-1 added `AckDialogTest.kt` with
+  11 Compose tests — first non-crypto androidTest and first Compose
+  test in the project. Prior count 6 files / 46 tests from 2026-10-15;
+  was wrongly recorded as 0 files in an earlier handoff — see KI-013)
 
 Note: a prior handoff claimed 98 Android tests. That was wrong. The
 actual prior count was ~1 (ExampleUnitTest only); the crypto work
@@ -3192,6 +3194,65 @@ persistent tracker; the handoff is.
 unchanged (doc-only session).
 
 
+
+### Session Z-1 — two standing deferrals addressed (2026-10-18)
+
+Both U-2 standing deferrals closed or re-scoped on evidence, not
+convenience. Two commits:
+
+- `2637610` — **Double-matrix-fetch dedupe fixed.** Routing-layer
+  fix, not the MutableStateFlow the R-5 note sketched. Splits the
+  combined `Authenticating, Reauthenticating` branch in AppRoot's
+  routing effect; `Reauthenticating` becomes a no-op so `screen` does
+  not oscillate during silent reauth. Matrix-fetch effect key
+  `(screen, deviceId)` unchanged -> does not re-fire. The
+  interceptor's retry inside the effect body still produces one fetch
+  with a fresh bearer. Verified post-trigger: 3 requests -> 2 (single
+  fetch + retry on same remotePort). U-2's cost > payoff ruling was
+  correct given the ruling's assumed fix; the actual fix was one
+  branch edit and also corrected a UX drift (Loading flash during
+  reauth, contrary to ADR-HARDENING-001 §2's "silent reauth"
+  intent).
+
+- `bf13dcc` — **AckDialog Compose tests + Espresso 3.7.0 bump.**
+  First Compose test in the project (11 tests). Covers Session I's
+  Q1-Q3 rulings at the UI layer: dialog shows full notice, two
+  confirmation affordances, no undo path. `AckDialog` visibility
+  `private -> internal` (androidTest source set access). Espresso
+  bumped 3.5.1 -> 3.7.0 because 3.5.1 calls removed
+  `InputManager.getInstance()` via reflection; every test on our API
+  37 emulators failed at `InputManagerEventInjectionStrategy.initialize`
+  with `NoSuchMethodException` before the first assertion ran. The
+  version bump is the reason the tests pass; committed together.
+
+**Scope pivot named honestly.** The standing deferral's label was
+"Compose tests for admin flows." This delivery is AckDialog. That is
+a security-value slice (Session I Q1-Q3 are the confirmation interface
+for key replacement — the repeated interaction that compromises the
+user if rendered wrong), not closure of the deferral. Admin flows and
+ChatScreen integration require ViewModel extraction: `AdminScreen`
+self-constructs `AdminApi(HttpClient(...))` and `SecureStorage` (18
+`remember` vars, 2 `LaunchedEffect`s); `ChatScreen` takes 3 concrete
+controller/store objects as params. Either is a real refactor. The
+handoff §4 deferral re-scoped to reflect that.
+
+**Verification.** Compile clean; both APKs installed on emulator-5556;
+`am instrument -w -e class com.umoja.secure.ui.chat.AckDialogTest`
+returned `OK (11 tests)`. Post-trigger `/me/matrix` count = 2
+(expected; pre-fix 3). API 37 confirmed via
+`getprop ro.build.version.sdk`.
+
+**Counts.** androidTest 46 → 57 (+11, 6 → 7 files). Backend 254
+and Android JVM 212 unchanged.
+
+**Six new §7 lessons** — see below. The session cost more round-trips
+than a linear session would have: five failed assumptions about
+environment (psql user, gradlew path, APK deployment, expiry constraint,
+count window) and one about test infrastructure (Espresso version).
+Each was caught by a verification step rather than shipped, which is
+the honest summary: the discipline worked, the initial assumptions did
+not always hold.
+
 ---
 
 ## 4. Known issues
@@ -3920,8 +3981,13 @@ Original phrasing preserved below for history:
       double-matrix-fetch dedupe (R-5 §7 note).
 
 **Backlog items (not scheduled):**
-- Instrumented Compose tests for admin flows (no test rule configured;
-  belongs with TASK-P1-022 or a new task).
+- ~~Instrumented Compose tests for admin flows~~ — **PARTIAL,
+  re-scoped 2026-10-18.** AckDialog coverage shipped at `bf13dcc`
+  (11 Compose tests). Remaining scope: AdminScreen and ChatScreen
+  integration. Both require ViewModel extraction (AdminScreen
+  self-constructs AdminApi/SecureStorage; ChatScreen takes 3
+  concrete controller/store objects as params). That's a refactor
+  session, not a test session. Scope recon done; refactor not started.
 - Deduplicate base64url validators (KI-016).
 - `canonicalJson` deduplication between `audit/log.ts` and
   `audit/verify.ts` (KI-008).
@@ -3929,14 +3995,15 @@ Original phrasing preserved below for history:
 - **`scripts/bootstrap-enrollment-token.sh` — DONE Session S-1.**
   See §3 Session S-1 entry. Eliminated the manual psql procedure
   that recurred 5x across Sessions A–R-4.
-- **Dedupe the double-matrix-fetch after 401-triggered reauth**
-  (Session R-5 observation). Two paths fetch `/me/matrix` on the
-  Reauthenticating → Authenticated transition: the interceptor's
-  retry and the routing effect's `LaunchedEffect(screen, deviceId)`.
-  Both succeed; the second is wasted. Fix option: track "already
-  fetched this reauth cycle" in a `MutableStateFlow<Long>` the
-  routing effect keys on, instead of `screen` directly. Minor
-  optimization; not a defect.
+- ~~**Dedupe the double-matrix-fetch after 401-triggered reauth**~~
+  — **RESOLVED 2026-10-18 at `2637610`.** Fixed at the routing
+  layer (Reauthenticating branch becomes no-op; screen does not
+  oscillate during silent reauth), not via the MutableStateFlow the
+  R-5 note sketched. The U-2 cost > payoff ruling was correct given
+  the ruling's assumed fix; the actual fix was one branch edit and
+  also corrected a UX drift from ADR-HARDENING-001 §2. Verified:
+  post-trigger `/me/matrix` count 3 → 2 (single fetch + interceptor
+  retry on same port). Full session entry in §3 Session Z-1.
 - **Consider making `enrollment_tokens.used_by_device_id`
   `ON DELETE SET NULL`.** Session R-4's device-row deletion hit
   the `NO ACTION` FK, requiring manual token cleanup. In a test
@@ -4842,8 +4909,91 @@ Rebuild after flipping — read at HttpClient construction time.
   names it**, not on the fully-formed assumed corrupted value.
 
 
+- **`exit 1` in a pasted block can terminate the interactive shell,**
+  even inside a subshell. Session Z-1 hit this in block 3 (subshell
+  `exit 1` fired after a compile check, zsh terminated). The abort
+  was correct -- the shell should not continue past a failed gate --
+  but the terminal going away loses scrollback and forces a re-paste.
+  **Flag-based flow is the fix:** `RESULT=0; ( ... ) || RESULT=$?;`
+  then `if [ "$RESULT" -ne 0 ]; then echo "FAILED"; fi`. The
+  subshell isolates `cd` and status, no `exit` anywhere, the shell
+  survives, the failure is still visible in the output, downstream
+  decisions are plain `if` branches. This is the form every write
+  block in Z-1's late arc used.
+
+- **`git commit` != `installDebug` != APK on emulator.** Three distinct
+  steps in three distinct places. A commit that lands and a test that
+  fails is not a code failure -- it might be that the APK was never
+  deployed. Session Z-1's block 6d ran 3 fetches post-trigger and the
+  fix commit existed; block 6f's `installDebug` was the missing step.
+  **Confirm deployment via `dumpsys package com.umoja.secure | grep
+  lastUpdateTime` -- if the timestamp is before the fix commit time,
+  the fix is not on the device. Do this before drawing any conclusion
+  from the emulator's behavior.** Same class as O-2 failure #4 but
+  re-earned at a different scale (session-wide, not just once).
+
+- **`--since N` windows over-count as well as truncate.** R-3/R-4
+  established that `--since 1m` can truncate before slow events. Z-1's
+  block 6g demonstrated the other end of the window: `--since 2m`
+  caught a pre-trigger request from 58 seconds earlier, making a count
+  of 2 read as 3. **Anchor on trigger time, not a fixed window:**
+  capture `TRIGGER_TS=$(date -u +%s)` before the action, then compute
+  the window as `--since $(( $(date -u +%s) - TRIGGER_TS + 5 ))s`, or
+  filter the log lines by their numeric `"time":` field against the
+  trigger epoch. Both forms prove the count is post-trigger.
+
+- **Espresso < 3.6.1 fails deterministically on API 33+ with
+  `NoSuchMethodException: InputManager.getInstance`.** The method was
+  removed in API 33; Espresso's `InputManagerEventInjectionStrategy`
+  calls it reflectively for input-injection setup. Every Compose test
+  using `createComposeRule()` fails on the first `runUntilIdle()` call,
+  before the first assertion runs. Symptom is uniform: 11/11 fail,
+  same stack trace, `InputManagerEventInjectionStrategy.initialize`
+  in every trace. **Fix: pin espresso-core 3.6.1+ (3.7.0 for API 36+).**
+  One-line version bump, no test code change. If a project's
+  `libs.versions.toml` has `espressoCore = "3.5.x"` or older, this is
+  the failure waiting to happen on modern emulators.
+
+- **`am instrument` exit code is not the test result.** Exit 0 means
+  "JUnitRunner finished," not "tests passed." A block that gates on
+  `[ $? -eq 0 ]` after `am instrument` succeeds when the tests failed.
+  **The authoritative signals are `INSTRUMENTATION_RESULT: stream=`
+  and the JUnitRunner summary line `OK (N tests)` / `FAILURES!!!`.**
+  Grep those, not the exit code. Z-1's block 12 printed `am instrument
+  exit: 0` alongside `FAILURES!!! Tests run: 11, Failures: 11` -- both
+  true, only one load-bearing.
+
+- **Postgres container user is `umoja`, not `postgres`.** The handoff
+  §6 psql invocations run as `psql` with no `-U` (defaults to the
+  exec user inside the container, which happens to be correct in the
+  historical setup); Session Z-1 assumed `-U postgres` and hit
+  `role "postgres" does not exist`. **`docker compose exec -T backend
+  env | grep DATABASE` gives the authoritative user**: in this project
+  it's `postgres://umoja:umoja@postgres:5432/umoja`, so the correct
+  psql invocation is `docker compose exec -T postgres psql -U umoja
+  -d umoja`. First psql call on a new environment should always read
+  DATABASE_URL, not guess.
+
+- **A grep verification returning 0 is ambiguous between "content
+  absent" and "pattern wrong."** Session Z-1's block 17 landed all
+  7 handoff edits correctly, but three sanity greps returned wrong
+  results: (1) a pattern using a backslash-u escape in double quotes
+  searched for the literal escape characters, not the em-dash -- use
+  a literal em-dash in the pattern, or `grep -F`, or `$'...'` ANSI-C
+  quoting; (2) a multi-line content match against a single-line
+  pattern failed because grep cannot cross `\n` -- split into two
+  greps or use `-A`/`-B` context; (3) a pattern starting with `--` was
+  parsed as a grep flag, not a pattern -- use `-e` or `--` separator.
+  **Rule: a verification that returns 0 must be proven against
+  known-matching content before concluding the content is missing.**
+  Use a substring that cannot be mis-parsed (`PARTIAL,` not the full
+  multi-line phrase), or `grep -F` for literal matches, or `grep -e`
+  for leading-dash patterns. The block that writes and the block
+  that verifies should use different pattern shapes so a pattern bug
+  in one does not mask a content bug in the other.
+
 Current verified state: **212 Android JVM tests** (2026-10-18),
-**46 androidTest** (2026-10-15, 6 files, from connectedAndroidTest XML),
+**57 androidTest** (2026-10-18, 7 files, from connectedAndroidTest XML),
 and **254 backend tests** (2026-10-18, 20 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
 infrastructure (Mac vs emulator) and must not be summed.
