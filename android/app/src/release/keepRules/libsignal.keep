@@ -1,0 +1,36 @@
+# libsignal keep rules — TASK-P1-039
+#
+# Placed in src/release/keepRules/ per AGP 9.3+ convention (new DSL
+# source set). Default Android rules are auto-included by
+# optimization { enable = true }; this file adds the library-specific
+# JNI/reflection contracts R8 cannot infer.
+#
+# Rationale: libsignal-android loads native code through JNI and
+# instantiates protocol classes reflectively from native callbacks.
+# R8 minification strips both unless kept. ADR-HARDENING-001 §3:
+# "The acceptance test is not 'build succeeds' — minification bugs
+# surface at cold-start, not build time." These keep rules are
+# necessary, not sufficient; Commit D's cold-start acceptance proves
+# the full set.
+
+# Signal Protocol core — reflection targets for native
+-keep class org.signal.libsignal.protocol.** { *; }
+-keep class org.signal.libsignal.protocol.state.** { *; }
+-keep class org.signal.libsignal.protocol.message.** { *; }
+-keep class org.signal.libsignal.protocol.ecc.** { *; }
+-keep class org.signal.libsignal.protocol.kem.** { *; }
+-keep class org.signal.libsignal.protocol.util.** { *; }
+-keep class org.signal.libsignal.protocol.logging.** { *; }
+
+# Whispersystems compat namespace (older packages some builds link against)
+-keep class org.whispersystems.libsignal.** { *; }
+
+# Internal native bridge — JNI symbol names must survive
+-keep class org.signal.libsignal.internal.** { *; }
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
+# Suppress R8 warnings for optional/reflective libsignal deps
+-dontwarn org.signal.libsignal.**
+-dontwarn org.whispersystems.libsignal.**
