@@ -484,17 +484,21 @@ Add to acceptance criteria:
 - [ ] Build succeeds on arm64-v8a, armeabi-v7a, x86_64.
 - [ ] Human approved all native-code work.
 
-**Status:** **APPROVED 2026-10-18** — target 0.105.0 from Signal's Maven
-repository, 28-test absolute gate. Awaiting execution (P2-3).
+**Status:** **EXECUTED 2026-10-18** — upgrade to 0.105.0 (both
+artifacts) landed at `97279b1` (Session Z-8). Gate passed: 71/71 per
+emulator, 29/29 libsignal target (the "28" figure was a preliminary
+count; verified count is 29 — see `LIBSIGNAL-REVIEW.md` §6).
 
 **Decision artifact:** `docs/architecture/ADR-SIGNAL-UPGRADE-001.md`
 **v0.2** (2026-10-18, commit `5fd44aa`, Session Z-7). Supersedes v0.1
-(`aa6860e`, Session Z-6). v0.2 records the approval: four section-5
-questions answered (§5.4); target corrected from v0.1's 0.94.0 to
-0.105.0 based on verified facts (§5.2); plan revised 4–5 → 2–3
-sessions because P2-2 (external verification) collapsed into the
-approval round. **Next: P2-3 execution.** No version changes, pin
-migrations, or test changes ship until P2-3's 28-test gate passes.
+(`aa6860e`, Session Z-6). Approval record in §5.4; verified facts in
+§5.2; plan revised 4–5 → 2–3 sessions. **Execution:** `97279b1`
+(Session Z-8) implemented the plan; four mechanical-fix rounds
+(constructor arity, property-to-method accessors, catalog swap,
+argument-order asymmetry per `LIBSIGNAL-REVIEW.md` §4.1). The three
+TASK-P1-005 doc acceptance criteria are satisfied: `docs/legal/AGPL-
+NOTICE.md`, `docs/crypto/LIBSIGNAL-REVIEW.md`, `docs/crypto/
+LIBSIGNAL-INTEGRATION.md`.
 
 ### TASK-P1-013 — Backend stack
 

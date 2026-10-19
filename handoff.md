@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session Z-7 — ADR approval round: `ADR-SIGNAL-UPGRADE-001` v0.1 → v0.2 at `5fd44aa`. **Approved: target 0.105.0** (both artifacts), from `https://build-artifacts.signal.org/libraries/maven/`, anonymously. **Version correction:** the registry note (US-TASK-P1-001 line 703) was ~15 releases stale when written — it said Signal-Android 0.94.0 / upstream 0.99.3, but actual was 0.105.0 / 0.105.1. Target corrected from v0.1's 0.94.0 recommendation to 0.105.0 based on verified facts. **Four section-5 questions answered** (§5.4 approval record): version (0.105.0), supply-chain (Signal's repo, anonymously accessible per their settings.gradle.kts), AGPLv3 (confirm only at build time), regression rule (28/28 absolute, mechanical renames only). **Plan revision:** v0.1's 4–5 sessions → 2–3 because P2-2 (external verification) collapsed into the approval round. Backend 254, Android JVM 244, androidTest 71 — unchanged. **P2-3 (execution) is the next session, unblocked.** Next: P2-3 OR nothing — choice, not obligation.)
+Last updated: 2026-10-19 (Session Z-8 — Phase 2, libsignal arc CLOSED: upgrade 0.81.1/0.86.5 → 0.105.0 (both artifacts) at `97279b1`. **Approved round (Z-7) executed.** Four mechanical-fix rounds: (1) SessionBuilder/SessionCipher 3-arg form (constructor arity), (2) PreKeySignalMessage property accessors → method calls, (3) catalog swap in build.gradle.kts, (4) **argument-order asymmetry** — SessionBuilder takes (remote, local), SessionCipher takes (local, remote), which compile-clean upgrade failed at runtime with NoSessionException; source-read of libsignal v0.105.0 confirmed and fix applied. **Gate: 71/71 per emulator, 0 failures, 29/29 libsignal target tests** (X3DH 7, PSPST 14, Smoke 8 — **28→29 correction** named in LIBSIGNAL-REVIEW §6). Three docs written: AGPL-NOTICE, LIBSIGNAL-REVIEW (with "do not consistify" warning on arg-order), LIBSIGNAL-INTEGRATION. **ADR §5.4 interpretation ruling named:** param reorder treated as mechanical (§5.4's literal "renames only" wording didn't anticipate reorder; ruling recorded in commit body + ADR-referenced docs). Backend 254, Android JVM 244, androidTest 71 — unchanged. **No blocking work remains.** Next: dependency version review (TASK-P1-027) OR suspend refactor of HttpClient.executeWithRetry (2 sessions) OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -3751,6 +3751,94 @@ citation-by-primary-source, not citation-by-prior-claim.
 **Counts.** Backend 254, Android JVM 244, androidTest 71 — all
 unchanged.
 
+
+### Session Z-8 — Phase 2, session P2-3: libsignal upgrade executed (2026-10-18/19)
+
+Third Phase-2 session, the execution of the plan approved in Z-7. One
+code commit: `97279b1` — 8 files (5 modified, 3 new docs). The
+libsignal arc is **CLOSED**.
+
+**WHAT THE SESSION DID.** Four sequential mechanical-fix rounds, each
+found by a specific discovery mechanism:
+
+1. **Constructor arity** — compile surfaced that `SessionBuilder` and
+   `SessionCipher` in 0.105.0 take a third argument (`localAddress`).
+   Fixed: 5 sites in `MessagingService.kt`, threaded `localAddress`
+   from `SecureStorage.get("device_id")`.
+
+2. **Property → method accessors** — `PreKeySignalMessage.getPreKeyId()`
+   returns `Optional<Integer>` (Kotlin cannot auto-synthesize property
+   from Optional); `getSignedPreKeyId()` returns `int` (same issue).
+   Fixed: 2 call sites in production, 18 in test.
+
+3. **Catalog swap** — two hardcoded `implementation("org.signal:...")`
+   lines → `libs.libsignal.android` / `libs.libsignal.client` catalog
+   refs. Version 0.105.0 in `libs.versions.toml`. Signal repo declared
+   in `settings.gradle.kts` (org.signal.* scoped, anonymously accessible
+   verified from Signal-Android's own build config).
+
+4. **Argument-order asymmetry** (the session's largest finding) —
+   compile-clean upgrade failed at runtime with
+   `NoSessionException: session with bob.1 not found: message_encrypt`.
+   Read of libsignal v0.105.0 source confirmed:
+   `SessionBuilder(store, remoteAddress, localAddress)` vs
+   `SessionCipher(store, localAddress, remoteAddress)` — siblings with
+   opposite order. Fixed by swapping SessionBuilder's args only;
+   SessionCipher's (local, remote) was already correct. Documented in
+   `LIBSIGNAL-REVIEW.md` §4.1 as a load-bearing asymmetry with a
+   "do not consistify" warning: future maintainers who notice and
+   unify will get a runtime failure the compiler cannot catch.
+
+**WHY RELEASE NOTES WERE USELESS.** 0 of 68 versions in
+[0.86.6, 0.105.1] have GitHub release bodies. The compile+test gate
+is the only working inventory mechanism, documented in
+`LIBSIGNAL-REVIEW.md` §5 as the cadence for future upgrades (bump
+only after ADR update; both mechanisms required, neither substitutes).
+
+**ADR §5.4 INTERPRETATION RULING, NAMED.** §5.4 allowed "mechanical
+API renames only; no test deletions, no weakened assertions." A
+parameter reorder is not literally a rename. Interpretation: the
+"mechanical" spirit covers deterministic adaptations to published API
+shape — arg reorder conforms to libsignal source, involves no
+protocol-behavior decision, required no test-assertion changes. Named
+explicitly in the commit body so the ruling is visible to future
+sessions rather than silently applied.
+
+**GATE EVIDENCE.** Full androidTest suite run (no filter — after a
+class-filter quirk on the first attempt) on both emulators:
+**71/71 per emulator, zero failures, zero errors.** Target classes at
+full count: X3DHInMemoryTest 7, PersistentSignalProtocolStoreTest 14,
+LibsignalSmokeTest 8 = **29/29** (X3DH's 7/7 proves the runtime arg-
+order fix); non-target classes also at full count (zero regressions).
+
+**28→29 CORRECTION.** The "28 androidTests" figure throughout ADR
+v0.1/v0.2 came from a preliminary count during ADR v0.1 drafting. The
+verified count at HEAD was 29. Corrected in `LIBSIGNAL-REVIEW.md` §6;
+ADR §7 left as historical record of the count-at-approval-time. Both
+ADR §7 and LIBSIGNAL-REVIEW §5 gates are satisfied by "29/29 pass."
+
+**THREE DOCS WRITTEN.** AGPL-NOTICE (license factual record, no
+independent legal review asserted), LIBSIGNAL-REVIEW (version rationale
++ both API quirks + future cadence), LIBSIGNAL-INTEGRATION (two-artifact
+split + JNI workaround preserved + emulator-vs-device caveat). These
+satisfy TASK-P1-005's three remaining acceptance criteria (AGPLv3
+documented, JNI documented, version review documented).
+
+**PROCESS NOTES** (documented for honesty, not as new lessons):
+- Two heredoc fragmentations during doc writes (ADR earlier, and
+  LIBSIGNAL-REVIEW first attempt). Both times the recovery was
+  editor + paste, which is §7's own rule for content over 150 lines.
+  Rule applied, not re-learned.
+- One preflight abort in the commit attempt (P2-3f): my
+  `git status --short | grep -c .` gate returned 7 for 8 files
+  because `docs/crypto/` and `docs/legal/` count as 1 line each
+  (dirs, not contained files). Recovery: gate on
+  `git diff --cached --name-only | grep -c .` after `git add`.
+  Same family as Z-5's XML parent/child double-count lesson.
+
+**Counts.** Backend 254, Android JVM 244, androidTest 71 — all
+unchanged (only version swap + mechanical adaptation; no test adds).
+
 ---
 
 ## 4. Known issues
@@ -4467,22 +4555,16 @@ Original phrasing preserved below for history:
 
     **No blocking tasks remain.** The next session's shape is a
     choice, not a backlog obligation:
-    - **Phase 2 preparation** — **libsignal upgrade path APPROVED.**
-      `ADR-SIGNAL-UPGRADE-001` v0.2 (`5fd44aa`, Session Z-7) names the
-      target: **0.105.0** (both artifacts) from
-      `https://build-artifacts.signal.org/libraries/maven/`,
-      anonymously. Four questions answered (§5.4); plan revised 4–5 →
-      2–3 sessions. **Next: P2-3 (execution).** Everything the execution
-      session needs is on disk: target version, source URL, 28-test gate,
-      allowed-edits rule, required doc writes (AGPL-NOTICE,
-      LIBSIGNAL-REVIEW, LIBSIGNAL-INTEGRATION). The one fact still
-      pending: the exact 0.86.5→0.105.0 breaking-change inventory —
-      P2-3's first task (read per-version GitHub release notes, then
-      compile against target). Dependency version review, networking
-      layer suspend refactor (removes the runBlocking bridge in
-      HttpClient.executeWithRetry per 040-D-1's KDoc), and reference
-      doc refresh remain scheduled after the libsignal arc per the
-      ADR's sequencing.
+    - **Phase 2 preparation** — **libsignal arc CLOSED.** Upgrade to
+      0.105.0 (both artifacts) executed at `97279b1` (Session Z-8);
+      approved at `5fd44aa` (Session Z-7). All three TASK-P1-005 doc
+      acceptance criteria satisfied: AGPL-NOTICE, LIBSIGNAL-REVIEW,
+      LIBSIGNAL-INTEGRATION. Full androidTest gate: 71/71 per emulator,
+      zero failures. **Remaining Phase-2 sub-efforts:** dependency
+      version review (TASK-P1-027, unscheduled), networking-layer
+      suspend refactor (removes the runBlocking bridge in
+      HttpClient.executeWithRetry per 040-D-1's KDoc; 2 sessions),
+      reference doc refresh. Both unstarted, neither blocked.
     - **Backlog hygiene** — `MessageStore` SQLite connection leak
       (production bug, dozens/sec during cold launch); KI-016
       base64url validator dedupe; KI-008 `canonicalJson` dedupe;
@@ -5597,6 +5679,20 @@ Rebuild after flipping — read at HttpClient construction time.
   commits cost a round-trip each and produced a correct final commit,
   versus a single shipped commit whose verification internally
   contradicted itself.
+
+- **`git status --short | grep -c .` counts directories as 1 line
+  each, not files inside.** Session Z-8's commit preflight expected
+  `N=8` (5 modified + 3 new docs) and saw `N=7` because
+  `docs/crypto/` and `docs/legal/` are each one line in `git status
+  --short` regardless of how many files they contain. The abort was
+  correct behavior from a broken gate — the metric (line count)
+  didn't match the question (file count). **Fix: gate on
+  `git diff --cached --name-only | grep -c .` after `git add`, which
+  lists the file paths that were staged, not the git-status
+  representation.** Same family as Z-5's XML parent/child double-
+  count (twelfth lesson): the tool's unit of measurement is not the
+  question's unit. When N looks wrong, verify the metric before
+  concluding the content is wrong.
 
 Current verified state: **244 Android JVM tests** (2026-10-18),
 **71 androidTest** (2026-10-18, 8 files, from connectedAndroidTest XML
