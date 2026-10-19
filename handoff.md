@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-19 (Session Z-9 — Phase 2, TASK-P1-027(a) executed: dependency review with ws CVE fix at `9a1173e` (ws 8.18.0 → 8.22.0, GHSA-58qx-3vcg-4xpx + GHSA-96hv-2xvq-fx4p, HIGH). Review record at `0071aa6`: `docs/security/DEPENDENCY-REVIEW.md` (6 sections, 5 findings), `DEPENDENCY-EXCEPTIONS.md` §1 RESOLVED entry, `artifacts/` (README + dep-tree.json, first tracked snapshot). **TASK-P1-027 SPLIT:** 027a (per-session review, executed) + 027b (CI gate, blocked on CI-provider decision). Registry v0.7 → v0.8, total 43 → 44. **Prohibited-package SBOM check: CLEAN.** Backend 254, Android JVM 244, androidTest 71 — all unchanged. **No blocking work remains.** Next: suspend refactor of HttpClient.executeWithRetry (2 sessions) OR P1-027b (needs CI provider) OR reference doc refresh OR nothing — choice, not obligation.)
+Last updated: 2026-10-19 (Session Z-10 — Phase 2, **handoff §8 refresh DONE (bounded)** at `6b715cb`. Non-transport staleness resolved: 3 missing ADRs added to Authoritative design (ADR-HARDENING-001, ADR-IDENTITY-CHANGE-001, ADR-SIGNAL-UPGRADE-001) + US-MASTER-001 + USER-ONBOARDING; 2 missing conformance-data entries; new "Code shape — added post-Session-A" block lists ~20 files (MatrixStore, MatrixVerifier, ReplacementNotice*, IdentityChangeAck*, SessionStateManager, SendGate, VerificationFailureStore, backend identityChange/, ws/revocation.ts, sign-test-* scripts); Verify-path find-greps widened. **Transport/ section deliberately deferred to the suspend refactor’s preamble** — the refactor reads those files anyway, so documenting them now would be re-stale. Backend 254, Android JVM 244, androidTest 71 — all unchanged. **No blocking work remains.** Next: suspend refactor of HttpClient.executeWithRetry (2 sessions) OR P1-027b (needs CI provider) OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -1509,15 +1509,7 @@ Verification of the ADR rulings happens in the task that implements
 each ruling — that is the whole point of the [VERIFY AT
 IMPLEMENTATION] markers.
 
-**§8's title is stale, worth a backlog item.** §8 says "References
-for the matrix implementation session" — accurate as of Session A,
-but Sessions H–M added `identityChange/`, `replacement-notice/`,
-new ADRs, and helpers not reflected in §8's "Current code shape"
-list. §8 is now a partial reference, not a complete one. Filed as a
-backlog item: rename §8 or replace its code-shape list with an
-authoritative reference. Not done this session — bigger than a
-handoff edit, and restructuring mid-session risks introducing more
-drift than it removes.
+**§8 refresh — DONE 2026-10-19 (`6b715cb`).** Bounded refresh of handoff §8's non-transport staleness (Session Z-10). §8's Authoritative design, Conformance data, and Code-shape blocks now reflect Sessions F through Z-9; the transport/ surface is deliberately deferred to the pending suspend refactor's preamble (the refactor reads those files as its intro, so documenting them now would be re-stale by the time the refactor ships). See §3 Session Z-10.
 
 ### Session O-1 — TASK-P1-037 backend landed (2026-10-17)
 
@@ -3915,6 +3907,92 @@ REAL security finding of the project, not a doc inconsistency.
 
 **Counts.** Backend 254, Android JVM 244, androidTest 71 per
 emulator — all unchanged (fix + docs only; no test adds).
+
+
+### Session Z-10 — Phase 2, handoff §8 refresh (bounded) (2026-10-19)
+
+Fifth Phase-2 session, first of the two 'close last known debt
+before opening new ground' sequence. One commit: `6b715cb` — 98
+insertions, 8 deletions in `handoff.md` only. No code touched.
+
+**SCOPE DECISION, NAMED.** The backlog said "rename §8 **or**
+replace its code-shape list." R-2 established the specific scope:
+refresh the **non-transport** staleness, defer the `transport/`
+section to the suspend refactor’s preamble. Reasoning: the
+refactor reads `HttpClient` + every `*Api` class as its preamble
+anyway, so documenting them in §8 now would be re-stale by the
+time the refactor ships. The genuinely stale parts are the crypto
+surface and non-transport auth/ui files. That scoping is what the
+commit reflects.
+
+**WHAT LANDED.** §8's content grew to reflect Sessions F through
+Z-9's additions (a stretch §8's Session-A provenance didn’t
+anticipate):
+
+- Authoritative design: 5 items → 10. Added ADR-HARDENING-001,
+  ADR-IDENTITY-CHANGE-001, ADR-SIGNAL-UPGRADE-001, US-MASTER-001,
+  USER-ONBOARDING with version tags and session references. Updated
+  ADR-PROVISIONING-001 to name §7.1.1 (Session A `4abcf53`);
+  THREAT-MODEL-001 / AUTH-SPEC-001 / US-ADD-001 now carry sweep
+  versions and session references.
+- Conformance data: 3 items → 5. Added canonical-replacement-notice
+  (Session F `d28c631`) and canonical-identity-change-ack (Session I
+  `ed271ac`) vector files.
+- New "Code shape — added post-Session-A" block: ~20 files —
+  MatrixStore, MatrixVerifier, ProvisioningKeys, DeviceIdStore,
+  EnrollmentQrPayload, Base64UrlValidation, CryptoJsonHelpers,
+  CryptoException, WipeConfirmationKeyManager, ReplacementNotice*,
+  IdentityChangeAck*, IdentityChangeController, SendGate,
+  VerificationFailureStore (Android); SessionStateManager,
+  SessionScreens, SecureScreen (auth/ui); replacement-notice.ts,
+  identity-change-ack.ts, backend/src/identityChange/,
+  ws/revocation.ts, sign-test-notice.ts, sign-test-matrix.ts
+  (backend).
+- Verify-path find-greps widened on both sides to catch the new
+  file names (previously missed SendGate, Verification*,
+  ReplacementNotice*, EnrollmentQr, Http, Api; backend missed
+  identity|replacement|ws/|audit|auth).
+- New §8 currency note in "Notes for a new agent" explaining the
+  outgrowth and the transport deferral mechanism.
+- Title provenance note at section top: names origin (Session A),
+  outgrowth, and points to the added block. **Title deliberately
+  not renamed** — renaming would cascade through cross-references
+  for a label still accurate as provenance. The note names it
+  instead.
+
+**TRANSPORT DEFERRAL — explicit.** §8's new "Deferred —
+`transport/` surface." paragraph names `HttpClient`, `AdminApi`,
+`ContactsApi`, `EnvelopeApi`, `PreKeyApi`, `MatrixApi`,
+`IdentityChangeApi`, `Socks5Bridge`, `WebSocketClient` and points to
+the suspend refactor as the place they’ll be documented. This
+prevents a future reader from thinking the refresh missed them.
+
+**TWO PROCESS FAILURES, NAMED (no new §7 lesson).**
+
+- **Python apostrophe SyntaxError.** First R-3 write attempt failed
+  at parse time: `'...the section's title...'` — a literal apostrophe
+  inside a Python single-quoted string terminates the string early.
+  Fixed by `\u2019` (right single quote, U+2019), renders identically
+  in Markdown. **Lesson is on disk**: twelfth §7 addition ("the
+  tool’s quoting rules are load-bearing, not cosmetic") is the same
+  family as the em-dash-in-grep and JSON-in-shell lessons. Not
+  re-recorded.
+- **Line-bound greps gave false-negatives.** R-3-fix showed empty
+  results for ADR-HARDENING-001 and ADR-IDENTITY-CHANGE-001 because
+  my patterns required same-line matching; the file paths and the
+  session refs are on adjacent wrapped lines. **Fifth/sixth count/
+  measurement failure this session's arc.** R-4 verification used
+  line-range awk instead. Same family as twelfth/thirteenth
+  (measurement-tool unit vs question unit); applied, not
+  re-learned. Same discipline: verify with grep -n before
+  concluding content is wrong.
+
+**BACKLOG ITEM CLOSED.** The handoff's \"§8’s title is stale\"
+  entry in §5's backlog is now resolved (bounded refresh, transport
+  deferred by intent). §5 updated accordingly.
+
+**Counts.** Backend 254, Android JVM 244, androidTest 71 — all
+unchanged (doc-only session).
 
 ---
 
