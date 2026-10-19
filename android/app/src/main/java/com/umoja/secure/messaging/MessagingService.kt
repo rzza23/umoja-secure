@@ -117,6 +117,7 @@ class MessagingService(private val context: Context) {
 
         val myDeviceId = storage.get("device_id")
             ?: return@withContext SendOutcome.Failure("not_enrolled")
+        val localAddress = SignalProtocolAddress(myDeviceId, 1)
 
         try {
             val http = HttpClient(HttpClient.DEV_BASE_URL)
@@ -140,22 +141,22 @@ class MessagingService(private val context: Context) {
             val hadSession = store.containsSession(peerAddress)
             Log.d(TAG, "sendMessage: containsSession=$hadSession for peer ${peerDeviceId.take(8)}")
             if (!hadSession) {
-                SessionBuilder(store, peerAddress).process(bundle)
+                SessionBuilder(store, peerAddress, localAddress).process(bundle)
                 Log.d(TAG, "sendMessage: established NEW session")
             } else {
                 Log.d(TAG, "sendMessage: REUSING existing session")
             }
 
             // 4. Encrypt
-            val cipher = SessionCipher(store, peerAddress)
+            val cipher = SessionCipher(store, localAddress, peerAddress)
             val ciphertext = cipher.encrypt(plaintext.toByteArray(Charsets.UTF_8))
 
             if (ciphertext.type == CiphertextMessage.PREKEY_TYPE) {
                 try {
                     val pkm = PreKeySignalMessage(ciphertext.serialize())
-                    val pkId = if (pkm.preKeyId.isPresent) pkm.preKeyId.get() else -1
+                    val pkId = if (pkm.getPreKeyId().isPresent) pkm.getPreKeyId().get() else -1
                     Log.d(TAG, "sendMessage: outgoing PreKeySignalMessage " +
-                        "preKeyId=$pkId signedPreKeyId=${pkm.signedPreKeyId}")
+                        "preKeyId=$pkId signedPreKeyId=${pkm.getSignedPreKeyId()}")
                 } catch (e: Exception) {
                     Log.w(TAG, "could not parse outgoing PreKeySignalMessage", e)
                 }
@@ -205,6 +206,9 @@ class MessagingService(private val context: Context) {
         val storage = SecureStorage(context)
         val sessionToken = storage.get("session_token")
             ?: return@withContext ReceiveOutcome.Failure("not_authenticated")
+        val myDeviceId = storage.get("device_id")
+            ?: return@withContext ReceiveOutcome.Failure("not_enrolled")
+        val localAddress = SignalProtocolAddress(myDeviceId, 1)
 
         val http = HttpClient(HttpClient.DEV_BASE_URL)
         val envelopeApi = EnvelopeApi(http)
@@ -226,7 +230,7 @@ class MessagingService(private val context: Context) {
                     val ciphertextBytes = decode(body.ciphertext)
 
                     val peerAddress = SignalProtocolAddress(item.senderDeviceId, 1)
-                    val cipher = SessionCipher(store, peerAddress)
+                    val cipher = SessionCipher(store, localAddress, peerAddress)
 
                     val plaintext = decrypt(cipher, ciphertextBytes)
                     if (plaintext == null) {
@@ -284,8 +288,11 @@ class MessagingService(private val context: Context) {
                 val ciphertextB64 = frame.getString("ciphertext")
 
                 val store = PersistentSignalProtocolStore(context)
+                val myDeviceId = SecureStorage(context).get("device_id")
+                    ?: return@withContext null
+                val localAddress = SignalProtocolAddress(myDeviceId, 1)
                 val peerAddress = SignalProtocolAddress(senderDeviceId, 1)
-                val cipher = SessionCipher(store, peerAddress)
+                val cipher = SessionCipher(store, localAddress, peerAddress)
 
                 val bytes = decode(ciphertextB64)
                 val plaintext = decrypt(cipher, bytes) ?: return@withContext null

@@ -41,8 +41,8 @@ android {
 
 dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("org.signal:libsignal-android:0.81.1")
-    implementation("org.signal:libsignal-client:0.86.5")
+    implementation(libs.libsignal.android)
+    implementation(libs.libsignal.client)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

@@ -127,7 +127,7 @@ class X3DHInMemoryTest {
     fun aliceEstablishesSessionFromBobBundle() {
         assertFalse(aliceStore.containsSession(bobAddress))
 
-        val builder = SessionBuilder(aliceStore, bobAddress)
+        val builder = SessionBuilder(aliceStore, bobAddress, aliceAddress)
         builder.process(bobBundle)
 
         assertTrue(aliceStore.containsSession(bobAddress))
@@ -139,15 +139,15 @@ class X3DHInMemoryTest {
 
     @Test
     fun firstMessageIsPreKeySignalMessageAndDecrypts() {
-        SessionBuilder(aliceStore, bobAddress).process(bobBundle)
+        SessionBuilder(aliceStore, bobAddress, aliceAddress).process(bobBundle)
 
-        val aliceCipher = SessionCipher(aliceStore, bobAddress)
+        val aliceCipher = SessionCipher(aliceStore, aliceAddress, bobAddress)
         val plaintext = "Hello Bob, this is Alice.".toByteArray(Charsets.UTF_8)
         val ciphertext = aliceCipher.encrypt(plaintext)
 
         assertEquals(CiphertextMessage.PREKEY_TYPE, ciphertext.type)
 
-        val bobCipher = SessionCipher(bobStore, aliceAddress)
+        val bobCipher = SessionCipher(bobStore, bobAddress, aliceAddress)
         val decrypted = bobCipher.decrypt(PreKeySignalMessage(ciphertext.serialize()))
 
         assertTrue(plaintext.contentEquals(decrypted))
@@ -155,10 +155,10 @@ class X3DHInMemoryTest {
 
     @Test
     fun fullRoundTripWithRatchetAdvancement() {
-        SessionBuilder(aliceStore, bobAddress).process(bobBundle)
+        SessionBuilder(aliceStore, bobAddress, aliceAddress).process(bobBundle)
 
-        val aliceCipher = SessionCipher(aliceStore, bobAddress)
-        val bobCipher = SessionCipher(bobStore, aliceAddress)
+        val aliceCipher = SessionCipher(aliceStore, aliceAddress, bobAddress)
+        val bobCipher = SessionCipher(bobStore, bobAddress, aliceAddress)
 
         // Alice -> Bob: first message is a PreKeySignalMessage
         val aliceMsg = "Hello Bob".toByteArray(Charsets.UTF_8)
@@ -179,9 +179,9 @@ class X3DHInMemoryTest {
 
     @Test
     fun multipleMessagesInSameDirection() {
-        SessionBuilder(aliceStore, bobAddress).process(bobBundle)
-        val aliceCipher = SessionCipher(aliceStore, bobAddress)
-        val bobCipher = SessionCipher(bobStore, aliceAddress)
+        SessionBuilder(aliceStore, bobAddress, aliceAddress).process(bobBundle)
+        val aliceCipher = SessionCipher(aliceStore, aliceAddress, bobAddress)
+        val bobCipher = SessionCipher(bobStore, bobAddress, aliceAddress)
 
         // In Signal Protocol, Alice keeps sending PreKeySignalMessages until
         // she receives a reply from Bob. This is by design: her side of the
@@ -214,8 +214,8 @@ class X3DHInMemoryTest {
 
     @Test
     fun ciphertextDoesNotContainPlaintext() {
-        SessionBuilder(aliceStore, bobAddress).process(bobBundle)
-        val aliceCipher = SessionCipher(aliceStore, bobAddress)
+        SessionBuilder(aliceStore, bobAddress, aliceAddress).process(bobBundle)
+        val aliceCipher = SessionCipher(aliceStore, aliceAddress, bobAddress)
 
         val secret = "UNIQUE_MARKER_STRING_9263741".toByteArray(Charsets.UTF_8)
         val ciphertext = aliceCipher.encrypt(secret)
@@ -226,9 +226,9 @@ class X3DHInMemoryTest {
 
     @Test
     fun tamperedCiphertextFailsDecryption() {
-        SessionBuilder(aliceStore, bobAddress).process(bobBundle)
-        val aliceCipher = SessionCipher(aliceStore, bobAddress)
-        val bobCipher = SessionCipher(bobStore, aliceAddress)
+        SessionBuilder(aliceStore, bobAddress, aliceAddress).process(bobBundle)
+        val aliceCipher = SessionCipher(aliceStore, aliceAddress, bobAddress)
+        val bobCipher = SessionCipher(bobStore, bobAddress, aliceAddress)
 
         val ciphertext = aliceCipher.encrypt("original".toByteArray(Charsets.UTF_8))
         val tampered = ciphertext.serialize().copyOf()
@@ -247,9 +247,9 @@ class X3DHInMemoryTest {
 
     @Test
     fun bothSidesPersistSessionRecords() {
-        SessionBuilder(aliceStore, bobAddress).process(bobBundle)
-        val aliceCipher = SessionCipher(aliceStore, bobAddress)
-        val bobCipher = SessionCipher(bobStore, aliceAddress)
+        SessionBuilder(aliceStore, bobAddress, aliceAddress).process(bobBundle)
+        val aliceCipher = SessionCipher(aliceStore, aliceAddress, bobAddress)
+        val bobCipher = SessionCipher(bobStore, bobAddress, aliceAddress)
 
         aliceCipher.encrypt("hi".toByteArray(Charsets.UTF_8))
         val firstMessage = aliceCipher.encrypt("hi again".toByteArray(Charsets.UTF_8))
