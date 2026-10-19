@@ -1,15 +1,101 @@
-# US-TASK-P1-001-v0.7 — Phase 1 Task Registry Reconciliation
+# US-TASK-P1-001-v0.8 — Phase 1 Task Registry Reconciliation
 
 Document ID: US-TASK-P1-001
 Version: 0.8
 Date: October 2026
-Supersedes: v0.6
+Supersedes: v0.7
 Purpose: Reconcile the Phase 1 task registry with UMOJA-SECURE-BUILD-MASTER.md v1.4.2.
 Authority: Derived from US-MASTER-001 + US-ADD-001. Cannot override them.
 
 ---
 
 ## §A — NEW TASKS
+
+### TASK-P1-027a: SBOM + dependency review, per-session execution
+
+**Phase:** 1
+**Priority:** Medium
+**Dependencies:** TASK-P1-013 (backend stack; SBOM tooling originated there)
+**Security classification:** Internal
+
+**Objective and non-goals:**
+- Execute the dependency review each time the lockfile changes:
+  generate SBOM, run audit, refresh dep-tree snapshot, document
+  findings.
+- Fix high/critical CVEs or document them as exceptions per Build
+  Master §6 (CVE, rationale, mitigation, owner, expiry ≤90 days).
+- Maintain `docs/security/DEPENDENCY-REVIEW.md` as the running
+  review record: inventory, method, findings log, cadence.
+- Produce `artifacts/dep-tree.json` snapshot on each lockfile change
+  (Build Master §6 step 3).
+- Do NOT add CI (that is TASK-P1-027b). Do NOT silence warnings via
+  `// eslint-disable`, `.npmrc` overrides, or `npm audit --omit`
+  flags (Build Master §6 explicit prohibition). Do NOT add
+  Android-side tooling (also 027b).
+
+**Acceptance criteria:**
+- [ ] SBOM generated via `npm run sbom`; parse for prohibited runtime
+      packages (Build Master §11 list) shows zero matches.
+- [ ] `npm audit --audit-level=high` run; high/critical findings
+      fixed or documented in `DEPENDENCY-EXCEPTIONS.md` §1.
+- [ ] `artifacts/dep-tree.json` regenerated when `package-lock.json`
+      changes; reviewed for prohibited packages, unresolved
+      versions, new dependencies.
+- [ ] `docs/security/DEPENDENCY-REVIEW.md` maintained (inventory,
+      method, findings log, cadence).
+- [ ] Every finding classified: fix / exception / observed-not-defect
+      / deferred-to-027b.
+
+**Required tests:**
+- TEST-DEP-REVIEW-SBOM-PROHIBITED-CLEAN (per-invocation check, not
+  a committed test file)
+- TEST-DEP-REVIEW-AUDIT-CLEAN (per-invocation check)
+
+**Status:** Executed 2026-10-19 (first pass at `9a1173e`; ws CVE
+fixed; artifacts/ created; review doc written; §1 resolved entry
+added)
+
+---
+
+### TASK-P1-027b: CI enforcement gate for dependency review
+
+**Phase:** 1
+**Priority:** Medium
+**Dependencies:** TASK-P1-027a (recommended before this); CI provider decision
+**Security classification:** Internal
+
+**Objective and non-goals:**
+- Automate Build Master §6's gate in a CI pipeline. Currently the
+  gate is enforceable only as manual human review because the repo
+  has no CI.
+- Per-PR: generate SBOM, run `npm audit --audit-level=high` (block on
+  high/critical), check SBOM against prohibited-package list, parse
+  `./gradlew :app:dependencies --configuration releaseRuntimeClasspath`
+  for the same list on Android, attach SBOM + dep-tree to PR.
+- Do NOT bake a specific CI provider into this section's acceptance
+  until the provider is chosen. Do NOT attempt the Android build
+  workflow before the backend workflow is proven on the same
+  pipeline (staged rollout).
+- Do NOT weaken Build Master §6's manual requirements (the CI gate
+  supplements, does not replace, human triage).
+
+**Acceptance criteria:**
+- [ ] CI provider chosen and documented (ADR or this section amendment).
+- [ ] Backend workflow: SBOM + audit + dep-tree diff; PR blocked on
+      high/critical or prohibited package.
+- [ ] Android workflow: gradle dependencies parse + prohibited-package
+      check.
+- [ ] SBOM and dep-tree attached to PR as build artifacts.
+- [ ] End-to-end verified on a throwaway branch (both a clean pass
+      and a deliberately-failing case).
+
+**Required tests:**
+- TEST-CI-PROHIBITED-BLOCKED
+- TEST-CI-HIGH-CVE-BLOCKED
+- TEST-CI-CLEAN-PASSES
+- TEST-ANDROID-DEP-PARSE
+
+**Status:** Blocked on CI provider decision (project-level)
 
 ### TASK-P1-033: Offline provisioning-key signing workflow
 
@@ -644,8 +730,7 @@ comparison is admin-error-catching, not adversary-catching.
 
 ---
 
-## §C — REGISTRY INDEX (v0.7 FINAL)
-
+## §C — REGISTRY INDEX (v0.8 FINAL)
 | ID | Title | Stage | Status |
 |----|-------|-------|--------|
 | TASK-P1-001 | Initialize repository structure | 1 | Proposed |
@@ -675,7 +760,8 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-024 | Independent security review | 10 | Proposed |
 | TASK-P1-025 | Admin provisioning tool | 3.5 | New |
 | TASK-P1-026 | Authorization matrix + verification | 3.5 | Updated |
-| TASK-P1-027 | SBOM + dependency review gate | 1 | New |
+| TASK-P1-027a | SBOM + dependency review, per-session | 1 | Executed 2026-10-19 |
+| TASK-P1-027b | CI enforcement gate for dep review | 1 | New |
 | TASK-P1-028 | Log redaction audit | 10 | New |
 | TASK-P1-029 | Signing-key custody | 3.5 | Updated |
 | TASK-P1-030 | Replacement-device flow | 9 | Updated |
@@ -692,7 +778,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-041 | Failed-verification operator logging | 1 | Proposed |
 | TASK-P1-042 | WS revocation listener reconnect + re-reconcile | 1 | DONE |
 
-**Total Phase 1 task identifiers:** 43 (001–020, 021a, 021b, 022–042).
+**Total Phase 1 task identifiers:** 44 (001–020, 021a, 021b, 022–026, 027a, 027b, 028–042).
 
 **Execution order (dependency-respecting):**
 TASK-P1-001 → TASK-P1-002 → TASK-P1-027 → TASK-P1-032 → TASK-P1-003 → TASK-P1-034 → TASK-P1-004 → TASK-P1-005 → TASK-P1-006 → TASK-P1-013 → TASK-P1-007 → TASK-P1-008 → TASK-P1-025 → TASK-P1-026 → TASK-P1-029 → TASK-P1-033 → TASK-P1-035 → TASK-P1-014 → TASK-P1-015 → TASK-P1-016 → TASK-P1-009 → TASK-P1-010 → TASK-P1-011 → TASK-P1-012 → TASK-P1-019 → TASK-P1-020 → TASK-P1-021a → TASK-P1-021b → TASK-P1-030 → TASK-P1-017 → TASK-P1-018 → TASK-P1-022 → TASK-P1-023 → TASK-P1-024 → TASK-P1-028 → TASK-P1-031
