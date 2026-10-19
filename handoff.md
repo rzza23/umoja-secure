@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-19 (Session Z-10 — Phase 2, **handoff §8 refresh DONE (bounded)** at `6b715cb`. Non-transport staleness resolved: 3 missing ADRs added to Authoritative design (ADR-HARDENING-001, ADR-IDENTITY-CHANGE-001, ADR-SIGNAL-UPGRADE-001) + US-MASTER-001 + USER-ONBOARDING; 2 missing conformance-data entries; new "Code shape — added post-Session-A" block lists ~20 files (MatrixStore, MatrixVerifier, ReplacementNotice*, IdentityChangeAck*, SessionStateManager, SendGate, VerificationFailureStore, backend identityChange/, ws/revocation.ts, sign-test-* scripts); Verify-path find-greps widened. **Transport/ section deliberately deferred to the suspend refactor’s preamble** — the refactor reads those files anyway, so documenting them now would be re-stale. Backend 254, Android JVM 244, androidTest 71 — all unchanged. **No blocking work remains.** Next: suspend refactor of HttpClient.executeWithRetry (2 sessions) OR P1-027b (needs CI provider) OR nothing — choice, not obligation.)
+Last updated: 2026-10-19 (Session Z-11 — Phase 2, **suspend HTTP surface refactor DONE** at `6c7830e`. Phase 2's substantive remaining item executed. 10 production files, 1 test file, 1 doc file, 12 total. Every API class method became `suspend fun`; `HttpClient`'s `runBlocking` bridge (040-D KDoc's Phase-1 trade-off) removed; `MatrixApi.fetchFn` and `IdentityChangeController`'s `listNotices`/`postAck` lambda params became `suspend`; `MatrixApiTest`'s 5 fetch calls wrapped in `runBlocking {}`. **Zero caller source changes** — verified exhaustively; every existing caller already in a suspend context. Handoff §8's transport deferral from Z-10 closed in the same commit. Gate: JVM 244/244 (incl. `HttpClientRetryTest` 7 tests unchanged — `shouldRetryAfter401` predicate untouched), androidTest 71/71 per emulator both machines. Backend 254 unchanged (Android-only refactor). **No blocking work remains.** Phase 2 remaining: TASK-P1-027b only (CI enforcement gate; blocked on CI-provider decision, organizational). Next: P1-027b OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -3994,6 +3994,84 @@ prevents a future reader from thinking the refresh missed them.
 **Counts.** Backend 254, Android JVM 244, androidTest 71 — all
 unchanged (doc-only session).
 
+
+### Session Z-11 — Phase 2, suspend HTTP surface refactor (2026-10-19)
+
+Sixth Phase-2 session, and the last substantive Phase-2 item. One
+commit: `6c7830e` — 12 files (10 production + 1 test + 1 doc), +71
+/ -60. Executes 040-D-1's "Phase 2: HTTP layer becomes suspend; this
+bridge disappears" claim.
+
+**WHAT LANDED.** `HttpClient.postJson`/`get`/`execute`/`executeWith
+Retry` all `suspend fun`; the `runBlocking { handler!!.invoke() }`
+bridge became a direct suspend call; `import kotlinx.coroutines.run
+Blocking` removed. `HttpClient` KDoc rewritten — the Phase-1 bridge
+rationale is now history; the current KDoc names the suspend surface
+and the **dispatcher-discipline rule** (suspend fun does not imply IO
+dispatch; callers must `withContext(Dispatchers.IO)` before calling).
+All 8 API classes' public methods `suspend fun` (25 signatures).
+`MatrixApi.fetchFn` param became `suspend`; `IdentityChange
+Controller`'s `listNotices`/`postAck` lambda params became `suspend`
+(their methods were already suspend, only param types needed
+alignment). `MatrixApiTest` gained `import kotlinx.coroutines.run
+Blocking` and wrapped 5 `api.fetch("test-token")` call sites; the
+uniform fix wraps the fetch call, not the test method, because
+`assertThrows` takes a non-suspend Java Executable.
+
+**ZERO CALLER CHANGES — verified exhaustively before the write.**
+Every existing caller was already in a suspend context:
+`ContactsScreen`/`ContactsViewModel` inside `scope.launch(IO)`;
+`MainActivity` matrix fetch and enrollment in `withContext(IO)`;
+`SessionManager`, `PreKeyUploader`, `MessagingService` in suspend
+funs; `IdentityChangeController` methods already suspend. Kotlin
+coerces `fun`-to-`suspend` at method-reference and lambda-inference
+boundaries, so wiring sites (`adminApi::listDevices`, `api::
+getNotices`, `MatrixApi { t -> http.get(...) }`) adapt without
+source edits.
+
+**BEHAVIOR-PRESERVATION, NAMED.** OkHttp's blocking `client.newCall
+(request).execute()` **stays** inside `executeWithRetry`. The
+calling thread still blocks during the HTTP round-trip, but it is
+inside `withContext(Dispatchers.IO)`. The suspend refactor did NOT
+convert OkHttp to its async callback form (`enqueue` /
+`suspendCancellableCoroutine`). That is a **separate** refactor with
+its own cancellation-semantics question, and P5-2's stated goal was
+solely to remove the `runBlocking` bridge. **Cancellation of an
+in-flight HTTP call remains deferred.** A future session reading
+"HTTP is suspend" should not assume the layer is async-cancellable —
+it is suspend-shaped, but the underlying call is blocking.
+
+**GATES.** `compileDebugKotlin`, `compileDebugAndroidTestKotlin`,
+`compileDebugUnitTestKotlin` all clean. JVM 244/244 (baseline 244) —
+**includes `HttpClientRetryTest`'s 7 tests unchanged** (`shouldRetry
+After401` predicate untouched; the retry-decision rule is
+behavior-identical, the pipeline behind it changed shape). android
+Test 71/71 per emulator, both machines, zero failures/errors (all 8
+classes at full count: Example 1, DeviceKeyManager 9, LibsignalSmoke
+8, PersistentSignalProtocolStore 14, WipeConfirmationKeyManager 7,
+X3DHInMemory 7, AckDialog 11, ChatScreen 14).
+
+**§8 TRANSPORT DEFERRAL CLOSED.** Z-10's "Deferred — `transport/`
+surface" paragraph replaced with the current transport listing
+(HttpClient suspend signatures + dispatcher discipline; the 8 API
+classes; the two MatrixApi / IdentityChangeController lambda-param
+changes; Socks5Bridge/WebSocketClient unchanged; zero caller
+changes). Closes the Z-10 deferral in the same commit that
+invalidates it — no intermediate state has a §8 that lies about
+what's deferred.
+
+**PROCESS NOTE (no new §7 lesson).** The session included another
+line-bound grep miss (`suspend fun postJson` searched for in
+handoff.md, but the prose says `` `postJson`/`get`/`execute`/`execute
+WithRetry` are `suspend fun` `` — same literal not present). Content
+was correct; the verification pattern was line-bound. Sixth/
+seventh miss of this class across the Z-5..P5-2 arc; same family as
+the twelfth §7 addition (measurement-tool unit vs question unit).
+Applied, not re-learned.
+
+**Counts.** Backend 254 (Android-only refactor), Android JVM 244,
+androidTest 71 per emulator — all unchanged.
+
 ---
 
 ## 4. Known issues
@@ -4710,15 +4788,14 @@ Original phrasing preserved below for history:
 
     **No blocking tasks remain.** The next session's shape is a
     choice, not a backlog obligation:
-    - **Phase 2 preparation** — **libsignal arc CLOSED** at
-      `97279b1`. **TASK-P1-027a EXECUTED** at `0071aa6` (dependency
-      review record, artifacts/, ws CVE fix at `9a1173e`).
-      **TASK-P1-027b** (CI enforcement gate + Android dependency
-      tooling) filed, blocked on CI-provider decision. **Remaining
-      sub-efforts:** networking-layer suspend refactor of
-      `HttpClient.executeWithRetry` (2 sessions, per 040-D-1 KDoc);
-      reference doc refresh (handoff §8 staleness). Both
-      unstarted, neither blocked.
+    - **Phase 2 preparation** — **suspend HTTP surface refactor
+      DONE** at `6c7830e` (Session Z-11). All API classes suspend;
+      `runBlocking` bridge removed; §8 transport deferral closed.
+      `HttpClientRetryTest` 7 tests unchanged (predicate untouched);
+      JVM 244/244; androidTest 71/71 per emulator. **Remaining:**
+      TASK-P1-027b (CI enforcement gate + Android tooling; blocked on
+      CI-provider decision, organizational, not technical). Nothing
+      else in the current Phase-2 backlog.
     - **Backlog hygiene** — `MessageStore` SQLite connection leak
       (production bug, dozens/sec during cold launch); KI-016
       base64url validator dedupe; KI-008 `canonicalJson` dedupe;
