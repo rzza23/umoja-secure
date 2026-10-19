@@ -48,7 +48,7 @@ class IdentityChangeApi(private val http: HttpClient) {
      * Backend does not filter by `permitted_contacts` (ADR §5 Option C);
      * the caller filters locally by its accepted matrix.
      */
-    fun getNotices(sessionToken: String): List<RemoteNotice> {
+    suspend fun getNotices(sessionToken: String): List<RemoteNotice> {
         val result = try {
             http.get("/identity-change-notices", bearer = sessionToken)
         } catch (e: HttpException) {
@@ -85,7 +85,7 @@ class IdentityChangeApi(private val http: HttpClient) {
      *
      * Response 201: `{ack_hash, created_at}`.
      */
-    fun postAck(
+    suspend fun postAck(
         canonicalUtf8: String,
         signatureBase64url: String,
         sessionToken: String,

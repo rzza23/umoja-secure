@@ -1,7 +1,6 @@
 package com.umoja.secure.transport
 
 import android.util.Log
-import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -93,7 +92,7 @@ class HttpClient(baseUrl: String) {
         return builder.build()
     }
 
-    fun postJson(path: String, body: String, bearer: String? = null): HttpResult {
+    suspend fun postJson(path: String, body: String, bearer: String? = null): HttpResult {
         val request = Request.Builder()
             .url(baseUrl + path)
             .post(body.toRequestBody(JSON))
@@ -102,7 +101,7 @@ class HttpClient(baseUrl: String) {
         return execute(request)
     }
 
-    fun get(path: String, bearer: String? = null): HttpResult {
+    suspend fun get(path: String, bearer: String? = null): HttpResult {
         val request = Request.Builder()
             .url(baseUrl + path)
             .get()
@@ -111,7 +110,7 @@ class HttpClient(baseUrl: String) {
         return execute(request)
     }
 
-    private fun execute(request: Request): HttpResult =
+    private suspend fun execute(request: Request): HttpResult =
         executeWithRetry(request, retryDepth = 0)
 
     /**
@@ -123,28 +122,27 @@ class HttpClient(baseUrl: String) {
      * machine's reauth wrote a new token to storage; the buffered
      * request still carries the old one).
      *
-     * **runBlocking bridge.** [execute] is `fun`, not `suspend` --
-     * every API class (AdminApi, ContactsApi, IdentityChangeApi,
-     * EnvelopeApi, PreKeyApi) is sync, and their callers wrap in
-     * `withContext(Dispatchers.IO)` at the API boundary (AppRoot,
-     * MessagingService, SessionManager). The handler is `suspend`
-     * because [SessionStateManager.reauthenticate] uses
-     * `withContext(IO)` internally. Bridging at this single point
-     * is the honest Phase 1 trade-off: the alternative is making
-     * the entire HTTP surface suspend, which ripples into every
-     * API class, every ViewModel, and every LaunchedEffect. Not in
-     * scope for 040-D. Phase 2: HTTP layer becomes suspend; this
-     * bridge disappears.
+     * **Suspend surface (Phase 2 completed).** [execute] is `suspend fun`.
+     * Every API class (AdminApi, ContactsApi, IdentityChangeApi,
+     * EnvelopeApi, PreKeyApi, MatrixApi) is `suspend`; the
+     * IdentityChangeController lambda params are `suspend`. Their callers
+     * were already in suspend contexts (`withContext(Dispatchers.IO)` at
+     * API boundaries, `LaunchedEffect`, `scope.launch`), so **zero caller
+     * changes were needed**. The handler is invoked directly -- no
+     * `runBlocking` bridge. The single-point bridge was the honest Phase 1
+     * trade-off (040-D KDoc, superseded); Phase 2 removed it by making
+     * the entire HTTP surface suspend.
      *
-     * The caller thread is already blocking on OkHttp's synchronous
-     * `execute()`. `runBlocking` adds one more block on the same
-     * thread (the reauth round-trip), so no new deadlock class is
-     * introduced. Callers on Main would throw
-     * `NetworkOnMainThreadException` from OkHttp *before* reaching
-     * this bridge -- the interceptor cannot fire on Main in
-     * practice.
+     * **Dispatcher discipline unchanged.** `suspend fun` does not imply
+     * IO dispatch. Callers MUST dispatch to IO before calling -- a caller
+     * on Main will throw `NetworkOnMainThreadException` from OkHttp
+     * *before* reaching the interceptor. All current callers satisfy
+     * this; future callers must too.
+     *
+     * Verified by: `HttpClientRetryTest` (7 tests, `shouldRetryAfter401`
+     * unchanged predicate), full JVM suite, androidTest per emulator.
      */
-    private fun executeWithRetry(request: Request, retryDepth: Int): HttpResult {
+    private suspend fun executeWithRetry(request: Request, retryDepth: Int): HttpResult {
         val result = try {
             client.newCall(request).execute().use { response ->
                 HttpResult(
@@ -166,7 +164,7 @@ class HttpClient(baseUrl: String) {
         val path = request.url.encodedPath
         if (retryDepth == 0 && shouldRetryAfter401(path, result.code, handler != null)) {
             val freshBearer = try {
-                runBlocking { handler!!.invoke() }
+                handler!!.invoke()
             } catch (e: Exception) {
                 Log.e(
                     TAG,

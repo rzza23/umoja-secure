@@ -26,7 +26,7 @@ data class EnvelopeBody(
 
 class EnvelopeApi(private val http: HttpClient) {
 
-    fun submit(
+    suspend fun submit(
         recipientDeviceId: String,
         ciphertextB64: String,
         sessionToken: String,
@@ -59,7 +59,7 @@ class EnvelopeApi(private val http: HttpClient) {
         }
     }
 
-    fun listPending(sessionToken: String): List<PendingEnvelope> {
+    suspend fun listPending(sessionToken: String): List<PendingEnvelope> {
         val result = try {
             http.get("/envelopes/pending", bearer = sessionToken)
         } catch (e: HttpException) {
@@ -87,7 +87,7 @@ class EnvelopeApi(private val http: HttpClient) {
         }
     }
 
-    fun fetch(envelopeId: String, sessionToken: String): EnvelopeBody {
+    suspend fun fetch(envelopeId: String, sessionToken: String): EnvelopeBody {
         val result = try {
             http.get("/envelopes/$envelopeId", bearer = sessionToken)
         } catch (e: HttpException) {
@@ -112,7 +112,7 @@ class EnvelopeApi(private val http: HttpClient) {
         }
     }
 
-    fun ack(envelopeId: String, sessionToken: String) {
+    suspend fun ack(envelopeId: String, sessionToken: String) {
         try {
             http.postJson("/envelopes/$envelopeId/ack", "{}", bearer = sessionToken)
         } catch (_: Exception) {

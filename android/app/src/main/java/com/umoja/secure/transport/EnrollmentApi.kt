@@ -23,7 +23,7 @@ class EnrollmentApi(private val http: HttpClient) {
      * device_id and organization. On any error, throws EnrollmentException
      * with a stable error code.
      */
-    fun enroll(request: EnrollmentRequest): EnrollmentResponse {
+    suspend fun enroll(request: EnrollmentRequest): EnrollmentResponse {
         val body = JSONObject().apply {
             put("token", request.token)
             put("device_id", request.deviceId)

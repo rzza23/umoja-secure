@@ -5987,12 +5987,24 @@ Backend (new):
 - `backend/scripts/sign-test-notice.ts`, `sign-test-matrix.ts` — signed
   fixture seeders (M, O-2)
 
-**Deferred — `transport/` surface.** `HttpClient`, `AdminApi`,
-`ContactsApi`, `EnvelopeApi`, `PreKeyApi`, `MatrixApi`,
-`IdentityChangeApi`, `Socks5Bridge`, `WebSocketClient`. The pending
-suspend refactor (Phase 2 remaining, 2 sessions) will read these files
-as its preamble and refresh this block then. Documenting them now would
-be re-stale by the refactor.
+`transport/` surface (Session P5-2, suspend refactor landed):
+- `HttpClient.kt` — `postJson`/`get`/`execute`/`executeWithRetry` are
+  `suspend fun`. The `runBlocking` bridge from 040-D is gone; the
+  `on401Handler` is invoked directly. **Dispatcher discipline**: `suspend`
+  does not imply IO dispatch — callers MUST `withContext(Dispatchers.IO)`
+  before calling (all current callers do).
+- `AuthApi.kt`, `ContactsApi.kt`, `AdminApi.kt`, `PreKeyApi.kt`,
+  `EnrollmentApi.kt`, `EnvelopeApi.kt`, `IdentityChangeApi.kt`,
+  `MatrixApi.kt` — all methods `suspend fun`; `MatrixApi` ctor `fetchFn`
+  is `suspend`; `IdentityChangeController`'s `listNotices`/`postAck`
+  lambda params are `suspend`.
+- `Socks5Bridge.kt`, `WebSocketClient.kt` — unchanged (Socks5Bridge is
+  plain JVM; WebSocketClient is callback-driven, not suspend).
+- Zero caller source changes: every existing caller already ran inside
+  `withContext(Dispatchers.IO)` / `LaunchedEffect` / `scope.launch`.
+- Verification: `HttpClientRetryTest` 7 tests unchanged (predicate
+  `shouldRetryAfter401` untouched); full JVM 244/244; androidTest per
+  emulator clean.
 
 ### Verify paths before reading
 

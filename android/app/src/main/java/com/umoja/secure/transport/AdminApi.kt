@@ -32,7 +32,7 @@ class AdminApi(private val http: HttpClient) {
         val expiresAt: String,
     )
 
-    fun createEnrollmentToken(
+    suspend fun createEnrollmentToken(
         req: CreateTokenRequest,
         sessionToken: String,
     ): CreatedToken {
@@ -77,7 +77,7 @@ class AdminApi(private val http: HttpClient) {
         val revokedAt: String?,
     )
 
-    fun listDevices(sessionToken: String): List<DeviceEntry> {
+    suspend fun listDevices(sessionToken: String): List<DeviceEntry> {
         val result = try {
             http.get("/admin/devices", bearer = sessionToken)
         } catch (e: HttpException) {
@@ -105,7 +105,7 @@ class AdminApi(private val http: HttpClient) {
         }
     }
 
-    fun revokeDevice(deviceId: String, reason: String, sessionToken: String) {
+    suspend fun revokeDevice(deviceId: String, reason: String, sessionToken: String) {
         val body = JSONObject().put("reason", reason).toString()
         val result = try {
             http.postJson("/admin/devices/$deviceId/revoke", body, bearer = sessionToken)
@@ -132,7 +132,7 @@ class AdminApi(private val http: HttpClient) {
         val revokedAt: String?,
     )
 
-    fun listContacts(sessionToken: String): List<ContactEntry> {
+    suspend fun listContacts(sessionToken: String): List<ContactEntry> {
         val result = try {
             http.get("/admin/contacts", bearer = sessionToken)
         } catch (e: HttpException) {
@@ -161,7 +161,7 @@ class AdminApi(private val http: HttpClient) {
         }
     }
 
-    fun authorizeContact(
+    suspend fun authorizeContact(
         ownerDeviceId: String,
         contactDeviceId: String,
         sessionToken: String,
@@ -182,7 +182,7 @@ class AdminApi(private val http: HttpClient) {
         }
     }
 
-    fun revokeContact(
+    suspend fun revokeContact(
         ownerDeviceId: String,
         contactDeviceId: String,
         reason: String,

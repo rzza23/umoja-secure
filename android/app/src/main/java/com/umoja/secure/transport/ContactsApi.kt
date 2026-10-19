@@ -17,7 +17,7 @@ class ContactsApi(private val http: HttpClient) {
      * so this list is the enforced view. The client uses it to
      * populate the Contacts screen and to gate sending.
      */
-    fun list(sessionToken: String): List<ContactEntry> {
+    suspend fun list(sessionToken: String): List<ContactEntry> {
         val result = try {
             http.get("/me/contacts", bearer = sessionToken)
         } catch (e: HttpException) {

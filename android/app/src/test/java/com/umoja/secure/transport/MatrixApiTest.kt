@@ -1,5 +1,6 @@
 package com.umoja.secure.transport
 
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
@@ -32,7 +33,7 @@ class MatrixApiTest {
     @Test
     fun `fetch returns RemoteMatrix on 200`() {
         val api = apiReturning(HttpResult(200, validMatrixJson()))
-        val rm = api.fetch("test-token")
+        val rm = runBlocking { api.fetch("test-token") }
         assertEquals(
             """{"domain":"umoja.authorization-matrix.v1","matrix":{}}""",
             rm?.canonicalUtf8,
@@ -45,7 +46,7 @@ class MatrixApiTest {
         val api = apiReturning(
             HttpResult(404, """{"error":"matrix_not_found"}"""),
         )
-        assertNull(api.fetch("test-token"))
+        assertNull(runBlocking { api.fetch("test-token") })
     }
 
     @Test
@@ -54,7 +55,7 @@ class MatrixApiTest {
             HttpResult(401, """{"error":"unauthorized"}"""),
         )
         val e = assertThrows(MatrixApiException::class.java) {
-            api.fetch("test-token")
+            runBlocking { api.fetch("test-token") }
         }
         assertEquals("unauthorized", e.code)
         assertEquals(401, e.httpCode)
@@ -64,7 +65,7 @@ class MatrixApiTest {
     fun `fetch throws invalid_response on malformed JSON`() {
         val api = apiReturning(HttpResult(200, "not-json"))
         val e = assertThrows(MatrixApiException::class.java) {
-            api.fetch("test-token")
+            runBlocking { api.fetch("test-token") }
         }
         assertEquals("invalid_response", e.code)
     }
@@ -73,7 +74,7 @@ class MatrixApiTest {
     fun `fetch throws network_error on HttpException from fetchFn`() {
         val api = apiThrowing(HttpException("boom"))
         val e = assertThrows(MatrixApiException::class.java) {
-            api.fetch("test-token")
+            runBlocking { api.fetch("test-token") }
         }
         assertEquals("network_error", e.code)
         assertTrue(e.cause is HttpException)

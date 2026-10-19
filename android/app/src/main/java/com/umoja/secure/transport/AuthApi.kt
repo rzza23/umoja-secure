@@ -12,7 +12,7 @@ data class SessionResponse(
 
 class AuthApi(private val http: HttpClient) {
 
-    fun requestChallenge(deviceId: String): Challenge {
+    suspend fun requestChallenge(deviceId: String): Challenge {
         val body = JSONObject().apply {
             put("device_id", deviceId)
             put("purpose", "auth")
@@ -47,7 +47,7 @@ class AuthApi(private val http: HttpClient) {
         }
     }
 
-    fun verify(challengeId: String, signatureB64Url: String): SessionResponse {
+    suspend fun verify(challengeId: String, signatureB64Url: String): SessionResponse {
         val body = JSONObject().apply {
             put("challenge_id", challengeId)
             put("signature", signatureB64Url)
@@ -81,7 +81,7 @@ class AuthApi(private val http: HttpClient) {
      * Best-effort: network failures are swallowed (the caller has already
      * cleared local state and the backend session will expire on its own).
      */
-    fun logout(sessionToken: String) {
+    suspend fun logout(sessionToken: String) {
         try {
             http.postJson("/auth/logout", "{}", bearer = sessionToken)
         } catch (_: Exception) {

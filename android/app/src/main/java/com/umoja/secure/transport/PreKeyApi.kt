@@ -53,7 +53,7 @@ data class PeerPreKeyBundle(
 
 class PreKeyApi(private val http: HttpClient) {
 
-    fun upload(request: PreKeyUploadRequest, sessionToken: String): PreKeyUploadResponse {
+    suspend fun upload(request: PreKeyUploadRequest, sessionToken: String): PreKeyUploadResponse {
         val oneTimeArray = JSONArray()
         request.oneTimePreKeys.forEach { otp ->
             oneTimeArray.put(JSONObject().apply {
@@ -106,7 +106,7 @@ class PreKeyApi(private val http: HttpClient) {
         }
     }
 
-    fun status(sessionToken: String): PreKeyStatusResponse {
+    suspend fun status(sessionToken: String): PreKeyStatusResponse {
         val result = try {
             http.get("/prekeys/status", bearer = sessionToken)
         } catch (e: HttpException) {
@@ -132,7 +132,7 @@ class PreKeyApi(private val http: HttpClient) {
         }
     }
 
-    fun fetchBundle(deviceId: String, sessionToken: String): PeerPreKeyBundle {
+    suspend fun fetchBundle(deviceId: String, sessionToken: String): PeerPreKeyBundle {
         val result = try {
             http.get("/prekeys/$deviceId", bearer = sessionToken)
         } catch (e: HttpException) {

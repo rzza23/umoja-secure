@@ -40,7 +40,7 @@ import org.json.JSONObject
  * ADR: ADR-HARDENING-001 §6
  */
 class MatrixApi(
-    private val fetchFn: (sessionToken: String) -> HttpResult,
+    private val fetchFn: suspend (sessionToken: String) -> HttpResult,
 ) {
     data class RemoteMatrix(
         val canonicalUtf8: String,
@@ -52,7 +52,7 @@ class MatrixApi(
      * seeded), throws [MatrixApiException] on 401, other non-200
      * statuses, network failure, or malformed response body.
      */
-    fun fetch(sessionToken: String): RemoteMatrix? {
+    suspend fun fetch(sessionToken: String): RemoteMatrix? {
         val result = try {
             fetchFn(sessionToken)
         } catch (e: HttpException) {

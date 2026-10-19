@@ -52,8 +52,8 @@ import java.security.PublicKey
  * ADR: ADR-IDENTITY-CHANGE-001 §5, §7
  */
 class IdentityChangeController(
-    private val listNotices: (String) -> List<IdentityChangeApi.RemoteNotice>,
-    private val postAck: (String, String, String) -> IdentityChangeApi.AckResponse,
+    private val listNotices: suspend (String) -> List<IdentityChangeApi.RemoteNotice>,
+    private val postAck: suspend (String, String, String) -> IdentityChangeApi.AckResponse,
     private val store: ReplacementNoticeStore,
     private val sessionTokenProvider: () -> String?,
     private val trustedKeys: Set<PublicKey>,
