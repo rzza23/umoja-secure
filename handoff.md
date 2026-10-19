@@ -5781,21 +5781,54 @@ infrastructure (Mac vs emulator) and must not be summed.
 
 ## 8. References for the matrix implementation session
 
+**Provenance note (2026-10-19, Session R-3):** title is from Session A
+(2026-10-15). Section content has been extended since to cover all
+current crypto/code shape; see the "added post-Session-A" block below.
+
 ### Authoritative design
 
 - `docs/architecture/ADR-PROVISIONING-001.md` — §2 (threat-model
   answers), §3 (signing protocol), §4 (matrix schema), §5 (test plan),
-  §6 (11-line plan). Amendment pending (see §5 step 1).
-- `docs/reference/THREAT-MODEL-001.md` §5–§8.
-- `docs/reference/AUTH-SPEC-001.md` §5, §6, §9, §10.
-- `docs/US-ADD-001.md` §7, §8, §8.1 (com.google.* interpretation).
+  §6 (11-line plan), §7.1.1 (Q1/Q4 verification exception; landed
+  Session A at `4abcf53`).
+- `docs/architecture/ADR-IDENTITY-CHANGE-001.md` (v0.4, amended Session
+  R-4 at `5d24621`) — identity-change ack schema, backend relay/verify
+  asymmetry (§4), peer discovery (§5), device_revoked-code
+  propagation (§10 v0.4).
+- `docs/architecture/ADR-HARDENING-001.md` (§9 amendments v0.2/v0.3/v0.4
+  through Session T-1 at `29ff6cc`) — session state machine (§2),
+  release-build hardening (§3), send-gating verification (§4),
+  out-of-scope list (§5), sequencing (§6), 037–041 completion
+  record (§9).
+- `docs/architecture/ADR-SIGNAL-UPGRADE-001.md` (v0.2, Session Z-7 at
+  `5fd44aa`) — libsignal version decision, verified facts (§5.2),
+  human approval record (§5.4), execution path (§6), regression
+  gate (§7). Executed at `97279b1`.
+- `docs/reference/THREAT-MODEL-001.md` (v0.2, conformance-swept Session
+  V-1 at `5655318`) §5–§9. Reconciliation-drift correction propagated
+  to US-MASTER-001 §3.5.
+- `docs/reference/AUTH-SPEC-001.md` (v0.3, conformance-swept Session U-3
+  at `349b268`; §9.2/§9.3 amended at X-1 `ed47e7a`) §5, §6, §9, §10.
+- `docs/US-ADD-001.md` (v0.3, conformance-swept Session W-1 at
+  `20771af`) §7, §8, §8.1 (com.google.* interpretation).
+- `docs/US-MASTER-001.md` (v0.2, Session W-1 at `3720b59`) — summary /
+  synthesis; propagates fixes from AUTH-SPEC/THREAT-MODEL/ADR-PROVISIONING
+  (see §3.5 for the cross-document propagation pattern).
+- `docs/reference/USER-ONBOARDING.md` — user-facing companion to the
+  implementer-facing specs (Session U-2 at `2bb3cf3`). Same claims,
+  different register; every claim carries a `Source:` line.
 - `UMOJA-SECURE-BUILD-MASTER.md` §3.6, §3.7, §3.8, §6, §11.
 
 ### Conformance data
 
 - `docs/reference/rfc8785-number-samples.json` — 24 samples.
-- `docs/reference/jcs-conformance/` — 6 pairs.
-- `docs/reference/canonical-matrix-test-vectors.json` — generated.
+- `docs/reference/jcs-conformance/` — 6 pairs (Apache 2.0).
+- `docs/reference/canonical-matrix-test-vectors.json` — generated
+  (W-001..W-006, Session A `e6eed9b`).
+- `docs/reference/canonical-replacement-notice-test-vectors.json` —
+  generated (R-001..R-003, Session F `d28c631`).
+- `docs/reference/canonical-identity-change-ack-test-vectors.json` —
+  generated (A-001, Session I `ed271ac`).
 
 ### Current code shape
 
@@ -5836,10 +5869,57 @@ Android — pre-existing, unchanged:
 - `android/.../transport/{AdminApi,ContactsApi,Socks5Bridge}.kt`
 - `android/.../ui/admin/AdminScreen.kt` — extended in P1-025
 
+### Code shape — added post-Session-A
+
+Surfaces added by Sessions F through Z-9. File names abbreviated
+for scannability; the source files carry full KDoc.
+
+Android `crypto/` (new):
+- `MatrixVerifier.kt` — Ed25519 verify against trusted set (A c2)
+- `MatrixStore.kt` — verified-matrix persistence; anti-rollback (E);
+  `version: StateFlow<Long>` write-notification (P D-1)
+- `ProvisioningKeys.kt` — pinned pubkeys; current/recovery/previous
+  seams for rotation (A)
+- `DeviceIdStore.kt` — durable client-chosen `device_id` (A/P1-019)
+- `EnrollmentQrPayload.kt` — QR producer matching P1-025 parser (A)
+- `Base64UrlValidation.kt` — shared internal validators (U-1 dedupe)
+- `CryptoJsonHelpers.kt`, `CryptoException.kt` — shared helpers (J)
+- `WipeConfirmationKeyManager.kt` — one-shot wipe key (A)
+- `ReplacementNotice{,Signer,Verifier,Store}.kt` — identity-change
+  continuity (F, J, K)
+- `IdentityChangeAck{,Signer}.kt`, `IdentityChangeController.kt` — ack
+  schema/sign/orchestration (I, K)
+- `SendGate.kt` — fail-closed send-path predicate (P)
+- `VerificationFailureStore.kt` — operator failure log (T-1)
+
+Android `auth/` and `ui/` (new):
+- `SessionStateManager.kt` — 7-state session lifecycle (R-2);
+  single-flight Mutex + CompletableDeferred
+- `SessionScreens.kt` — terminal-state composables (R-3)
+- `SecureScreen.kt` — `FLAG_SECURE` composition wrapper (Q)
+
+Backend (new):
+- `backend/src/crypto/replacement-notice.ts` — signed notice schema (F)
+- `backend/src/crypto/identity-change-ack.ts` — signed ack schema + verify (I)
+- `backend/src/identityChange/` — services + routes for notices/acks
+  relay (H); `relay → store-verbatim → verify-on-ack` asymmetry per
+  ADR-IDENTITY-CHANGE-001 §4
+- `backend/src/ws/revocation.ts` — LISTEN/NOTIFY prompt-wake with
+  reconnect + reconcile (P1-042, X-1)
+- `backend/scripts/sign-test-notice.ts`, `sign-test-matrix.ts` — signed
+  fixture seeders (M, O-2)
+
+**Deferred — `transport/` surface.** `HttpClient`, `AdminApi`,
+`ContactsApi`, `EnvelopeApi`, `PreKeyApi`, `MatrixApi`,
+`IdentityChangeApi`, `Socks5Bridge`, `WebSocketClient`. The pending
+suspend refactor (Phase 2 remaining, 2 sessions) will read these files
+as its preamble and refresh this block then. Documenting them now would
+be re-stale by the refactor.
+
 ### Verify paths before reading
 
-    find ~/umoja-secure/backend/src -name "*.ts" | grep -E "crypto|admin|enroll|contact|session|canonical" | sort
-    find ~/umoja-secure/android/app/src -name "*.kt" | grep -E "Admin|Contact|Device|Signal|Session|Canonical|Jcs|Matrix|Provisioning" | sort
+    find ~/umoja-secure/backend/src -name "*.ts" | grep -E "crypto|admin|enroll|contact|session|canonical|identity|replacement|ws/|audit|auth" | sort
+    find ~/umoja-secure/android/app/src -name "*.kt" | grep -E "Admin|Contact|Device|Signal|Session|Canonical|Jcs|Matrix|Provisioning|Identity|Replacement|SendGate|Verification|SecureScreen|EnrollmentQr|Http|Api" | sort
 
 ### Notes for a new agent
 
@@ -5851,6 +5931,16 @@ authoritative. Do not "fix" the old commit label.
 **Canonical document provenance.** `US-ADD-001`, `US-MASTER-001`,
 `AUTH-SPEC-001`, `THREAT-MODEL-001` were authored 2026-10-14. They did
 not exist before. Each carries a §1 Provenance section recording this.
+
+**§8 currency (2026-10-19).** The "Current code shape" section was
+accurate as of Session A. The "added post-Session-A" block above
+catches the crypto surface added by Sessions F through Z-9. The
+`transport/` surface is deliberately deferred to the pending suspend
+refactor’s preamble — the refactor reads those files anyway, so
+updating the listing now would be re-stale by the refactor. The
+section title still says "matrix implementation session"; the
+content has outgrown that scope, and the provenance note at the
+top names it.
 
 **If a security-relevant question arises that none of these answers,
 do not guess. STOP and escalate, per Build Master §0.**
