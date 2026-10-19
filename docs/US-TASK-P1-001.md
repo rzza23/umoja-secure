@@ -486,6 +486,14 @@ Add to acceptance criteria:
 
 **Status:** Proposed (blocked until human approves native code path)
 
+**Decision artifact:** `docs/architecture/ADR-SIGNAL-UPGRADE-001.md`
+(v0.1, 2026-10-18, commit `aa6860e`, Session Z-6). Names the version
+candidates, breaking-change checklist, **human approval gate (§5's
+four questions)**, execution path (P2-2 through P2-5), regression
+gate, pin migration plan, rollback plan. **Human approval on §5 is
+the next step; no version changes, pin migrations, or test changes
+ship until that approval lands.**
+
 ### TASK-P1-013 — Backend stack
 
 **Objective:**

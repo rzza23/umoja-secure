@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session Z-5 — Compose refactor arc, session D and ARC COMPLETE: ChatScreenTest at `9bfdfab`, 14 Compose tests. Arc delivered in four sessions: A (AdminScreenState refactor, `2804427`), B (AdminScreenStateTest, `a6de609`), C (ChatViewModel injectable + test, `bd8a6e7` — **plan revision**: ChatScreenState planned in Z-2, cancelled on C1 evidence; ChatViewModel refactored instead as the actual untested surface), D (ChatScreenTest, `9bfdfab`). All 14 tests pass on `createComposeRule()` (SecureScreen's null-safe cast makes pure composition safe). Fixtures seeded through `KeyValueStore` -- no network, no real crypto. Zero production code changes this session. Measurement diagnosis cost four blocks: three failed grep approaches to reading JUnit XML (parent-sum → 142, first-match → 1, substring-name → 15) before `xml.etree.ElementTree` produced the correct 71. **Three new §7 lessons** on structural data parsing. Backend 254, Android JVM 244, androidTest 57 → 71. **Deferral CLOSED: 5 of 5 sub-deliverables landed.** **No blocking work remains.** Next: Phase 2 OR nothing -- choice, not obligation.)
+Last updated: 2026-10-18 (Session Z-6 — Phase 2 opening: `ADR-SIGNAL-UPGRADE-001` v0.1 at `aa6860e`. Design-only session, 306 lines, 11 sections. **TASK-P1-005's native-code gate is the blocker**: the ADR escalates it (Build Master §0: escalate, do not guess), it does not bypass it. Contains: current-state inventory (3 files with libsignal imports, 31 distinct imports, 6 fragility points, 28 androidTests as regression suite); version decision (A: stay at 0.81.1/0.86.5, B: 0.94.0 Signal-Android recommended contingent on external verification, C: 0.99.3 upstream); breaking-change checklist tiered by expected stability; **human approval gate** (§5's four questions: version choice, supply-chain change, AGPLv3 posture, regression-discipline commitment); execution path P2-2 through P2-5 contingent on approval; regression gate (28 tests must pass); pin migration to libs.versions.toml; rollback plan; out-of-scope list. No code, no version bumps, no test changes. Backend 254, Android JVM 244, androidTest 71 — all unchanged. **No blocking work remains, but the next concrete step is human review of §5 of the ADR.** Next: human approval on the ADR (then P2-2) OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -3575,6 +3575,95 @@ in A and C) emulator acceptance.
 
 **Three new §7 lessons earned** (the measurement chain) — see below.
 
+
+### Session Z-6 — Phase 2 opening: ADR-SIGNAL-UPGRADE-001 (2026-10-18)
+
+First Phase-2 session. Design-only. One commit: `aa6860e` —
+`ADR-SIGNAL-UPGRADE-001` v0.1 (306 lines, 11 sections). No code, no
+version bumps, no test changes.
+
+**WHY DESIGN-FIRST.** TASK-P1-005's registry status is **"Proposed
+(blocked until human approves native code path)"**, with acceptance
+criterion "Human approved all native-code work." Build Master §0 says
+escalate, do not guess. The right first move is not to plan the
+upgrade execution — it is to make the approval question concrete
+enough that a human can answer it. Session G (ADR-IDENTITY-CHANGE-001,
+401 lines of design, zero code) is the precedent this session follows.
+
+**WHAT THE ADR CONTAINS.** From a full reconnaissance read at HEAD
+`80dc9e3`:
+
+- §2 Current-state inventory: 3 files with libsignal imports
+  (`PersistentSignalProtocolStore` 410 lines, `SignalIdentityStore`
+  172, `MessagingService` 396); 31 distinct libsignal imports
+  enumerated; 6 fragility points named (FP-1 through FP-6) where the
+  code depends on shape, not just type — 33-byte identity
+  serialization with 0x05 prefix, split pub/priv workaround (KDoc
+  says the alternative crashes JNI on some emulators), markKyber
+  PreKeyUsed signature, PREKEY_TYPE/WHISPER_TYPE constants,
+  InMemorySignalProtocolStore constructor, IdentityChange enum names;
+  28 androidTests across 3 files (635 lines) as the regression suite.
+
+- §3 Version decision: three candidates (A: stay at 0.81.1/0.86.5 —
+  zero risk, no security fixes; B: 0.94.0 Signal-Android — latest
+  Android-context version, but not on Maven Central, requires Signal's
+  artifact repo; C: 0.99.3 upstream — latest protocol, but not an
+  Android distribution and may not be Maven-published). **Recommends B
+  contingent on two external verifications at execution time:** Maven
+  Central's current latest, and Signal-Android artifact access path.
+  Names what collapses each candidate. Does not settle the choice.
+
+- §4 Breaking-change checklist: 31 imports tiered by expected
+  stability (Tier 1 likely stable, Tier 2 needs changelog verification,
+  Tier 3 known-fragile = FP-1..FP-6). Comparison method: read the
+  changelog, read the target source, compile against the target — in
+  that order. Do not guess at API stability.
+
+- §5 **Human approval gate**: TASK-P1-005 status restated; four
+  questions the human is being asked (version choice; supply-chain
+  change off Maven Central if B or C; AGPLv3 posture for the newer
+  artifact; regression-discipline commitment); the three things the
+  ADR cannot answer (all external facts); what-happens-if-denied
+  (pins stay, mismatch documented as deliberate, project continues).
+
+- §6 Execution path contingent on approval: 4–5 sessions P2-2
+  through P2-5 (external verification + AGPL notice; catalog migration
+  + review; bump + adaptation + integration doc; regression
+  verification). Ordering: external verification is the gate for
+  everything else; catalog migration before version bump so rollback
+  of the bump doesn't also need to roll back the migration.
+
+- §7 Regression gate: 28 androidTests must pass. Do not edit tests to
+  pass a broken upgrade; production code absorbs API changes, tests
+  assert invariants (never change) vs construct fixtures via API (may
+  change).
+
+- §8–§11: pin migration to libs.versions.toml (behavior-neutral,
+  separate commit); rollback plan (one-commit-or-none at each phase,
+  never partial-revert); out-of-scope list; revision history.
+
+**THE ADR DOES NOT SETTLE WHICH OF A/B/C IS CORRECT.** It names the
+recommendation and the two external facts that would collapse the
+candidate set. Human approves the target version after those facts
+are confirmed at execution time.
+
+**Escalation, not execution.** Denying approval is a legitimate
+outcome (§5.3). The ADR makes the question concrete; the human
+decides. If approved, P2-2 opens as a new session. If denied, the
+ADR records the reasoning and the project continues with current
+pins.
+
+**Process note.** This session also confirmed the §7 heredoc rule
+exists for a reason: a 250-line ADR draft was initially attempted as
+a single heredoc, the paste fragmented mid-block, and the recovery
+was to write via TextEdit + verify with grep (the §7 "prefer a text
+editor for content over ~150 lines" rule). The rule was on disk; it
+was the correct response to the failure; no new §7 lesson added
+because the existing one covers it exactly.
+
+**Counts.** Backend 254, Android JVM 244, androidTest 71 — all
+unchanged (docs-only session).
+
 ---
 
 ## 4. Known issues
@@ -4291,10 +4380,16 @@ Original phrasing preserved below for history:
 
     **No blocking tasks remain.** The next session's shape is a
     choice, not a backlog obligation:
-    - **Phase 2 preparation** — dependency version review, libsignal
-      upgrade path, networking layer suspend refactor (removes the
-      runBlocking bridge in HttpClient.executeWithRetry per 040-D-1's
-      KDoc), reference doc refresh.
+    - **Phase 2 preparation** — **libsignal upgrade path documented
+      in `ADR-SIGNAL-UPGRADE-001` (`aa6860e`, Session Z-6); awaiting
+      human approval on the native-code gate (§5's four questions).**
+      Once approved, P2-2 through P2-5 execute the upgrade per the
+      ADR's execution path. Dependency version review, networking
+      layer suspend refactor (removes the runBlocking bridge in
+      HttpClient.executeWithRetry per 040-D-1's KDoc), and reference
+      doc refresh remain scheduled after the libsignal arc per the
+      ADR's sequencing (suspend refactor is distinct sub-effort,
+      ordered last).
     - **Backlog hygiene** — `MessageStore` SQLite connection leak
       (production bug, dozens/sec during cold launch); KI-016
       base64url validator dedupe; KI-008 `canonicalJson` dedupe;
