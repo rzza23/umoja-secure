@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-19 (Session Z-8 — Phase 2, libsignal arc CLOSED: upgrade 0.81.1/0.86.5 → 0.105.0 (both artifacts) at `97279b1`. **Approved round (Z-7) executed.** Four mechanical-fix rounds: (1) SessionBuilder/SessionCipher 3-arg form (constructor arity), (2) PreKeySignalMessage property accessors → method calls, (3) catalog swap in build.gradle.kts, (4) **argument-order asymmetry** — SessionBuilder takes (remote, local), SessionCipher takes (local, remote), which compile-clean upgrade failed at runtime with NoSessionException; source-read of libsignal v0.105.0 confirmed and fix applied. **Gate: 71/71 per emulator, 0 failures, 29/29 libsignal target tests** (X3DH 7, PSPST 14, Smoke 8 — **28→29 correction** named in LIBSIGNAL-REVIEW §6). Three docs written: AGPL-NOTICE, LIBSIGNAL-REVIEW (with "do not consistify" warning on arg-order), LIBSIGNAL-INTEGRATION. **ADR §5.4 interpretation ruling named:** param reorder treated as mechanical (§5.4's literal "renames only" wording didn't anticipate reorder; ruling recorded in commit body + ADR-referenced docs). Backend 254, Android JVM 244, androidTest 71 — unchanged. **No blocking work remains.** Next: dependency version review (TASK-P1-027) OR suspend refactor of HttpClient.executeWithRetry (2 sessions) OR nothing — choice, not obligation.)
+Last updated: 2026-10-19 (Session Z-9 — Phase 2, TASK-P1-027(a) executed: dependency review with ws CVE fix at `9a1173e` (ws 8.18.0 → 8.22.0, GHSA-58qx-3vcg-4xpx + GHSA-96hv-2xvq-fx4p, HIGH). Review record at `0071aa6`: `docs/security/DEPENDENCY-REVIEW.md` (6 sections, 5 findings), `DEPENDENCY-EXCEPTIONS.md` §1 RESOLVED entry, `artifacts/` (README + dep-tree.json, first tracked snapshot). **TASK-P1-027 SPLIT:** 027a (per-session review, executed) + 027b (CI gate, blocked on CI-provider decision). Registry v0.7 → v0.8, total 43 → 44. **Prohibited-package SBOM check: CLEAN.** Backend 254, Android JVM 244, androidTest 71 — all unchanged. **No blocking work remains.** Next: suspend refactor of HttpClient.executeWithRetry (2 sessions) OR P1-027b (needs CI provider) OR reference doc refresh OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -3839,6 +3839,83 @@ documented, JNI documented, version review documented).
 **Counts.** Backend 254, Android JVM 244, androidTest 71 — all
 unchanged (only version swap + mechanical adaptation; no test adds).
 
+
+### Session Z-9 — Phase 2, TASK-P1-027(a): dependency review executed (2026-10-19)
+
+Fourth Phase-2 session. Two commits: `9a1173e` (ws CVE fix) +
+`0071aa6` (review record + artifacts + registry split).
+
+**SCOPE RECOGNITION.** TASK-P1-027's title — "SBOM + dependency
+review gate" — exceeded what the project can execute today. The
+SBOM and review halves are executable; the gate half requires CI
+that doesn't exist (no `.github/`, no pipeline config, no automation).
+Splitting the task was the honest response, not narrowing the work.
+Same class as Sessions C and V-1's plan revisions on evidence.
+
+**WHAT THE EXECUTION FOUND.** One HIGH-severity CVE — the first
+REAL security finding of the project, not a doc inconsistency.
+
+- `ws@8.18.0` had two advisories: GHSA-58qx-3vcg-4xpx (CVSS 4.4,
+  uninitialized memory disclosure) and GHSA-96hv-2xvq-fx4p
+  (CVSS 7.5, memory-exhaustion DoS). npm audit aggregates to HIGH.
+- Reached by both the direct devDependency (`^8.18.0`) and
+  transitively via `@fastify/websocket@11.0.1` (`^8.16.0`).
+- Per Build Master §6: "HIGH/CRITICAL: PR blocked until fixed or
+  documented exception." Per §6: "Agent must not add
+  `.npmrc` overrides to silence warnings." Sanctioned path was
+  direct range bump — → `^8.22.0`, resolved to 8.22.0.
+- `npm audit` after: 0 critical, 0 high, 0 moderate, 0 low.
+- Backend test suite: 254/254 green, no behavior regression.
+- Fix commit `9a1173e` (2 files: package.json + package-lock.json).
+
+**FOUR MORE FINDINGS, NONE CVE-grade:**
+
+- `fsevents@2.3.3` install script un-covered by `allowScripts` —
+  observed, not a defect (the discipline is working correctly).
+- `artifacts/` directory was absent despite Build Master §6 step 3
+  naming `artifacts/dep-tree.json`. Created this session.
+- No CI exists. Deferred to P1-027b.
+- Android has no dependency tooling. Deferred to P1-027b (gradle
+  task + CI both required).
+
+**THE FOUR DELIVERABLES.**
+
+1. `docs/security/DEPENDENCY-REVIEW.md` (new, 6 sections): scope,
+   inventory (22 direct backend deps, depth distribution), method
+   (exact commands + structural SBOM parse), findings log (5 entries),
+   cadence (manual-review gap named), related documents.
+2. `DEPENDENCY-EXCEPTIONS.md` §1: RESOLVED entry for ws — both
+   GHSAs, CVSS, mitigation, fix-commit reference, plus an explicit
+   "Distinction from an active exception" paragraph so no future
+   reader mistakes it for a retention entry.
+3. `artifacts/` (new): `README.md` (refresh discipline) +
+   `dep-tree.json` (first committed snapshot, 22 direct deps,
+   post-ws-fix state). Per the README, snapshot refreshes when
+   lockfile changes only.
+4. Registry v0.7 → v0.8: P1-027 split into §A entries for 027a
+   ("Executed 2026-10-19") and 027b ("New, blocked on CI-provider
+   decision"). §C row split, total 43 → 44.
+
+**PROCESS NOTES.**
+
+- **Partial-write discovered mid-session:** The version bump block
+(P4-1g-4b) preflighted on `Version: 0.7` at count 0. Actual was
+  `Version: 0.8` — a prior block had partially written the field.
+  Robust-fix approach: regex anchor + read current value + only
+  change if different. This is the correct pattern when a mid-
+  session abort leaves the target in partial state. Worth noting
+  because the alternative (abort again on unexpected current value)
+  would have looped without progress.
+- **The count=2 class of sanity-gate failures** recurred four times
+  this session (arc CLOSED, git-status grep, zxing, 97279b1). Each
+  was legitimate content at count=2 (heading + body reference, or
+  two independent mentions). Same family as Z-4/Z-5's lessons —
+  already on disk (§7 twelfth/thirteenth). Applied via `grep -n`
+  verification before re-gating, not re-learned as new lessons.
+
+**Counts.** Backend 254, Android JVM 244, androidTest 71 per
+emulator — all unchanged (fix + docs only; no test adds).
+
 ---
 
 ## 4. Known issues
@@ -4555,16 +4632,15 @@ Original phrasing preserved below for history:
 
     **No blocking tasks remain.** The next session's shape is a
     choice, not a backlog obligation:
-    - **Phase 2 preparation** — **libsignal arc CLOSED.** Upgrade to
-      0.105.0 (both artifacts) executed at `97279b1` (Session Z-8);
-      approved at `5fd44aa` (Session Z-7). All three TASK-P1-005 doc
-      acceptance criteria satisfied: AGPL-NOTICE, LIBSIGNAL-REVIEW,
-      LIBSIGNAL-INTEGRATION. Full androidTest gate: 71/71 per emulator,
-      zero failures. **Remaining Phase-2 sub-efforts:** dependency
-      version review (TASK-P1-027, unscheduled), networking-layer
-      suspend refactor (removes the runBlocking bridge in
-      HttpClient.executeWithRetry per 040-D-1's KDoc; 2 sessions),
-      reference doc refresh. Both unstarted, neither blocked.
+    - **Phase 2 preparation** — **libsignal arc CLOSED** at
+      `97279b1`. **TASK-P1-027a EXECUTED** at `0071aa6` (dependency
+      review record, artifacts/, ws CVE fix at `9a1173e`).
+      **TASK-P1-027b** (CI enforcement gate + Android dependency
+      tooling) filed, blocked on CI-provider decision. **Remaining
+      sub-efforts:** networking-layer suspend refactor of
+      `HttpClient.executeWithRetry` (2 sessions, per 040-D-1 KDoc);
+      reference doc refresh (handoff §8 staleness). Both
+      unstarted, neither blocked.
     - **Backlog hygiene** — `MessageStore` SQLite connection leak
       (production bug, dozens/sec during cold launch); KI-016
       base64url validator dedupe; KI-008 `canonicalJson` dedupe;
