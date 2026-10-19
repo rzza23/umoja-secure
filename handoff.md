@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-18 (Session Z-6 — Phase 2 opening: `ADR-SIGNAL-UPGRADE-001` v0.1 at `aa6860e`. Design-only session, 306 lines, 11 sections. **TASK-P1-005's native-code gate is the blocker**: the ADR escalates it (Build Master §0: escalate, do not guess), it does not bypass it. Contains: current-state inventory (3 files with libsignal imports, 31 distinct imports, 6 fragility points, 28 androidTests as regression suite); version decision (A: stay at 0.81.1/0.86.5, B: 0.94.0 Signal-Android recommended contingent on external verification, C: 0.99.3 upstream); breaking-change checklist tiered by expected stability; **human approval gate** (§5's four questions: version choice, supply-chain change, AGPLv3 posture, regression-discipline commitment); execution path P2-2 through P2-5 contingent on approval; regression gate (28 tests must pass); pin migration to libs.versions.toml; rollback plan; out-of-scope list. No code, no version bumps, no test changes. Backend 254, Android JVM 244, androidTest 71 — all unchanged. **No blocking work remains, but the next concrete step is human review of §5 of the ADR.** Next: human approval on the ADR (then P2-2) OR nothing — choice, not obligation.)
+Last updated: 2026-10-18 (Session Z-7 — ADR approval round: `ADR-SIGNAL-UPGRADE-001` v0.1 → v0.2 at `5fd44aa`. **Approved: target 0.105.0** (both artifacts), from `https://build-artifacts.signal.org/libraries/maven/`, anonymously. **Version correction:** the registry note (US-TASK-P1-001 line 703) was ~15 releases stale when written — it said Signal-Android 0.94.0 / upstream 0.99.3, but actual was 0.105.0 / 0.105.1. Target corrected from v0.1's 0.94.0 recommendation to 0.105.0 based on verified facts. **Four section-5 questions answered** (§5.4 approval record): version (0.105.0), supply-chain (Signal's repo, anonymously accessible per their settings.gradle.kts), AGPLv3 (confirm only at build time), regression rule (28/28 absolute, mechanical renames only). **Plan revision:** v0.1's 4–5 sessions → 2–3 because P2-2 (external verification) collapsed into the approval round. Backend 254, Android JVM 244, androidTest 71 — unchanged. **P2-3 (execution) is the next session, unblocked.** Next: P2-3 OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -3664,6 +3664,93 @@ because the existing one covers it exactly.
 **Counts.** Backend 254, Android JVM 244, androidTest 71 — all
 unchanged (docs-only session).
 
+
+### Session Z-7 — ADR approval round: ADR-SIGNAL-UPGRADE-001 v0.1 → v0.2 (2026-10-18)
+
+Second Phase-2 session. Doc-only. One commit: `5fd44aa` — ADR v0.2,
+405 lines (up from 306). No code, no version bumps, no test changes.
+
+**WHAT HAPPENED.** The human's four section-5 questions from the
+Session Z-6 close were escalated, then verified, then answered. The
+external facts named in v0.1's §5.2 as "cannot answer" became the
+following verified facts in v0.2's §5.2:
+
+- **F-1: Maven Central is at 0.86.5** for both artifacts, last updated
+  2025-11-17. Nothing newer. Candidate A (stay) is not a neutral option —
+  it means staying at 0.86.5 indefinitely, with the mismatched pins
+  (0.86.5 client / 0.81.1 AAR) as a latent correctness issue.
+
+- **F-2: Signal-Android ships 0.105.0** from
+  `https://build-artifacts.signal.org/libraries/maven/`, **anonymously**.
+  Verifiable from Signal-Android's `gradle/libs.versions.toml`
+  (`libsignal-client = "0.105.0"` for both artifacts) and
+  `settings.gradle.kts` (repo declared, no credentials block — contrast
+  with the adjacent build-cache repo which does have credentials).
+
+- **F-3: Upstream is at 0.105.1** (2026-10-15). One patch ahead of
+  Signal-Android's production pin. Not Android-targeted; not consumed by
+  Signal-Android yet.
+
+**THE VERSION CORRECTION.** v0.1's recommendation was 0.94.0, contingent
+on verification. The verification showed the recommendation was based on
+a stale source — the registry note (US-TASK-P1-001 line 703, written
+2026-10-17) said "Maven 0.86.5; upstream 0.99.3; Signal-Android 0.94.0."
+The upstream and Signal-Android figures were already ~15 releases stale
+*when written*, not when read. Approved target: **0.105.0**.
+
+**FOUR QUESTIONS ANSWERED** (§5.4 approval record):
+
+1. Target version: **0.105.0** (both artifacts aligned). Rejects A
+   (11 months of missing security updates); defers C (0.105.1 is one
+   patch ahead but not Android-targeted).
+2. Supply-chain: **Approved.** Signal's official Maven repo, anonymously
+   accessible. No new trust relationship beyond what libsignal already
+   implies.
+3. AGPLv3: **Confirm only.** Execution reads the LICENSE bundled in the
+   0.105.0 artifact; if still AGPLv3 with no additional clauses, proceed.
+   Material change means stop and re-escalate.
+4. Regression rule: **Approved as absolute.** 28 androidTests must pass.
+   Mechanical API renames at test call sites allowed; no test deletions,
+   no weakened assertions.
+
+**PLAN REVISION.** v0.1 estimated 4–5 sessions (P2-2 through P2-5).
+P2-2 was scoped as "read external changelog + confirm artifact
+availability + write AGPL-NOTICE" — those verifications happened in
+the approval round itself. v0.2's §6.1 revised plan: **2–3 sessions**
+(P2-3 execution, P2-4 regression verification). May collapse to one
+session if the 0.86.5→0.105.0 API diff is mechanical.
+
+**VERSION-NOTE STALENESS — the session's durable lesson.** The registry
+note was 15 releases stale when written, not when read. Version notes
+in static documents go stale fast; verify at execution time, not from
+the document. Same class as KI-013 (do not propagate test counts from
+prior handoffs) and the §7 rule "counts from runner output." Recorded
+in v0.2 §6.1 so a future session reading the ADR encounters the lesson
+at the point of relevance.
+
+**THE ONE FACT STILL PENDING.** The exact 0.86.5 → 0.105.0
+breaking-change inventory (v0.1 §4's checklist). v0.2 §5.2's "Fact
+still pending at execution" paragraph names the method: read the
+per-version release notes on GitHub (0.86.6 through 0.105.1), then
+compile against target — in that order, per §4's "do not guess at
+API stability" rule. This is P2-3's first task, not an unverified fact
+slipping past the approval.
+
+**PROCESS NOTE.** The session included a recovery from a bad input: a
+pasted AI response recommended 0.94.0 based on the same stale registry
+note. The response's *structural reasoning* was sound — use Signal's
+repo, treat AGPL as confirm-only, back the 28-test rule — but its
+version numbers were wrong. The response's URL
+(`build-artifacts.signal.org`) turned out to be correct; its version
+claims did not. The handling: incorporate the structural points,
+reject the version numbers, verify everything against primary sources
+(Signal-Android's build files, Maven Central metadata, GitHub
+releases). Same discipline as V-1's cross-document propagation —
+citation-by-primary-source, not citation-by-prior-claim.
+
+**Counts.** Backend 254, Android JVM 244, androidTest 71 — all
+unchanged.
+
 ---
 
 ## 4. Known issues
@@ -4380,16 +4467,22 @@ Original phrasing preserved below for history:
 
     **No blocking tasks remain.** The next session's shape is a
     choice, not a backlog obligation:
-    - **Phase 2 preparation** — **libsignal upgrade path documented
-      in `ADR-SIGNAL-UPGRADE-001` (`aa6860e`, Session Z-6); awaiting
-      human approval on the native-code gate (§5's four questions).**
-      Once approved, P2-2 through P2-5 execute the upgrade per the
-      ADR's execution path. Dependency version review, networking
+    - **Phase 2 preparation** — **libsignal upgrade path APPROVED.**
+      `ADR-SIGNAL-UPGRADE-001` v0.2 (`5fd44aa`, Session Z-7) names the
+      target: **0.105.0** (both artifacts) from
+      `https://build-artifacts.signal.org/libraries/maven/`,
+      anonymously. Four questions answered (§5.4); plan revised 4–5 →
+      2–3 sessions. **Next: P2-3 (execution).** Everything the execution
+      session needs is on disk: target version, source URL, 28-test gate,
+      allowed-edits rule, required doc writes (AGPL-NOTICE,
+      LIBSIGNAL-REVIEW, LIBSIGNAL-INTEGRATION). The one fact still
+      pending: the exact 0.86.5→0.105.0 breaking-change inventory —
+      P2-3's first task (read per-version GitHub release notes, then
+      compile against target). Dependency version review, networking
       layer suspend refactor (removes the runBlocking bridge in
       HttpClient.executeWithRetry per 040-D-1's KDoc), and reference
       doc refresh remain scheduled after the libsignal arc per the
-      ADR's sequencing (suspend refactor is distinct sub-effort,
-      ordered last).
+      ADR's sequencing.
     - **Backlog hygiene** — `MessageStore` SQLite connection leak
       (production bug, dozens/sec during cold launch); KI-016
       base64url validator dedupe; KI-008 `canonicalJson` dedupe;

@@ -484,15 +484,17 @@ Add to acceptance criteria:
 - [ ] Build succeeds on arm64-v8a, armeabi-v7a, x86_64.
 - [ ] Human approved all native-code work.
 
-**Status:** Proposed (blocked until human approves native code path)
+**Status:** **APPROVED 2026-10-18** — target 0.105.0 from Signal's Maven
+repository, 28-test absolute gate. Awaiting execution (P2-3).
 
 **Decision artifact:** `docs/architecture/ADR-SIGNAL-UPGRADE-001.md`
-(v0.1, 2026-10-18, commit `aa6860e`, Session Z-6). Names the version
-candidates, breaking-change checklist, **human approval gate (§5's
-four questions)**, execution path (P2-2 through P2-5), regression
-gate, pin migration plan, rollback plan. **Human approval on §5 is
-the next step; no version changes, pin migrations, or test changes
-ship until that approval lands.**
+**v0.2** (2026-10-18, commit `5fd44aa`, Session Z-7). Supersedes v0.1
+(`aa6860e`, Session Z-6). v0.2 records the approval: four section-5
+questions answered (§5.4); target corrected from v0.1's 0.94.0 to
+0.105.0 based on verified facts (§5.2); plan revised 4–5 → 2–3
+sessions because P2-2 (external verification) collapsed into the
+approval round. **Next: P2-3 execution.** No version changes, pin
+migrations, or test changes ship until P2-3's 28-test gate passes.
 
 ### TASK-P1-013 — Backend stack
 
