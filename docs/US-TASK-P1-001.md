@@ -793,7 +793,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-030 | Replacement-device flow | 9 | Updated |
 | TASK-P1-031 | Audit hash-chain verification | 10 | Restored |
 | TASK-P1-032 | Resolved-dependency inspection | 1 | New |
-| TASK-P1-033a | Offline signing — backend POST /admin/matrices/:device_id + verify | 1 | New |
+| TASK-P1-033a | Offline signing — backend POST /admin/matrices/:device_id + verify | 1 | Executed 2026-10-20 |
 | TASK-P1-033b | Offline signing — admin-side export/import/push | 1 | New |
 | TASK-P1-033c | Offline signing — signing build flavor + SigningActivity | 1 | New |
 | TASK-P1-033d | Offline signing — ceremony runbook | 0.5 | New |

@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-20 (Session Z-14 — Phase 1 DoD, TASK-P1-033 SPLIT into 033a–033e in registry v0.9 → v0.10 (total 45 → 49). Preparatory session — no code. Split justified by recon: P1-033's 40-line §B body was drafted when the ceremony was one deliverable; P1-037 (matrix transport GET) landed since, and the offline-app packaging decision (build flavor vs separate module) is now resolvable from KEY-CUSTODY §4. **Three architectural decisions recorded:** (1) POST /me/matrix verifies the provisioning signature server-side (verify-on-write, relay-on-read — ADR-IDENTITY-CHANGE-001 §4's ruling, since the backend can hold the pubkey via env config); (2) non-monotonic pushes rejected 409 `matrix_version_not_monotonic` — client anti-rollback rule applied at the write boundary; (3) offline app = `signing` build flavor + `SIGNING_ONLY` guards, not a separate module — the physical device enforces network isolation; compile-time guards are defense-in-depth. **Two acceptance criteria deferred to siblings:** rotation → P1-036, revocation → P1-035. **Next: P1-033a** (backend POST /me/matrix + signature verification, ~1 session).
+Last updated: 2026-10-20 (Session Z-15 — **P1-033a DONE** at `221c98f` (Phase 1 DoD, offline signing ceremony, backend half). `POST /admin/matrices/:device_id` in `admin.ts` (`requireAdmin`): verify-on-write per ADR-IDENTITY-CHANGE-001 §4 (backend holds `PROVISIONING_PUBKEY_B64U` env now; GET /me/matrix keeps its relay per the ADR's "verify when you can, relay when you can't" ruling); `version = parse(canonical).version`; non-monotonic reject 409 `matrix_version_not_monotonic`; device_id-match invariant (migration 016's pre-announced missing check) enforced. `env.ts` gains `PROVISIONING_PUBKEY_B64U` with test/prod gate (parallel to P1-029b's client-side). Nine new route tests. Backend 254 → 263. **Recon caught at first test run:** W-001's `matrix.device_id = "device-001"` is not UUID-shaped; route URL param requires UUID; fix builds freshly-signed matrices with UUID device_id from the same test seed (W-001 ground-truth preserved, signature not invalidated). **Next: P1-033b** (admin-side signing flow: `MatrixApi.push` + `AdminScreenState`) OR P1-035 (recovery-key ceremony — design exists) OR P1-027b (needs CI provider) OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -46,7 +46,7 @@ Authoritative documents (all exist on disk):
 
 - Node.js 24.x, Fastify 5.12.5, PostgreSQL 16
 - Docker-deployable (docker compose up -d --build from repo root)
-- **254 tests passing** (20 files; verified 2026-10-18 via
+- **263 tests passing** (20 files; verified 2026-10-20 via
   `npm test`. Sessions C–F added matrix-version, floor stamping,
   replacement-notice. Session H added identity-change services (7
   validator tests) and routes (17 route tests). Session I added the
@@ -54,7 +54,9 @@ Authoritative documents (all exist on disk):
   unchanged. Session M added the `sign-test-notice.ts` helper script
   (no test coverage, exercised manually). Session N design-only,
   no backend changes. Session O-1 added matrix transport: migration
-  016, GET /me/matrix, 5 route tests.)
+  016, GET /me/matrix, 5 route tests. Session Z-15 added
+  `POST /admin/matrices/:device_id` + verify-on-write + 9 route
+  tests.)
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -4356,6 +4358,122 @@ production. Rot seam named in KDoc (single key today; P1-036 extends
 to `{previous, current}` set). GET /me/matrix KDoc gains the
 verify-on-write/relay-on-read asymmetry note in the same commit.
 
+
+### Session Z-15 — TASK-P1-033a DONE: POST /admin/matrices/:device_id (2026-10-20)
+
+First code session of the P1-033 arc. Backend write path for the
+offline signing ceremony. Three files, one commit: `221c98f`.
+**033a DONE end-to-end.**
+
+**WHAT SHIPPED.**
+
+- `backend/src/routes/admin.ts` +151: `POST /admin/matrices/:device_id`
+  (`requireAdmin`). Verify-on-write via `verifyMatrix` (which
+  re-canonicalizes per §3.8, so non-canonical JSON that parses to
+  the same matrix fails at verify — correct, the ceremony requires
+  JCS). Enforces `parse(canonical).matrix.device_id === urlParam`
+  (migration 016's pre-announced missing invariant). Enforces
+  `version = parse(canonical).version` (migration 016's column
+  invariant). Rejects `version <= existing.version` with 409
+  `matrix_version_not_monotonic` (mirrors `MatrixStore.accept`'s
+  client rule at the write boundary). Stores `jcsCanonicalize(parsed)`
+  as `canonical_bytes` — the exact form the signature verified.
+  Rotation seam named in KDoc: single key today, P1-036 extends to
+  `{previous, current}` set.
+- `backend/src/config/env.ts` +48: `PROVISIONING_PUBKEY_B64U` schema
+  field (43-char base64url, optional at zod level). `loadEnv`
+  enforces: `NODE_ENV=test` + absent → test-key default;
+  `NODE_ENV=prod` + absent → exit(1); `NODE_ENV=prod` + == test
+  key → exit(1); `NODE_ENV=prod` + == placeholder (43 underscores)
+  → exit(1). Parallel to P1-029b's client-side check; both sides of
+  the ceremony fail closed on the same conditions from the same
+  spec (`KEY-CUSTODY.md` §5.1).
+- `backend/test/matrix-transport.test.ts` +336/-1: 9 new tests
+  (`TEST-MATRIX-PUSH-VALID`, `-INVALID-SIG`, `-INVALID-BODY`,
+  `-INVALID-MATRIX`, `-DEVICE-ID-MISMATCH`, `-NON-MONOTONIC`,
+  `-DEVICE-NOT-FOUND`, `-UNAUTHENTICATED`, `-FORBIDDEN-USER`). 5
+  existing GET tests preserved.
+
+**VERIFY-ON-WRITE EXECUTED.** The split (Z-14) named this decision
+based on ADR-IDENTITY-CHANGE-001 §4: before 033a the backend held
+no provisioning pubkey, so GET /me/matrix's relay was correct. Adding
+`PROVISIONING_PUBKEY_B64U` gives the backend the key — the ADR's
+own logic ("verify when you can, relay when you can't") then requires
+verification at the write boundary. Asymmetry is named in the POST
+route's KDoc (GET KDoc unchanged — its claim is still accurate for
+its path). Client verification on receipt remains (P1-037 defense in
+depth).
+
+**THE FINDING THAT MATTERED — caught at first test run.** First
+run of the 9 POST tests: 5 failed with `invalid input syntax for
+type uuid: "device-001"`. W-001's `matrix.device_id` is the literal
+string `"device-001"` — a placeholder from Session A's vector
+generator, not UUID-shaped. The route's URL param validator requires
+UUID (`devices.device_id` is a UUID PRIMARY KEY). Tests calling
+`createTargetDevice(TEST_ORG_ID, w001.device_id)` failed at the
+INSERT before any assertion ran.
+
+Two responses were available:
+
+1. **Edit W-001** to use a UUID. **Rejected.** W-001 is ground truth
+   (§7: "Corpus files are ground truth"); its signature is over the
+   exact bytes in the file. Editing `device_id` invalidates the
+   signature, breaking the 5 GET tests that assert byte-for-byte
+   round-trip.
+2. **Build freshly-signed matrices in the tests.** Chosen. New
+   `deriveTestPrivateKey()` + `buildSignedMatrix()` helpers derive
+   the same test seed the vector generator uses (HKDF-SHA256 →
+   PKCS8 Ed25519, mirroring `sign-test-matrix.ts`) and sign a
+   matrix with a real UUID `device_id`. `beforeAll` gains a
+   self-check: derives the pubkey, asserts it matches
+   `w001.pubkey_raw` — if HKDF derivation ever drifts from the
+   generator, the suite fails loudly at `beforeAll` (before any POST
+   test), not silently as 9 `invalid_signature` failures.
+
+The recon-first discipline is what caught this: the failing tests
+were diagnostic, not destructive — nothing shipped with a broken
+route. Had the tests been written to pass without asserting against
+a real UUID-shaped device, the route would have passed review while
+being untestable on the first real push. Same class as Session P's
+D-1 finding: the case that distinguishes correct from sticky-open
+is the one not in the initial hypothesis set.
+
+**A SECOND FINDING — the typecheck fix.** First typecheck run
+caught one error: `admin.ts(276,34): error TS2532: Object is
+possibly 'undefined'` on `existing.rows[0].version` behind an
+`existing.rowCount === 1` guard. `noUncheckedIndexedAccess` doesn't
+narrow through `rowCount` checks. Fix: extract `const existingRow =
+existing.rows[0]` then guard `existingRow !== undefined` — pattern
+(a) from Session H's typed-query lessons. Same family as `tx.query<T>()`
+in `identityChange` services; not a new §7 lesson.
+
+**NO NEW §7 LESSONS.** Both findings belong to families already on
+disk:
+
+- W-001-not-UUID: same family as Session P's D-1 (initial-hypothesis
+  set misses the distinguishing case) and §7's "corpus files are
+  ground truth."
+- `rows[0]` typecheck: same family as Session H's typed-query lessons
+  (§7 pattern (a) and (b)).
+
+Recording the absence is honest — the discipline applied, the
+lessons held, no fourteenth bullet was needed.
+
+**COUNTS.**
+
+  Backend:     254 → 263 (+9)
+  Android JVM: 246 (unchanged)
+  androidTest: 71  (unchanged)
+  Registry:    v0.10, total 49 (033a status: New → Executed 2026-10-20)
+
+**NEXT: P1-033b** — admin-side signing flow. `MatrixApi.push()`
+(`suspend fun push(targetDeviceId: String, remote: RemoteMatrix,
+sessionToken: String)`), `AdminScreenState` gains
+`exportForSigning()` / `importSignature()` / `pushSignedMatrix()`.
+AdminScreen UI: QR render of canonical + hash, signature ingest (QR
+scanner or paste field per P1-025's debug path), push button. Error
+states mirror `AdminApiException` taxonomy. ~1 session.
+
 ---
 
 ## 4. Known issues
@@ -5077,20 +5195,22 @@ Original phrasing preserved below for history:
       `runBlocking` bridge removed; §8 transport deferral closed.
       `HttpClientRetryTest` 7 tests unchanged; JVM 244/244;
       androidTest 71/71 per emulator.
-    - **Phase-1 DoD gaps (Build Master §10) — P1-029 DONE.**
-      Design (029a) landed at `29cd7bf` (`KEY-CUSTODY.md`, 287 lines).
-      Implementation (029b) landed at `7c02d16` (ProvisioningKeys
-      DEBUG/PROD split, 2 new §5.1 tests, `UmojaApplication` startup
-      assertion). **Next unblocked:** P1-033 (offline signer — the
-      design exists; generates the production key that replaces the
-      `PRODUCTION_PROVISIONING_PUBKEY_B64U` placeholder), P1-035
-      (recovery-key ceremony — also has its design in
-      `docs/ops/KEY-CUSTODY.md` §3). **Hardware-blocked:** P1-021a
-      (emergency lock), P1-021b (duress wipe), P1-034 (TEE Ed25519
-      verification on target hardware). **Organizational-blocked:**
-      P1-027b (CI-provider decision). **Independent of all:** P1-024
-      (external security review), scheduled against a candidate
-      release.
+    - **Phase-1 DoD gaps (Build Master §10) — P1-033 IN PROGRESS.**
+      **P1-029 DONE:** design `29cd7bf` (`KEY-CUSTODY.md`, 287 lines);
+      implementation `7c02d16` (ProvisioningKeys DEBUG/PROD split,
+      `UmojaApplication` startup assertion). **P1-033 split into
+      033a–033e (Z-14); 033a DONE at `221c98f`** — backend
+      `POST /admin/matrices/:device_id` with verify-on-write,
+      device_id-match invariant, non-monotonic reject. **Next:**
+      033b (admin client flow: `MatrixApi.push` + `AdminScreenState`)
+      → 033c (signing build flavor) → 033d (ceremony runbook) →
+      033e (end-to-end drill). **Also unblocked:** P1-035 (recovery
+      key ceremony — design exists in `docs/ops/KEY-CUSTODY.md` §3).
+      **Hardware-blocked:** P1-021a (emergency lock), P1-021b (duress
+      wipe), P1-034 (TEE Ed25519 verification on target hardware).
+      **Organizational-blocked:** P1-027b (CI-provider decision).
+      **Independent of all:** P1-024 (external security review),
+      scheduled against a candidate release.
     - **TASK-P1-027b** — CI enforcement gate + Android dependency
       tooling. Blocked on CI-provider decision (organizational, not
       technical). Session opens when that decision exists.
@@ -6225,8 +6345,8 @@ Rebuild after flipping — read at HttpClient construction time.
 
 Current verified state: **246 Android JVM tests** (2026-10-19),
 **71 androidTest** (2026-10-18, 8 files, from connectedAndroidTest XML
-aggregate `<testsuites tests="71">` -- not grep-summed), and **254
-backend tests** (2026-10-18, 20 files), all from runner output.
+aggregate `<testsuites tests="71">` -- not grep-summed), and **263
+backend tests** (2026-10-20, 20 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
 infrastructure (Mac vs emulator) and must not be summed.
 
