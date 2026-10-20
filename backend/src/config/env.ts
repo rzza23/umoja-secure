@@ -19,6 +19,16 @@ const EnvSchema = z.object({
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, 'AUDIT_HASH_KEY must be 32 bytes hex (64 chars)'),
   SERVER_ID: z.string().min(1).default('umoja-backend-1'),
+  // P1-033a. The provisioning public key used to verify
+  // POST /admin/matrices/:device_id bodies. Optional at schema
+  // level; loadEnv enforces test-vs-production rules below.
+  PROVISIONING_PUBKEY_B64U: z
+    .string()
+    .regex(
+      /^[A-Za-z0-9_-]{43}$/,
+      'PROVISIONING_PUBKEY_B64U must be 43-char base64url (32 raw bytes)',
+    )
+    .optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -32,7 +42,44 @@ function loadEnv(): Env {
     console.error(parsed.error.flatten().fieldErrors);
     process.exit(1);
   }
-  return parsed.data;
+  // P1-033a. Test-vs-production gate, parallel to the client-side
+  // check at ProvisioningKeys.kt + UmojaApplication.kt (TASK-P1-029b).
+  // The backend MUST NOT verify matrices against the test key in
+  // production, and MUST NOT start with the 43-underscore placeholder.
+  // Reasoning: docs/ops/KEY-CUSTODY.md section 5.1.
+  const TEST_KEY = 'hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M';
+  const PLACEHOLDER = '___________________________________________';
+  let pubkey = parsed.data.PROVISIONING_PUBKEY_B64U;
+  if (!pubkey) {
+    if (parsed.data.NODE_ENV === 'test') {
+      pubkey = TEST_KEY;
+    } else {
+      // eslint-disable-next-line no-console
+      console.error(
+        'PROVISIONING_PUBKEY_B64U is required in non-test environments. ' +
+          'See docs/ops/KEY-CUSTODY.md section 5.1.',
+      );
+      process.exit(1);
+    }
+  }
+  if (parsed.data.NODE_ENV === 'production' && pubkey === TEST_KEY) {
+    // eslint-disable-next-line no-console
+    console.error(
+      'PROVISIONING_PUBKEY_B64U cannot be the test key in production ' +
+        '(docs/ops/KEY-CUSTODY.md section 5.1).',
+    );
+    process.exit(1);
+  }
+  if (parsed.data.NODE_ENV === 'production' && pubkey === PLACEHOLDER) {
+    // eslint-disable-next-line no-console
+    console.error(
+      'PROVISIONING_PUBKEY_B64U is still the ceremony placeholder ' +
+        '(docs/ops/KEY-CUSTODY.md section 5.1). Replace it before ' +
+        'running the production backend.',
+    );
+    process.exit(1);
+  }
+  return { ...parsed.data, PROVISIONING_PUBKEY_B64U: pubkey };
 }
 
 export const env: Env = loadEnv();

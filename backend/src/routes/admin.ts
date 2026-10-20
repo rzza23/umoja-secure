@@ -25,6 +25,12 @@ import {
   getMatrixVersion,
 } from '../admin/matrixVersions.js';
 
+import { pool } from '../db/client.js';
+import { env } from '../config/env.js';
+import { jcsCanonicalize } from '../crypto/jcs.js';
+import { validateSignedMatrix, type SignedMatrix } from '../crypto/matrix-schema.js';
+import { verifyMatrix } from '../crypto/matrix-sign.js';
+
 const CreateTokenBody = z.object({
   role: z.enum(['owner', 'admin', 'user', 'auditor']),
   label_hint: z.string().max(64).optional(),
@@ -154,6 +160,152 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         }
         throw err;
       }
+    },
+  );
+
+  // ---------- Matrices ----------
+
+  /**
+   * POST /admin/matrices/:device_id -- admin pushes a signed
+   * authorization matrix for a target device.
+   *
+   * Build Master §3.6 step 8: "**Admin app** attaches the
+   * signature and pushes the signed matrix." Admin-scoped: the
+   * admin's session authenticates; the URL names the target device
+   * being provisioned.
+   *
+   * **Verify-on-write.** The backend verifies the provisioning
+   * signature server-side against `PROVISIONING_PUBKEY_B64U`
+   * (docs/ops/KEY-CUSTODY.md §5.1). The corresponding
+   * `GET /me/matrix` relays (its KDoc names the asymmetry). Per
+   * ADR-IDENTITY-CHANGE-001 §4's ruling ("verify when you can,
+   * relay when you can't"), the backend has the key here, so it
+   * verifies.
+   *
+   * **Invariant enforcement** (migration 016's pre-announced
+   * missing invariant):
+   *   - `parse(canonical).matrix.device_id === urlParam`
+   *   - `version` stored = `parse(canonical).matrix.version`
+   *   - non-monotonic push rejected 409
+   *
+   * **Rotation seam.** Single key today
+   * (`env.PROVISIONING_PUBKEY_B64U`). P1-036 extends to a
+   * `{previous, current}` set during overlap; this route must
+   * accept either key when that lands.
+   *
+   * Task: TASK-P1-033a
+   * Build Master: §3.6 step 8
+   * ADR: ADR-PROVISIONING-001 §3, ADR-IDENTITY-CHANGE-001 §4
+   */
+  app.post(
+    '/admin/matrices/:device_id',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      const params = z
+        .object({ device_id: z.string().uuid() })
+        .safeParse(req.params);
+      if (!params.success) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const body = z
+        .object({
+          canonical_utf8: z.string().min(1).max(65536),
+          signature_base64url: z.string().regex(/^[A-Za-z0-9_-]{86}$/),
+        })
+        .safeParse(req.body);
+      if (!body.success) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+
+      // Parse + validate the canonical matrix. validateSignedMatrix
+      // throws MatrixSchemaError on any schema violation; we treat
+      // that as 400 invalid_matrix.
+      let parsed: SignedMatrix;
+      try {
+        parsed = validateSignedMatrix(JSON.parse(body.data.canonical_utf8));
+      } catch {
+        return reply.code(400).send({ error: 'invalid_matrix' });
+      }
+
+      // Verify the provisioning signature. verifyMatrix re-canonicalizes
+      // per §3.8, so a client sending non-canonical bytes that parse
+      // to the same matrix will fail here -- correct behavior, the
+      // ceremony requires JCS.
+      const pubkeyB64u = env.PROVISIONING_PUBKEY_B64U;
+      if (!pubkeyB64u) {
+        // loadEnv guarantees this (test default or provided); reachable
+        // only if env.ts invariants change.
+        throw new Error('PROVISIONING_PUBKEY_B64U not loaded');
+      }
+      const ok = verifyMatrix(
+        parsed,
+        body.data.signature_base64url,
+        Buffer.from(pubkeyB64u, 'base64url'),
+      );
+      if (!ok) {
+        return reply.code(400).send({ error: 'invalid_signature' });
+      }
+
+      // Device-id invariant: the matrix's device_id must equal the
+      // URL param. Migration 016's KDoc pre-announced this as the
+      // write-path check that was missing.
+      if (parsed.matrix.device_id !== params.data.device_id) {
+        return reply.code(400).send({ error: 'device_id_mismatch' });
+      }
+
+      // Confirm the target device exists in the admin's org
+      // (defense-in-depth; the FK would fail at INSERT otherwise,
+      // but 404 is a better signal than an FK 500).
+      const target = await pool.query<{ device_id: string }>(
+        `SELECT device_id FROM devices WHERE device_id = $1 AND org_id = $2`,
+        [params.data.device_id, req.device!.org_id],
+      );
+      if (target.rowCount !== 1) {
+        return reply.code(404).send({ error: 'device_not_found' });
+      }
+
+      // Non-monotonic reject. Client MatrixStore.accept enforces
+      // this on receipt; mirrored here at the write boundary so a
+      // compromised admin session cannot downgrade a matrix.
+      const existing = await pool.query<{ version: number }>(
+        `SELECT version FROM matrices WHERE device_id = $1`,
+        [params.data.device_id],
+      );
+      const existingRow = existing.rows[0];
+      if (
+        existingRow !== undefined &&
+        parsed.matrix.version <= existingRow.version
+      ) {
+        return reply.code(409).send({
+          error: 'matrix_version_not_monotonic',
+        });
+      }
+
+      // Store canonical bytes (re-canonicalized via jcsCanonicalize,
+      // so stored form == verified form).
+      const canonical_bytes = jcsCanonicalize(parsed);
+
+      await pool.query(
+        `INSERT INTO matrices
+           (device_id, canonical_bytes, signature_base64url, version)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (device_id) DO UPDATE
+           SET canonical_bytes = EXCLUDED.canonical_bytes,
+               signature_base64url = EXCLUDED.signature_base64url,
+               version = EXCLUDED.version,
+               updated_at = now()`,
+        [
+          params.data.device_id,
+          canonical_bytes,
+          body.data.signature_base64url,
+          parsed.matrix.version,
+        ],
+      );
+
+      return reply.code(201).send({
+        device_id: params.data.device_id,
+        version: parsed.matrix.version,
+      });
     },
   );
 
