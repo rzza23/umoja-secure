@@ -18,6 +18,13 @@ class UmojaApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // TASK-P1-033c. Signing flavor carries no transport, no
+        // WebSocket, no matrix verification. The client-flavor
+        // assertions below are client-only by construction; the
+        // signing flavor short-circuits before them.
+        if (BuildConfig.SIGNING_ONLY) {
+            return
+        }
         // ADR-HARDENING-001 §3 startup assertion. Today
         // TransportConfig.useTor is `val = !BuildConfig.DEBUG`, so
         // this check is satisfied by construction — tautological on
@@ -65,7 +72,12 @@ class UmojaApplication : Application() {
     }
 
     override fun onTerminate() {
-        webSocketClient.shutdown()
+        // TASK-P1-033c. In signing flavor webSocketClient is never
+        // initialized; ::webSocketClient.isInitialized is the honest
+        // guard (lateinit access would throw UninitializedPropertyAccessException).
+        if (!BuildConfig.SIGNING_ONLY && ::webSocketClient.isInitialized) {
+            webSocketClient.shutdown()
+        }
         super.onTerminate()
     }
 }

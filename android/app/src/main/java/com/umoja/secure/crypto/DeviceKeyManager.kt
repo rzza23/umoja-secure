@@ -28,6 +28,13 @@ class DeviceKeyManager(
 ) {
     companion object {
         const val DEFAULT_ALIAS = "umoja.device.identity.v1"
+        // TASK-P1-033c. The provisioning key that signs authorization
+        // matrices. Distinct alias from the device auth key: separate
+        // Keystore entry, separate prefs slot. Generated ONLY in the
+        // signing flavor's ceremony mode (KEY-CUSTODY §2); never in
+        // the client flavor. The signing flavor's SigningScreen refuses
+        // to sign if hasKey() returns false (decision 1, fail-closed).
+        const val PROVISIONING_ALIAS = "umoja.provisioning.v1"
         private const val KEYSTORE = "AndroidKeyStore"
         private const val HW_ALGORITHM = "Ed25519"
         private const val SW_PROVIDER = "BC"

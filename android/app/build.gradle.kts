@@ -21,6 +21,39 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // P1-033c: signing flavor split.
+    //
+    // Two build flavors:
+    //   - client:  the ordinary Umoja app. Full transport, WebSocket,
+    //              matrix verification. SIGNING_ONLY=false.
+    //   - signing: the offline ceremony device. NO transport code
+    //              reachable (TransportConfig throws), NO WebSocket
+    //              (UmojaApplication short-circuits), NO matrix
+    //              verification (ProvisioningKeys routing does not
+    //              apply), NO MainActivity (removed via src/signing/
+    //              AndroidManifest.xml). Only SigningActivity, only
+    //              reachable via ADB. SIGNING_ONLY=true.
+    //
+    // Workflow cost: gradle task names gain the flavor prefix.
+    //   installDebug            -> installClientDebug
+    //   testDebugUnitTest       -> testClientDebugUnitTest
+    //   connectedAndroidTest    -> connectedClientAndroidTest
+    // Session entries before Z-17 used the pre-flavor names; they
+    // are historical, not corrected.
+    flavorDimensions += "mode"
+    productFlavors {
+        create("client") {
+            dimension = "mode"
+            buildConfigField("boolean", "SIGNING_ONLY", "false")
+        }
+        create("signing") {
+            dimension = "mode"
+            applicationIdSuffix = ".signing"
+            versionNameSuffix = "-signing"
+            buildConfigField("boolean", "SIGNING_ONLY", "true")
+        }
+    }
+
     buildTypes {
         release {
             optimization {

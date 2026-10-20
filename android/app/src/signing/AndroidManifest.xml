@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application>
+        <activity
+            android:name=".MainActivity"
+            tools:node="remove" />
+        <activity
+            android:name=".signing.SigningActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:label="Umoja Signing"
+            android:theme="@style/Theme.UmojaSecure" />
+    </application>
+</manifest>

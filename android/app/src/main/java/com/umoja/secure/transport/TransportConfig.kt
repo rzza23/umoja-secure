@@ -47,6 +47,23 @@ object TransportConfig {
     const val SOCKS_HOST: String = "127.0.0.1"
     const val SOCKS_PORT: Int = 9050
 
-    val httpBaseUrl: String get() = if (useTor) TOR_HTTP else CLEARNET_HTTP
-    val wsUrl: String get() = if (useTor) TOR_WS else CLEARNET_WS
+    // TASK-P1-033c. The signing flavor has no transport. Accessing
+    // either URL in that flavor is a bug in the caller -- fail closed
+    // with a loud crash, not a silent no-op or a dead string.
+    // `useTor` itself is a harmless boolean and stays readable; the
+    // network URLs are what any accidental transport call needs.
+    val httpBaseUrl: String
+        get() {
+            check(!BuildConfig.SIGNING_ONLY) {
+                "TransportConfig.httpBaseUrl accessed in signing flavor"
+            }
+            return if (useTor) TOR_HTTP else CLEARNET_HTTP
+        }
+    val wsUrl: String
+        get() {
+            check(!BuildConfig.SIGNING_ONLY) {
+                "TransportConfig.wsUrl accessed in signing flavor"
+            }
+            return if (useTor) TOR_WS else CLEARNET_WS
+        }
 }
