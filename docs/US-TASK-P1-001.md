@@ -796,7 +796,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-033a | Offline signing — backend POST /admin/matrices/:device_id + verify | 1 | Executed 2026-10-20 |
 | TASK-P1-033b | Offline signing — admin-side export/import/push | 1 | Executed 2026-10-20 |
 | TASK-P1-033c | Offline signing — signing build flavor + SigningActivity | 1 | Executed 2026-10-20 |
-| TASK-P1-033d | Offline signing — ceremony runbook | 0.5 | New |
+| TASK-P1-033d | Offline signing — ceremony runbook | 0.5 | Executed 2026-10-20 |
 | TASK-P1-033e | Offline signing — end-to-end drill | 0.5 | New |
 | TASK-P1-034 | Hardware-backed Ed25519 Keystore verification | 2 | New |
 | TASK-P1-035 | Organization recovery key | 3.5 | New |

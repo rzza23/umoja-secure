@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-20 (Session Z-17 — **P1-033c DONE** at `efb2edf`. Build flavor split: `client` (ordinary app, unchanged at 260 JVM) + `signing` (offline signer, `.signing` suffix, no launcher, transport guarded, WebSocket skipped, 274 JVM including 14 new `SigningStateTest`). `SigningActivity` reachable only via `adb shell am start` (no launcher icon). `DeviceKeyManager.PROVISIONING_ALIAS` const. **Manifest verified at the artifact level** (aapt: signing APK has no `launchable-activity`, MainActivity absent, SigningActivity present; client APK unchanged) and **runtime smoke on emulator-5556** (both APKs install, client launches clean, launcher query returns only client). Build failure along the way: XML `--` inside a comment (fixed by moving ADB syntax to SigningActivity KDoc). Workflow break: `installDebug` → `installClientDebug`; §6 updated. **Next: P1-033d** (ceremony runbook) OR P1-033e (e2e drill, needs 033d + air-gapped hardware) OR P1-035 (recovery-key ceremony) OR P1-027b (needs CI provider) OR nothing — choice, not obligation.)
+Last updated: 2026-10-20 (Session Z-18 — **P1-033d DONE** at `dc01a1d`. Operational runbook `docs/ops/PROVISIONING-CEREMONY.md` (585 lines, 9 sections): the two-person procedure for key generation (Part A) and routine matrix signing (Part B). Two print-ready paper log templates. Step A.2.7 names the backend `PROVISIONING_PUBKEY_B64U` env config — a real 033a dependency not in Build Master §3.6. Step A.2.5 records attestation as "NOT AVAILABLE (pending P1-034)" — gap recorded, not hidden. Execution-status section honestly declares: no production ceremony executed; runbook is specification-of-procedure until P1-033e. **P1-033 arc is 4 of 5 sub-tasks closed; 033e is hardware-blocked** (needs air-gapped Pixel 7+ StrongBox; not available on this workstation). Backend 263, Android JVM 260 client / 274 signing, androidTest 71 — all unchanged (doc-only session). **Next: P1-035** (recovery-key ceremony — design exists, unblocked) OR P1-033e (blocked on hardware) OR P1-027b (needs CI provider) OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -4698,6 +4698,103 @@ chain of custody (§4.4). Links to KEY-CUSTODY §2's 8-step
 generation ceremony. Names the backend `PROVISIONING_PUBKEY_B64U`
 env config step (033a's dependency). Doc-only, ~1 session.
 
+
+### Session Z-18 — TASK-P1-033d DONE: provisioning ceremony runbook (2026-10-20)
+
+Fourth and final code-or-doc session of the P1-033 arc. The offline
+signing ceremony's operational procedure now exists as a followable
+document. One commit: `dc01a1d`.
+
+**WHAT SHIPPED.** `docs/ops/PROVISIONING-CEREMONY.md` (585 lines,
+9 sections). Structure:
+
+- Purpose + execution status: honest declaration that no production
+  ceremony has been executed; the runbook is a *specification of
+  procedure* until P1-033e runs it. The `Drill 001` block is a
+  template with angle-bracket placeholders, not an actual entry.
+- Part A — generation ceremony: 7 prerequisites, 8 executable steps
+  (KEY-CUSTODY §2.1 operationalized), print-ready paper log template,
+  completion checklist.
+- Part B — signing ceremony: 5 prerequisites, 8 executable steps
+  (KEY-CUSTODY §2.4 operationalized), print-ready paper log template,
+  completion checklist.
+- Part C — failure handling (abort discipline, never-resume-partial).
+- Part D — audit trail and retention (Safe #1, 7-year minimum,
+  two-person retrieval).
+- Part E — six explicitly-named out-of-scope areas (recovery key,
+  rotation, compromise recovery, attestation, test drill, backend ops).
+
+**REFERENCES VS DUPLICATES.** The runbook references KEY-CUSTODY §2.1/
+§2.4 as the design (cryptographic protocol lives there); it does not
+rewrite those sections. It adds three things that didn't exist:
+print-ready paper log templates (KEY-CUSTODY mentions "paper record"
+7 times but never defines its fields — the templates are the durable
+artifacts two operators actually write in); the backend
+`PROVISIONING_PUBKEY_B64U` env config step (A.2.7 — a real 033a
+dependency not in Build Master §3.6's 9-step list); and the
+explicit abort-discipline language naming what failure means at
+each step.
+
+**HONESTY MARKERS.** Step A.2.5 records attestation verification as
+"NOT AVAILABLE (pending TASK-P1-034)" as a valid state — the current
+signing app doesn't export an attestation chain, so the ceremony
+team writes "NOT AVAILABLE (pending P1-034)" on the paper log
+instead of pretending it was verified. The execution-status section
+declares the runbook unexecuted until 033e runs it. Part E names
+six things the runbook does not cover, each cross-referenced to its
+owning task.
+
+**TWO PROCESS NOTES — both already-covered families, both worth
+naming.**
+
+1. **Heredoc fragmentation, then editor recovery.** First write
+   attempt used a 370-line `python3 <<'PYEOF'` heredoc. The paste
+   fragmented mid-block; zsh left the terminal waiting for the
+   closing delimiter. Recovery: `touch` + `open -e` + editor paste
+   (one file open, one paste, one save). This is *exactly* §7's
+   "prefer a text editor for content over ~150 lines" guidance,
+   which the session violated and then re-validated. Not a new
+   §7 bullet — an instance of the existing one.
+
+2. **"585 vs 380" false alarm — audit before acting.** After the
+   editor save, `wc -l` reported 585 against my ~380 estimate. The
+   tempting response was to trim or rewrite. Instead, ran a
+   structural audit: H1 count (2 — one title, one shell comment in
+   a code fence), H2 count (9, all distinct), H3 count (8, all
+   distinct), body markers (2 `Ceremony ID:`, 1 `Drill 001`, 1
+   `Step A.2.1`, 1 `Step B.2.7`, 1 `Revision history`), transition
+   line numbers monotonic. No duplication. The 585 was real content
+   — paper logs alone are ~70 lines each — and 141 blank lines
+   (~24%) is normal for markdown with this much code. **My estimate
+   was wrong; the file was correct.** The audit caught it before a
+   false-trim-before-commit. Same family as §7's "a count is not
+   proof; verify against the source" (KI-013) and "grep returning 0
+   is ambiguous between content absent and pattern wrong." Not a
+   new bullet — a demonstration of the existing one.
+
+**ARC STATUS — P1-033 is 4 of 5.** 033a (backend, `221c98f`),
+033b (admin client, `691d27d`), 033c (signing app, `efb2edf`), 033d
+(runbook, `dc01a1d`). **033e (end-to-end drill) is hardware-blocked**:
+needs an air-gapped Pixel 7+ with StrongBox that isn't available on
+this workstation. Considered splitting 033e into 033e-1 (emulator
+drill) + 033e-2 (StrongBox drill, hardware-blocked) and decided
+**against** — the emulator drill can't prove StrongBox TEE isolation,
+attestation, two-person physical discipline, or air-gapped isolation,
+which are 033e's core acceptance criteria. A runbook-typo catch is a
+real benefit but not what 033e exists to prove. 033e stays one task,
+honestly blocked on hardware. Registry stays at total 49; no split
+amendment this session.
+
+**COUNTS.** Backend 263, Android JVM 260 client / 274 signing,
+androidTest 71 — all unchanged (doc-only). Registry v0.10 unchanged
+(033d status: New → Executed 2026-10-20).
+
+**NEXT: P1-035** (recovery-key ceremony — design exists in
+`docs/ops/KEY-CUSTODY.md` §3, unblocked) is the natural next arc.
+P1-033e sits blocked on hardware; when an air-gapped Pixel 7+ is
+available, 033e opens as a ceremony-execution session against this
+runbook. P1-027b still needs a CI-provider decision.
+
 ---
 
 ## 4. Known issues
@@ -5419,7 +5516,7 @@ Original phrasing preserved below for history:
       `runBlocking` bridge removed; §8 transport deferral closed.
       `HttpClientRetryTest` 7 tests unchanged; JVM 244/244;
       androidTest 71/71 per emulator.
-    - **Phase-1 DoD gaps (Build Master §10) — P1-033 IN PROGRESS.**
+    - **Phase-1 DoD gaps (Build Master §10) — P1-033 IN PROGRESS (4/5).**
       **P1-029 DONE:** design `29cd7bf` (`KEY-CUSTODY.md`, 287 lines);
       implementation `7c02d16` (ProvisioningKeys DEBUG/PROD split,
       `UmojaApplication` startup assertion). **P1-033 split into
@@ -5428,17 +5525,21 @@ Original phrasing preserved below for history:
       device_id-match invariant, non-monotonic reject. **033b DONE at
       `691d27d`** — `MatrixApi.push` + `AdminScreenState`
       (`importSignature` / `clearSignature` / `pushSignedMatrix`) +
-      AdminScreen push Card. **033c DONE at `efb2edf`** —
-      `signing` build flavor + `SigningActivity` + `SigningScreen`;
-      signing APK has no launcher, MainActivity removed, transport
-      guarded, WebSocket skipped (artifact-level manifest verified).
-      **Next:** 033d (ceremony runbook) → 033e (end-to-end drill). **Also
-      unblocked:** P1-035 (recovery key ceremony — design exists in
-      `docs/ops/KEY-CUSTODY.md` §3). **Hardware-blocked:** P1-021a
-      (emergency lock), P1-021b (duress wipe), P1-034 (TEE Ed25519
-      verification on target hardware). **Organizational-blocked:**
-      P1-027b (CI-provider decision). **Independent of all:** P1-024
-      (external security review), scheduled against a candidate release.
+      AdminScreen push Card. **033c DONE at `efb2edf`** — `signing`
+      build flavor + `SigningActivity` + `SigningScreen`; signing APK
+      has no launcher, MainActivity removed, transport guarded,
+      WebSocket skipped. **033d DONE at `dc01a1d`** —
+      `docs/ops/PROVISIONING-CEREMONY.md`, the two-person runbook
+      (Parts A/B with print-ready paper logs). **033e BLOCKED on
+      hardware** — end-to-end drill needs an air-gapped Pixel 7+
+      StrongBox; no such device available on this workstation.
+      **Also unblocked:** P1-035 (recovery key ceremony — design
+      exists in `docs/ops/KEY-CUSTODY.md` §3). **Hardware-blocked:**
+      P1-021a (emergency lock), P1-021b (duress wipe), P1-034 (TEE
+      Ed25519 verification on target hardware), P1-033e. **Organizational-
+      blocked:** P1-027b (CI-provider decision). **Independent of all:**
+      P1-024 (external security review), scheduled against a candidate
+      release.
     - **TASK-P1-027b** — CI enforcement gate + Android dependency
       tooling. Blocked on CI-provider decision (organizational, not
       technical). Session opens when that decision exists.
