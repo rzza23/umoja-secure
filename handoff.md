@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-20 (Session Z-15 — **P1-033a DONE** at `221c98f` (Phase 1 DoD, offline signing ceremony, backend half). `POST /admin/matrices/:device_id` in `admin.ts` (`requireAdmin`): verify-on-write per ADR-IDENTITY-CHANGE-001 §4 (backend holds `PROVISIONING_PUBKEY_B64U` env now; GET /me/matrix keeps its relay per the ADR's "verify when you can, relay when you can't" ruling); `version = parse(canonical).version`; non-monotonic reject 409 `matrix_version_not_monotonic`; device_id-match invariant (migration 016's pre-announced missing check) enforced. `env.ts` gains `PROVISIONING_PUBKEY_B64U` with test/prod gate (parallel to P1-029b's client-side). Nine new route tests. Backend 254 → 263. **Recon caught at first test run:** W-001's `matrix.device_id = "device-001"` is not UUID-shaped; route URL param requires UUID; fix builds freshly-signed matrices with UUID device_id from the same test seed (W-001 ground-truth preserved, signature not invalidated). **Next: P1-033b** (admin-side signing flow: `MatrixApi.push` + `AdminScreenState`) OR P1-035 (recovery-key ceremony — design exists) OR P1-027b (needs CI provider) OR nothing — choice, not obligation.)
+Last updated: 2026-10-20 (Session Z-16 — **P1-033b DONE** at `691d27d` (Phase 1 DoD, offline signing ceremony, admin client half). `MatrixApi.push(targetDeviceId, remote, sessionToken)` returns server echo `PushResult(deviceId, version)`; `AdminScreenState` gains `importSignature` / `clearSignature` / `pushSignedMatrix` + two new StateFlows; AdminScreen gains QR render of `builtWrapperJson`, signature text field + scan launcher, push button. `MainActivity` wires `adminMatrixApi::push` into `AdminScreenState.pushFn` (single HttpClient shared with fetchFn). **Breaking API change:** `MatrixApi` constructor gains `pushFn` second param; 3 call sites updated to named `fetchFn = { }`. **Latent bug fixed:** `buildMatrix` now clears `_pushedMatrix` so rebuild re-enables push. JVM 246 → 260 (+14: +4 MatrixApiTest, +10 AdminScreenStateTest). Backend 263 unchanged. **Push UI structurally complete, end-to-end runtime verification deferred to 033e** (real signed matrix from a real ceremony). **Next: P1-033c** (signing build flavor + SigningActivity) OR P1-035 (recovery-key ceremony — design exists) OR P1-027b (needs CI provider) OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -95,7 +95,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 246** (verified 2026-10-19 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests. Session Z-3: AdminScreenStateTest, 22 JVM tests. Session Z-4: ChatViewModelTest, 10 JVM tests. Session Z-13: 029b ProvisioningKeysTest, 2 JVM tests.)
+- **JVM unit tests: 260** (verified 2026-10-19 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests. Session Z-3: AdminScreenStateTest, 22 JVM tests. Session Z-4: ChatViewModelTest, 10 JVM tests. Session Z-13: 029b ProvisioningKeysTest, 2 JVM tests. Session Z-16: 033b MatrixApiTest +4, AdminScreenStateTest +10.)
 - **androidTest: 8 files, 71 tests** (verified 2026-10-18 from
   connectedAndroidTest XML aggregate `<testsuites tests="71">` -- not
   grep-summed; see §7 twelfth lesson. Session Z-1 added `AckDialogTest.kt`
@@ -4474,6 +4474,98 @@ AdminScreen UI: QR render of canonical + hash, signature ingest (QR
 scanner or paste field per P1-025's debug path), push button. Error
 states mirror `AdminApiException` taxonomy. ~1 session.
 
+
+### Session Z-16 — TASK-P1-033b DONE: admin-side signing flow (2026-10-20)
+
+Second code session of the P1-033 arc. Admin app can now construct,
+receive a signature for, and push a signed authorization matrix to
+TASK-P1-033a's route. Six files, one commit: `691d27d`. **033b DONE.**
+
+**WHAT SHIPPED.**
+
+- `MatrixApi.kt` (+58): `pushFn` ctor param (default = `error(...)`);
+  `push(targetDeviceId, remote, sessionToken): PushResult`; `data
+  class PushResult(deviceId, version)` (server echo). Body sends
+  `{canonical_utf8, signature_base64url}` to
+  `/admin/matrices/:device_id`; expects 201; error taxonomy mirrors
+  `fetch()` (network_error / {error_code} / invalid_response).
+- `MatrixApiTest.kt` (+110): 2 helpers updated to named `fetchFn = { }`;
+  4 new push tests. Existing 5 fetch tests compile unchanged.
+- `AdminScreenState.kt` (+100): `pushFn` 6th ctor param (default =
+  error); `importedSignature` / `pushedMatrix` StateFlows;
+  `importSignature` (86-char base64url regex, clears pushedMatrix),
+  `clearSignature` (preserves built wrapper/hash), `pushSignedMatrix`
+  (4 precondition guards before network). `buildMatrix` now clears
+  `_pushedMatrix` on success — **latent bug fix**: rebuild must
+  re-enable the push button; without it, a successful push left the
+  button disabled with "Pushed" label after every subsequent build.
+- `AdminScreenStateTest.kt` (+180): `stateWith` gains `pushFn` 6th
+  param (default = error); 10 new tests (importSignature 3,
+  clearSignature 1, pushSignedMatrix 5 boundary/success/failure).
+  Existing 22 compile unchanged.
+- `AdminScreen.kt` (+75): 4 imports (`Image`, `asImageBitmap`,
+  `BarcodeEncoder`, `BarcodeFormat`); `pushScope` (rememberCoroutineScope);
+  `importedSigText` state; `sigScanLauncher` (2nd ScanContract);
+  2 collectAsState; push Card before Authorize section: QR render of
+  `builtWrapperJson` (wrapper, not hash — offline device needs bytes
+  to re-canonicalize and confirm), signature text field, Scan +
+  Import buttons, "Signature imported: <12>..." echo, Push button
+  (disabled after success), "Pushed: <id8>... at v<n>" echo.
+- `MainActivity.kt` (+9): `adminMatrixApi` remember block — one
+  HttpClient shared between fetchFn and pushFn; `pushFn =
+  adminMatrixApi::push` wired into `AdminScreenState`.
+
+**BREAKING API CHANGE — MATRIXAPI CONSTRUCTOR.** Adding `pushFn` as
+second param breaks trailing-lambda syntax: `MatrixApi { t -> ... }`
+would bind to `pushFn` (3 args) instead of `fetchFn` (1 arg). Callers
+updated to `MatrixApi(fetchFn = { ... })`: 2 in `MatrixApiTest`, 1 in
+`MainActivity`. Zero behavior change — same lambda, same fetch path.
+The compile error (`No value passed for parameter 'fetchFn'`) is the
+acceptance that the change was caught, not silently mis-bound.
+
+**SCOPE HONESTY — push UI runtime verification deferred.** The push
+UI is structurally complete and compiles; it is NOT runtime-verified
+this session. A real end-to-end test requires a real signed matrix
+from a real offline ceremony — that is TASK-P1-033e's scope. What
+033b proves: admin app can construct the push payload, validate the
+signature input, and call `pushFn` with right arguments (10 JVM
+tests). What it does NOT prove: that a real backend accepts the
+push and a real device accepts the matrix. That proof is 033e's.
+
+**THE LATENT BUG FIXED.** `buildMatrix` populated `_builtWrapperJson`
+and `_builtHash` but did NOT clear `_pushedMatrix` from a prior
+successful push. Post-033b UX: push succeeds → button becomes "Pushed"
+disabled → user rebuilds → button stays disabled because
+`_pushedMatrix` still holds the old result. Fixed with one line:
+`_pushedMatrix.value = null` in `buildMatrix`'s success branch. Same
+class of bug as Session R-5's double-fetch (state consistency across
+orthogonal actions). Not a §7 lesson — single-line fix, family
+already covered by "remember cache keys must include the state-flow
+trigger" (Session P D-1).
+
+**VERIFICATION.**
+
+  typecheck:    compile clean (grep ^e: empty)
+  JVM tests:    260 / 260 (246 prior + 4 + 10)
+                MatrixApiTest: 9 (5 existing + 4 new)
+                AdminScreenStateTest: 32 (22 existing + 10 new)
+  XML aggregate from <testsuite tests=> per file
+  Backend:      263 (unchanged)
+  androidTest:  71 (unchanged)
+
+**COUNTS.** Backend 263 unchanged. Android JVM 246 → 260 (+14).
+androidTest 71 unchanged. Registry v0.10 unchanged (033b status:
+New → Executed 2026-10-20; no count change — split was at Z-14).
+
+**NEXT: P1-033c** — offline signing app. `signing` build flavor in
+`app/build.gradle.kts`; `SIGNING_ONLY` guards at `UmojaApplication`
+(skip WebSocket) and `TransportConfig` (throw on use); `SigningActivity`
+/ `SigningScreen` with QR-scan canonical, re-canonicalize + confirm
+hash, sign SHA-256 digest via `MatrixSigner.sign()` with provisioning
+key from `DeviceKeyManager`, QR-emit signature. ~1 session. Physical
+network isolation is KEY-CUSTODY §4.3's domain; `SIGNING_ONLY`
+guards are defense-in-depth.
+
 ---
 
 ## 4. Known issues
@@ -5199,18 +5291,20 @@ Original phrasing preserved below for history:
       **P1-029 DONE:** design `29cd7bf` (`KEY-CUSTODY.md`, 287 lines);
       implementation `7c02d16` (ProvisioningKeys DEBUG/PROD split,
       `UmojaApplication` startup assertion). **P1-033 split into
-      033a–033e (Z-14); 033a DONE at `221c98f`** — backend
+      033a–033e (Z-14). 033a DONE at `221c98f`** — backend
       `POST /admin/matrices/:device_id` with verify-on-write,
-      device_id-match invariant, non-monotonic reject. **Next:**
-      033b (admin client flow: `MatrixApi.push` + `AdminScreenState`)
-      → 033c (signing build flavor) → 033d (ceremony runbook) →
-      033e (end-to-end drill). **Also unblocked:** P1-035 (recovery
-      key ceremony — design exists in `docs/ops/KEY-CUSTODY.md` §3).
-      **Hardware-blocked:** P1-021a (emergency lock), P1-021b (duress
-      wipe), P1-034 (TEE Ed25519 verification on target hardware).
-      **Organizational-blocked:** P1-027b (CI-provider decision).
-      **Independent of all:** P1-024 (external security review),
-      scheduled against a candidate release.
+      device_id-match invariant, non-monotonic reject. **033b DONE at
+      `691d27d`** — `MatrixApi.push` + `AdminScreenState`
+      (`importSignature` / `clearSignature` / `pushSignedMatrix`) +
+      AdminScreen push Card (QR + sig scan + push button). **Next:**
+      033c (signing build flavor: `SIGNING_ONLY` guards + SigningActivity)
+      → 033d (ceremony runbook) → 033e (end-to-end drill). **Also
+      unblocked:** P1-035 (recovery key ceremony — design exists in
+      `docs/ops/KEY-CUSTODY.md` §3). **Hardware-blocked:** P1-021a
+      (emergency lock), P1-021b (duress wipe), P1-034 (TEE Ed25519
+      verification on target hardware). **Organizational-blocked:**
+      P1-027b (CI-provider decision). **Independent of all:** P1-024
+      (external security review), scheduled against a candidate release.
     - **TASK-P1-027b** — CI enforcement gate + Android dependency
       tooling. Blocked on CI-provider decision (organizational, not
       technical). Session opens when that decision exists.
@@ -6343,7 +6437,7 @@ Rebuild after flipping — read at HttpClient construction time.
   question's unit. When N looks wrong, verify the metric before
   concluding the content is wrong.
 
-Current verified state: **246 Android JVM tests** (2026-10-19),
+Current verified state: **260 Android JVM tests** (2026-10-20),
 **71 androidTest** (2026-10-18, 8 files, from connectedAndroidTest XML
 aggregate `<testsuites tests="71">` -- not grep-summed), and **263
 backend tests** (2026-10-20, 20 files), all from runner output.
