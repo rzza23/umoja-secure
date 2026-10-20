@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-19 (Session Z-13 — Phase 1 DoD gap CLOSED for P1-029: design (029a) at `29cd7bf` + implementation (029b) at `7c02d16`. `ProvisioningKeys.kt` split into `TEST_*` (current seed, pinned to vector file) / `PRODUCTION_*` (43 underscores = 32B of 0xFF placeholder, replaced by TASK-P1-033's offline-signer integration) / `CURRENT_*` (`val`, routed via `BuildConfig.DEBUG`). Startup assertion in `UmojaApplication.kt` refuses release builds where `CURRENT` resolves to `TEST` — catches the routing-failure case that ships the test key. Recovery key untouched (P1-035 territory). Android JVM 244 → 246 (+2 §5.1 tests). Backend 254 unchanged. **Next: P1-033 (offline signer — design exists, generates PRODUCTION key) OR P1-035 (recovery key ceremony) OR P1-027b (needs CI provider) OR nothing — choice, not obligation.)
+Last updated: 2026-10-20 (Session Z-14 — Phase 1 DoD, TASK-P1-033 SPLIT into 033a–033e in registry v0.9 → v0.10 (total 45 → 49). Preparatory session — no code. Split justified by recon: P1-033's 40-line §B body was drafted when the ceremony was one deliverable; P1-037 (matrix transport GET) landed since, and the offline-app packaging decision (build flavor vs separate module) is now resolvable from KEY-CUSTODY §4. **Three architectural decisions recorded:** (1) POST /me/matrix verifies the provisioning signature server-side (verify-on-write, relay-on-read — ADR-IDENTITY-CHANGE-001 §4's ruling, since the backend can hold the pubkey via env config); (2) non-monotonic pushes rejected 409 `matrix_version_not_monotonic` — client anti-rollback rule applied at the write boundary; (3) offline app = `signing` build flavor + `SIGNING_ONLY` guards, not a separate module — the physical device enforces network isolation; compile-time guards are defense-in-depth. **Two acceptance criteria deferred to siblings:** rotation → P1-036, revocation → P1-035. **Next: P1-033a** (backend POST /me/matrix + signature verification, ~1 session).
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -4240,6 +4240,121 @@ test key."
 **Counts.** Backend 254 unchanged. Android JVM 244 → 246 (+2).
 androidTest 71 unchanged. Registry v0.9 unchanged (029b status:
 New → Executed 2026-10-19; no count change — split was at Z-12).
+
+
+### Session Z-14 — TASK-P1-033 SPLIT into 033a–033e (2026-10-20)
+
+Preparatory session. Registry v0.9 → v0.10, total 45 → 49
+(+4 net: P1-033 was 1 task, is now 5). No code written. The commit
+is the registry amendment plus this handoff close.
+
+**WHY THE SPLIT, ON EVIDENCE.** Reconnaissance found three things
+that changed P1-033's shape since its 40-line §B body was drafted:
+
+1. **P1-037 landed.** The `GET /me/matrix` read path exists
+   (`me.ts`, O-1); the `POST` write path does not. The signing
+   ceremony's final step ("admin attaches signature and pushes")
+   has no backend target today — that's now a first-class sub-task
+   (033a), not an implicit dependency.
+2. **The offline-app packaging decision is resolvable.** Earlier
+   framing implied a separate module or source set. KEY-CUSTODY §4.3
+   makes the primary control physical (`dumpsys connectivity` check,
+   no-network device); compile-time guards are defense-in-depth, not
+   the enforcement. A `signing` build flavor + `SIGNING_ONLY` guards
+   is one session, not two. 033c reflects that.
+3. **Two acceptance criteria have different owners.** The current
+   §B body lists "Key rotation procedure documented and tested"
+   and "Key revocation procedure documented and tested" as P1-033
+   criteria. Rotation is P1-036's (trusted-set change during overlap);
+   revocation is P1-035's (recovery-key-authorized). The split moves
+   those two criteria and their tests (TEST-PROVSIGN-004, -005) to
+   the correct sibling tasks — not deleted, deferred with named
+   owner.
+
+**THREE ARCHITECTURAL DECISIONS RECORDED.** Named in §B P1-033's
+body and settled here so 033a opens without re-litigation:
+
+- **Verify-on-write, relay-on-read.** `POST /me/matrix` verifies the
+  provisioning signature server-side. `GET /me/matrix` continues to
+  relay (its KDoc names the asymmetry). Justification: GET relays
+  because the backend has no provisioning pubkey (ADR-IDENTITY-CHANGE-
+  001 §4's ruling: verify when you can, relay when you can't).
+  Adding `PROVISIONING_PUBKEY_B64U` config gives the backend the key
+  — the ADR's own logic then requires verification at the write
+  boundary. Clients continue to verify on receipt (P1-037 defense in
+  depth). Verification primitive: `@noble/ed25519.verifyAsync` (same
+  as `auth/verify.ts`; matrix *signing* uses Node's built-in `crypto`
+  via SPKI wrapping, but verification with a raw-32 pubkey uses
+  `@noble`).
+- **Non-monotonic pushes rejected 409.** `version <= existing.version`
+  → 409 `matrix_version_not_monotonic`. Same rule `MatrixStore.accept`
+  enforces (P1-026), applied at the write boundary. Prevents a
+  compromised admin session from downgrading a matrix. New test:
+  `TEST-MATRIX-PUSH-VERSION-NOT-MONOTONIC` (033a's 6th test; the
+  original plan had 5).
+- **Signing app = build flavor, not separate module.** The physical
+  device enforces network isolation (KEY-CUSTODY §4.3). Compile-time
+  guards (skip WebSocket at startup, throw if `TransportConfig`
+  accessed) are defense-in-depth. A separate source set for a control
+  that runs on an air-gapped device would be over-engineering.
+
+**WHAT THE REGISTRY AMENDMENT DID.**
+
+- §B P1-033 body expanded: Dependencies gains TASK-P1-037; one new
+  acceptance criterion (verify-on-write); Required-tests list trimmed
+  to the 5 tests 033 delivers (was 7; 004/005 deferred); added
+  "Deferred to sibling tasks" note; added "Sub-task breakdown
+  (v0.10, 2026-10-20)" with 5 named sub-tasks; added "Architectural
+  decisions (v0.10, 2026-10-20)" with the 3 rulings above; Status:
+  Proposed → Split.
+- §C: 1 row (033) → 5 rows (033a–e) with weights 1/1/1/0.5/0.5.
+- Version: 0.9 → 0.10.
+- Total: 45 → 49 with range update "030–042" →
+  "030–032, 033a–033e, 034–042".
+
+**ARITHMETIC CORRECTION.** The plan drafted earlier in the session
+said total 45 → 50. That was an oversight: splitting 033 (1 task)
+into 033a–e (5 tasks) adds **4 net**, so 45 → 49, not 50. Verified
+by range-sum arithmetic and corrected before the write. The registry
+carries 49.
+
+**TWO PROCESS ANOMALIES, BOTH CAUGHT AND RECOVERED.**
+
+1. **1a's `ABORT: §B P1-033 header not found` was a preflight bug,
+   not absent content.** §B headers use two formats in
+   `US-TASK-P1-001.md`: colon-style (`### TASK-P1-033: title`) and
+   emdash-style (`### TASK-P1-029 — title`). 1a's check used
+   `startswith('### TASK-P1-033 ')` — space after the number, which
+   matches emdash-style but not colon-style. Same for the
+   `grep -c '^### TASK-P1-033 '` in 1d-1. The false abort would have
+   caused a duplicate §B write. Caught by the next read (1d-2's `sed`).
+   Same § family: **a preflight returning 0 or not-found is ambiguous
+   between content absent and pattern wrong**. Widen the pattern before
+   concluding.
+2. **1d-2's first write attempt failed with `NameError: body_lines`.**
+   `body_lines` was defined in 1d-2's *preflight* heredoc, not the
+   *write* heredoc — two separate Python processes, no shared state.
+   Failure was benign: the exception fired on an `actions.append(f'...')`
+   after `src` was in memory but before `p.write_text(src)`, so no
+   partial write. Fix: recompute `body_lines = end - start` in the
+   write script. Same family as §7's "edit scripts start with `cd`"
+   — a variable assumption crossing a process boundary. Not a new
+   §7 bullet (one instance), but a note for future blocks that
+   re-use preflight variables in the write phase.
+
+**COUNTS (unchanged by this session).**
+
+  Backend:     254
+  Android JVM: 246
+  androidTest: 71 per emulator
+  Registry:    v0.10, total 49 (033a–e all New)
+
+**NEXT: P1-033a** — backend POST /me/matrix + signature verification.
+1 session. Six tests (5 original + TEST-MATRIX-PUSH-VERSION-NOT-MONOTONIC).
+Env config `PROVISIONING_PUBKEY_B64U` test default; required in
+production. Rot seam named in KDoc (single key today; P1-036 extends
+to `{previous, current}` set). GET /me/matrix KDoc gains the
+verify-on-write/relay-on-read asymmetry note in the same commit.
 
 ---
 

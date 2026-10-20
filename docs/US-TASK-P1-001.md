@@ -1,7 +1,7 @@
 # US-TASK-P1-001-v0.8 — Phase 1 Task Registry Reconciliation
 
 Document ID: US-TASK-P1-001
-Version: 0.9
+Version: 0.10
 Date: October 2026
 Supersedes: v0.7
 Purpose: Reconcile the Phase 1 task registry with UMOJA-SECURE-BUILD-MASTER.md v1.4.2.
@@ -101,7 +101,7 @@ added)
 
 **Phase:** 1
 **Priority:** Critical
-**Dependencies:** TASK-P1-025, TASK-P1-026, TASK-P1-029
+**Dependencies:** TASK-P1-025, TASK-P1-026, TASK-P1-029, TASK-P1-037
 **Security classification:** Internal
 
 **Objective and non-goals:**
@@ -121,21 +121,39 @@ added)
 - [ ] Signing protocol matches §3.8 exactly: Ed25519 over SHA-256 of JCS-canonical bytes.
 - [ ] Tampered matrix (any byte changed after signing) rejected.
 - [ ] Workflow documents supported offline signing devices.
-- [ ] Key rotation procedure (new key + overlap window) documented and tested.
-- [ ] Key revocation procedure (authorized by recovery key per §3.6) documented and tested.
+- [ ] Backend POST /me/matrix rejects invalid signatures (400) and non-monotonic version pushes (409) — Session 2026-10-20 decision (see Architectural decisions).
 
 **Required tests:**
-- TEST-PROVSIGN-001: End-to-end signing workflow completes.
-- TEST-PROVSIGN-002: Tampered matrix rejected.
-- TEST-PROVSIGN-003: Admin app has no write access to provisioning key.
-- TEST-PROVSIGN-004: Rotation produces new key; old key accepted in overlap window.
-- TEST-PROVSIGN-005: Revoked key rejected.
-- TEST-PROVSIGN-006: Human confirmation required on signing device.
-- TEST-PROVSIGN-007: Offline signer and Android verifier produce identical intermediate values (canonical bytes, SHA-256 digest, Ed25519 signature) for all test vectors.
+- TEST-PROVSIGN-001: End-to-end signing workflow completes (033e).
+- TEST-PROVSIGN-002: Tampered matrix rejected (033a).
+- TEST-PROVSIGN-003: Admin app has no write access to provisioning key (033b).
+- TEST-PROVSIGN-006: Human confirmation required on signing device (033c).
+- TEST-PROVSIGN-007: Offline signer and Android verifier produce identical intermediate values (canonical bytes, SHA-256 digest, Ed25519 signature) for all test vectors (033c).
 
-**Status:** Proposed
+**Deferred to sibling tasks (v0.10 split, 2026-10-20).**
+- The key-rotation acceptance criterion ("Key rotation procedure (new key + overlap window) documented and tested") moves to **P1-036** (Provisioning-key rotation and recovery-key revocation notice handling). Rotation is the trusted-set change during overlap; it is not part of the routine signing ceremony.
+- The key-revocation acceptance criterion ("Key revocation procedure (authorized by recovery key per §3.6) documented and tested") moves to **P1-035** (Organization recovery key generation, custody, and revocation workflow). Revocation is authorized by the recovery key, which P1-035 generates and P1-033 does not touch.
+- TEST-PROVSIGN-004 (rotation produces new key; old key accepted in overlap window) → **P1-036**.
+- TEST-PROVSIGN-005 (revoked key rejected) → **P1-035**.
+The top-level acceptance criteria above retain only what this split delivers.
 
----
+**Sub-task breakdown (v0.10, 2026-10-20).**
+
+P1-033 is five sessions of work, not one. Sub-tasks are numbered 033a–033e. Each lands as its own commit; the end-to-end drill (033e) is the last. Predecessors TASK-P1-025 (matrix build UI), TASK-P1-026 (client verification), TASK-P1-029 (custody design + ProvisioningKeys split), and TASK-P1-037 (matrix transport, GET path) are all DONE.
+
+- **P1-033a — Backend POST /me/matrix.** New route in `backend/src/routes/me.ts`, mirroring the GET's session-scoped shape. Accepts `{canonical_utf8, signature_base64url}`. **Verifies the provisioning signature server-side** (see Architectural decisions). Enforces `version = parse(canonical).version` (migration 016 invariant) and `version > existing.version` (non-monotonic reject 409). UPSERT on valid. Config: `PROVISIONING_PUBKEY_B64U` env var; test-key default in `NODE_ENV=test`, required in production. Verification primitive: `@noble/ed25519.verifyAsync` (same as `auth/verify.ts`; matrix *signing* uses Node's built-in `crypto` via SPKI wrapping, but verification with a raw 32-byte pubkey uses `@noble`). Rotation seam: single key today; P1-036 extends to `{previous, current}` set during overlap. GET /me/matrix KDoc updated to name the asymmetry ("verified at write; trusted on read").
+- **P1-033b — Admin-side signing flow.** `MatrixApi.push()` (mirror of `fetch()`, `suspend fun push(remote: RemoteMatrix, sessionToken: String): Unit`). `AdminScreenState` gains `exportForSigning()`, `importSignature(base64url)`, `pushSignedMatrix()`. AdminScreen UI: QR render of canonical + hash (reusing the P1-025 paste-field pattern for dev), signature ingest via QR scanner or paste field, push button. Error states mirror the existing `AdminApiException` taxonomy.
+- **P1-033c — Offline signing app.** `signing` build flavor in `app/build.gradle.kts`. `BuildConfig.SIGNING_ONLY` guards at `UmojaApplication.onCreate()` (skip WebSocket client) and `TransportConfig` (throw on use). `SigningActivity` / `SigningScreen`: QR-scan canonical + hash, re-canonicalize + confirm hash matches, sign SHA-256 digest via `MatrixSigner.sign()` with the provisioning key from `DeviceKeyManager` (provisioning-specific Keystore alias), QR-emit the signature. The private key never leaves the device; the app holds no network stack at runtime. Compile-time enforcement is defense-in-depth on top of the device's physical network isolation (KEY-CUSTODY §4.3).
+- **P1-033d — Ceremony runbook.** `docs/ops/PROVISIONING-CEREMONY.md`: operational procedure for Build Master §3.6 steps 1-9, paper log template, `dumpsys connectivity` capture (KEY-CUSTODY §4.3), APK SHA-256 re-verification (KEY-CUSTODY §4.2), tamper-bag chain of custody (KEY-CUSTODY §4.4). Links to KEY-CUSTODY §2's 8-step generation procedure. Names the backend `PROVISIONING_PUBKEY_B64U` config step as part of the ceremony close-out.
+- **P1-033e — End-to-end drill.** Manual acceptance on a test org: admin builds matrix → exports → offline signs → imports + pushes → backend accepts (signature verified, monotonic version) → downstream device fetches (GET /me/matrix) → `MatrixStore.accept` succeeds. Records evidence (screenshots, backend log, DB state). The task's acceptance gate.
+
+**Architectural decisions (v0.10, 2026-10-20).**
+
+- **Verify-on-write, relay-on-read.** The backend verifies the provisioning signature at `POST /me/matrix` and does NOT verify at `GET /me/matrix`. The asymmetry is dictated by whether the backend holds the pubkey (ADR-IDENTITY-CHANGE-001 §4's ruling). Adding `PROVISIONING_PUBKEY_B64U` as a config gives the backend the key; the ADR's own logic then requires verification at the write boundary. Clients continue to verify on receipt (P1-037 defense in depth).
+- **Non-monotonic pushes rejected server-side.** `version <= existing.version` → 409 `matrix_version_not_monotonic`. Same anti-rollback rule the client enforces (`MatrixStore.accept`, P1-026), applied at the write boundary. Prevents a compromised admin session from downgrading a matrix. Test: `TEST-MATRIX-PUSH-VERSION-NOT-MONOTONIC`.
+- **Signing app = build flavor + SIGNING_ONLY guards, not a separate module.** The physical device enforces network isolation (KEY-CUSTODY §4.3's `dumpsys connectivity` check). Compile-time guards (skip WebSocket at startup, throw if `TransportConfig` accessed) are defense-in-depth, not the primary control. A separate source set would be over-engineering for a control that runs on an air-gapped device.
+
+**Status:** Split (033a–033e)
 
 ### TASK-P1-034: Hardware-backed Ed25519 Keystore verification
 
@@ -775,7 +793,11 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-030 | Replacement-device flow | 9 | Updated |
 | TASK-P1-031 | Audit hash-chain verification | 10 | Restored |
 | TASK-P1-032 | Resolved-dependency inspection | 1 | New |
-| TASK-P1-033 | Offline provisioning-key signing workflow | 3.5 | New |
+| TASK-P1-033a | Offline signing — backend POST /me/matrix + verify | 1 | New |
+| TASK-P1-033b | Offline signing — admin-side export/import/push | 1 | New |
+| TASK-P1-033c | Offline signing — signing build flavor + SigningActivity | 1 | New |
+| TASK-P1-033d | Offline signing — ceremony runbook | 0.5 | New |
+| TASK-P1-033e | Offline signing — end-to-end drill | 0.5 | New |
 | TASK-P1-034 | Hardware-backed Ed25519 Keystore verification | 2 | New |
 | TASK-P1-035 | Organization recovery key | 3.5 | New |
 | TASK-P1-036 | Provisioning-key rotation & recovery-key revocation notices | 3.5 | Proposed |
@@ -786,7 +808,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-041 | Failed-verification operator logging | 1 | Proposed |
 | TASK-P1-042 | WS revocation listener reconnect + re-reconcile | 1 | DONE |
 
-**Total Phase 1 task identifiers:** 45 (001–020, 021a, 021b, 022–026, 027a, 027b, 028, 029a, 029b, 030–042).
+**Total Phase 1 task identifiers:** 49 (001–020, 021a, 021b, 022–026, 027a, 027b, 028, 029a, 029b, 030–032, 033a–033e, 034–042).
 
 **Execution order (dependency-respecting):**
 TASK-P1-001 → TASK-P1-002 → TASK-P1-027 → TASK-P1-032 → TASK-P1-003 → TASK-P1-034 → TASK-P1-004 → TASK-P1-005 → TASK-P1-006 → TASK-P1-013 → TASK-P1-007 → TASK-P1-008 → TASK-P1-025 → TASK-P1-026 → TASK-P1-029 → TASK-P1-033 → TASK-P1-035 → TASK-P1-014 → TASK-P1-015 → TASK-P1-016 → TASK-P1-009 → TASK-P1-010 → TASK-P1-011 → TASK-P1-012 → TASK-P1-019 → TASK-P1-020 → TASK-P1-021a → TASK-P1-021b → TASK-P1-030 → TASK-P1-017 → TASK-P1-018 → TASK-P1-022 → TASK-P1-023 → TASK-P1-024 → TASK-P1-028 → TASK-P1-031
