@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-20 (Session Z-16 — **P1-033b DONE** at `691d27d` (Phase 1 DoD, offline signing ceremony, admin client half). `MatrixApi.push(targetDeviceId, remote, sessionToken)` returns server echo `PushResult(deviceId, version)`; `AdminScreenState` gains `importSignature` / `clearSignature` / `pushSignedMatrix` + two new StateFlows; AdminScreen gains QR render of `builtWrapperJson`, signature text field + scan launcher, push button. `MainActivity` wires `adminMatrixApi::push` into `AdminScreenState.pushFn` (single HttpClient shared with fetchFn). **Breaking API change:** `MatrixApi` constructor gains `pushFn` second param; 3 call sites updated to named `fetchFn = { }`. **Latent bug fixed:** `buildMatrix` now clears `_pushedMatrix` so rebuild re-enables push. JVM 246 → 260 (+14: +4 MatrixApiTest, +10 AdminScreenStateTest). Backend 263 unchanged. **Push UI structurally complete, end-to-end runtime verification deferred to 033e** (real signed matrix from a real ceremony). **Next: P1-033c** (signing build flavor + SigningActivity) OR P1-035 (recovery-key ceremony — design exists) OR P1-027b (needs CI provider) OR nothing — choice, not obligation.)
+Last updated: 2026-10-20 (Session Z-17 — **P1-033c DONE** at `efb2edf`. Build flavor split: `client` (ordinary app, unchanged at 260 JVM) + `signing` (offline signer, `.signing` suffix, no launcher, transport guarded, WebSocket skipped, 274 JVM including 14 new `SigningStateTest`). `SigningActivity` reachable only via `adb shell am start` (no launcher icon). `DeviceKeyManager.PROVISIONING_ALIAS` const. **Manifest verified at the artifact level** (aapt: signing APK has no `launchable-activity`, MainActivity absent, SigningActivity present; client APK unchanged) and **runtime smoke on emulator-5556** (both APKs install, client launches clean, launcher query returns only client). Build failure along the way: XML `--` inside a comment (fixed by moving ADB syntax to SigningActivity KDoc). Workflow break: `installDebug` → `installClientDebug`; §6 updated. **Next: P1-033d** (ceremony runbook) OR P1-033e (e2e drill, needs 033d + air-gapped hardware) OR P1-035 (recovery-key ceremony) OR P1-027b (needs CI provider) OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -95,7 +95,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 260** (verified 2026-10-19 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests. Session Z-3: AdminScreenStateTest, 22 JVM tests. Session Z-4: ChatViewModelTest, 10 JVM tests. Session Z-13: 029b ProvisioningKeysTest, 2 JVM tests. Session Z-16: 033b MatrixApiTest +4, AdminScreenStateTest +10.)
+- **JVM unit tests: 260 client / 274 signing** (verified 2026-10-19 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests. Session Z-3: AdminScreenStateTest, 22 JVM tests. Session Z-4: ChatViewModelTest, 10 JVM tests. Session Z-13: 029b ProvisioningKeysTest, 2 JVM tests. Session Z-16: 033b MatrixApiTest +4, AdminScreenStateTest +10. Session Z-17: 033c build flavor split, SigningStateTest +14 under `testSigningDebugUnitTest` (client 260 unchanged, signing 274).)
 - **androidTest: 8 files, 71 tests** (verified 2026-10-18 from
   connectedAndroidTest XML aggregate `<testsuites tests="71">` -- not
   grep-summed; see §7 twelfth lesson. Session Z-1 added `AckDialogTest.kt`
@@ -4566,6 +4566,138 @@ key from `DeviceKeyManager`, QR-emit signature. ~1 session. Physical
 network isolation is KEY-CUSTODY §4.3's domain; `SIGNING_ONLY`
 guards are defense-in-depth.
 
+
+### Session Z-17 — TASK-P1-033c DONE: offline signing app (2026-10-20)
+
+Third code session of the P1-033 arc. Builds the offline signing
+app: a separate APK (`com.umoja.secure.signing`) with no transport,
+no WebSocket, no matrix verification, and only one activity
+reachable via ADB. Nine files, one commit: `efb2edf`. **033c DONE.**
+
+**WHAT SHIPPED.**
+
+Modified (4):
+- `build.gradle.kts`: `flavorDimensions + productFlavors`
+  (`client` SIGNING_ONLY=false, `signing` `.signing` suffix +
+  SIGNING_ONLY=true). KDoc names the workflow-cost breaking change.
+- `DeviceKeyManager.kt`: `PROVISIONING_ALIAS = "umoja.provisioning.v1"`
+  const. The class already takes alias as a ctor param; one const,
+  no refactor. Same StrongBox/TEE/software tiering as device auth.
+- `UmojaApplication.kt`: `SIGNING_ONLY` short-circuit at top of
+  `onCreate`; `onTerminate` guards `webSocketClient` via
+  `::webSocketClient.isInitialized` (signing never initializes it).
+- `TransportConfig.kt`: `httpBaseUrl`/`wsUrl` getters throw if
+  `SIGNING_ONLY`. `useTor` stays readable.
+
+New (5):
+- `src/signing/AndroidManifest.xml`: removes MainActivity via
+  `tools:node="remove"`; declares SigningActivity `exported=true`
+  with `launchMode=singleTask`, NO launcher.
+- `SigningState.kt` (~244 lines): lambda-injected plain class.
+  Two modes (CEREMONY / OPERATING). Fail-closed on: key exists
+  (ceremony), key missing (operating), non-JCS/empty/malformed
+  canonical, no canonical loaded. Suspend methods wrap Keystore
+  in `withContext(Dispatchers.IO)`. Prehash protocol per §3.8:
+  SHA-256(canonical) → sign 32-byte digest → 64-byte sig →
+  base64url.
+- `SigningActivity.kt` (~82 lines): reads intent extra `mode`
+  (ceremony|operating); wires 4 lambdas to one
+  `DeviceKeyManager(this, PROVISIONING_ALIAS)`. ADB invocation
+  in KDoc.
+- `SigningScreen.kt` (~359 lines): Compose UI. Ceremony: pubkey
+  QR + copy. Operating: canonical QR-scan OR paste, JCS validate,
+  SHA-256 preview, sign button, signature QR + copy.
+- `SigningStateTest.kt` (~256 lines): 14 tests. Every guard +
+  happy path + prehash captured.
+
+**THE FLAVOR SPLIT VERIFIED AT THE ARTIFACT LEVEL — this was
+the load-bearing check before commit.** `aapt dump badging` on
+both APKs:
+
+  Signing: `package: com.umoja.secure.signing`, **NO
+  launchable-activity** line, MainActivity absent from xmltree,
+  SigningActivity present.
+  Client:  `package: com.umoja.secure`, launchable-activity =
+  MainActivity, SigningActivity absent.
+
+Runtime smoke on emulator-5556: both APKs install (`Success` × 2),
+client launches with empty crash log,
+`cmd package query-activities -a MAIN -c LAUNCHER` returns **only**
+the client's MainActivity. Signing APK is installed but invisible
+to the home screen — the core property of the flavor split, now
+confirmed semantically at the package-manager level.
+
+Signing APK isolation has three layers, all independently load-
+bearing:
+  1. Physical: air-gapped device (KEY-CUSTODY §4.3).
+  2. Manifest: no LAUNCHER, MainActivity removed.
+  3. Runtime: TransportConfig throws, WebSocket skipped.
+
+**BUILD FAILURE ALONG THE WAY — XML `--` IN COMMENT.** First
+`assembleSigningDebug` failed at `processSigningDebugMainManifest`:
+"Error parsing ... AndroidManifest.xml". Root cause: the KDoc-style
+comment embedded the string `--es mode ceremony` (ADB flag syntax).
+XML forbids `--` inside `<!-- ... -->` — the parser saw a premature
+close. Fix: manifest comment reduced to pure prose; the ADB syntax
+now lives in SigningActivity.kt's KDoc (Kotlin comments have no such
+restriction). Same family as §7's shell-trap lessons — a comment
+marker interacting with the parser. Not a new §7 bullet.
+
+Secondary failure: `mergeClientDebugJavaResource` "Failed to obtain
+compression information for entry". Cascaded from the manifest
+failure's partial cache. `./gradlew clean` resolved it. Not a code
+defect.
+
+**PROCESS NOTE — `zsh: event not found: -` on paste, twice.** Two
+large paste blocks in this session failed with `zsh: event not found:
+-`. Both echoed content but didn't execute. Root cause: some character
+sequence in the pasted content triggered zsh history expansion before
+the shell parsed it. Neither block had an obvious `!`; the trigger was
+likely a paste-transcription artifact during the large paste.
+
+Recovery pattern that worked: **break the failing block into small
+`python3 -c '...'` one-liners**. Each `python3 -c` succeeded where
+the enclosing bash block failed. This is the concrete lesson for
+future large-paste sessions — not a new §7 bullet (existing family:
+"shell-block comments", "`!` triggers history expansion" from
+Session P), but a recovery action worth naming here: when heredoc
+blocks fail with `event not found`, switch to `python3 -c` for that
+step rather than re-pasting the same block.
+
+**WORKFLOW BREAK NAMED AND FIXED IN §6 — bounded to §6 only.**
+The flavor split changes every gradle task name: `installDebug` →
+`installClientDebug`, `testDebugUnitTest` → `testClientDebugUnitTest`,
+`connectedAndroidTest` → `connectedClientAndroidTest`.
+
+Only §6's operational commands are updated (5 × `testDebugUnitTest`,
+1 × `installDebug`, 1 × `connectedAndroidTest` + the stale
+"currently 0 tests (KI-013)" comment, now 71). Historical references
+in §3 session entries (`installDebug` at Sessions O-2 and P,
+`testDebugUnitTest` at Z-16) are preserved — they document what
+existed at that moment, not what exists now. §6 gains signing-flavor
+commands (`testSigningDebugUnitTest`, `installSigningDebug`) alongside
+the client-flavor ones, so the workflow section reflects both halves
+of the split.
+
+**SCOPE HONESTY — ceremony mode NOT runtime-tested.** The signing
+APK's `--es mode ceremony` generates a real provisioning key in
+StrongBox. Doing that on this emulator now would interfere with
+033e's clean test. Signing logic is JVM-verified (14 tests) but the
+Keystore-backed ceremony path is 033e's acceptance, not 033c's.
+
+**COUNTS.** Backend 263 unchanged. Android JVM: client 260 (unchanged),
+signing 274 (14 new under `testSigningDebugUnitTest`, all green).
+androidTest 71 unchanged. Registry v0.10 unchanged (033c status:
+New → Executed 2026-10-20).
+
+**NEXT: P1-033d** — ceremony runbook. `docs/ops/PROVISIONING-
+CEREMONY.md` operationalizes Build Master §3.6 steps 1–9 into a
+two-person procedure with paper log, dumpsys connectivity capture
+(KEY-CUSTODY §4.3), APK hash re-verification (§4.2), tamper-bag
+chain of custody (§4.4). Links to KEY-CUSTODY §2's 8-step
+generation ceremony. Names the backend `PROVISIONING_PUBKEY_B64U`
+env config step (033a's dependency). Doc-only, ~1 session.
+
 ---
 
 ## 4. Known issues
@@ -5296,9 +5428,11 @@ Original phrasing preserved below for history:
       device_id-match invariant, non-monotonic reject. **033b DONE at
       `691d27d`** — `MatrixApi.push` + `AdminScreenState`
       (`importSignature` / `clearSignature` / `pushSignedMatrix`) +
-      AdminScreen push Card (QR + sig scan + push button). **Next:**
-      033c (signing build flavor: `SIGNING_ONLY` guards + SigningActivity)
-      → 033d (ceremony runbook) → 033e (end-to-end drill). **Also
+      AdminScreen push Card. **033c DONE at `efb2edf`** —
+      `signing` build flavor + `SigningActivity` + `SigningScreen`;
+      signing APK has no launcher, MainActivity removed, transport
+      guarded, WebSocket skipped (artifact-level manifest verified).
+      **Next:** 033d (ceremony runbook) → 033e (end-to-end drill). **Also
       unblocked:** P1-035 (recovery key ceremony — design exists in
       `docs/ops/KEY-CUSTODY.md` §3). **Hardware-blocked:** P1-021a
       (emergency lock), P1-021b (duress wipe), P1-034 (TEE Ed25519
@@ -5481,22 +5615,33 @@ Original phrasing preserved below for history:
 ### Android unit tests (JVM — no device required)
 
     cd ~/umoja-secure/android
-    ./gradlew :app:testDebugUnitTest
-    ./gradlew :app:testDebugUnitTest --tests "com.umoja.secure.crypto.JcsCanonicalizerTest"
-    ./gradlew :app:testDebugUnitTest --tests "com.umoja.secure.crypto.JcsCanonicalizerTest" --rerun-tasks
+    ./gradlew :app:testClientDebugUnitTest
+    ./gradlew :app:testClientDebugUnitTest --tests "com.umoja.secure.crypto.JcsCanonicalizerTest"
+    ./gradlew :app:testClientDebugUnitTest --tests "com.umoja.secure.crypto.JcsCanonicalizerTest" --rerun-tasks
 
     # Verify a test actually ran (Gradle can succeed with 0 matched):
-    cat app/build/test-results/testDebugUnitTest/TEST-com.umoja.secure.crypto.JcsCanonicalizerTest.xml
+    cat app/build/test-results/testClientDebugUnitTest/TEST-com.umoja.secure.crypto.JcsCanonicalizerTest.xml
 
     # Total count — recount, don't trust the handoff number:
-    grep -h -o 'tests="[0-9]*"' app/build/test-results/testDebugUnitTest/TEST-*.xml \
+    grep -h -o 'tests="[0-9]*"' app/build/test-results/testClientDebugUnitTest/TEST-*.xml \
+      | awk -F'"' '{s+=$2} END {print s}'
+
+    # Signing-flavor unit tests (offline signing app, TASK-P1-033c):
+    ./gradlew :app:testSigningDebugUnitTest
+
+    # Total count for signing flavor:
+    grep -h -o 'tests="[0-9]*"' app/build/test-results/testSigningDebugUnitTest/TEST-*.xml \
       | awk -F'"' '{s+=$2} END {print s}'
 
 ### Android app build / device install
 
     cd ~/umoja-secure/android
-    ./gradlew installDebug
-    ./gradlew connectedAndroidTest   # currently 0 tests (KI-013)
+    ./gradlew installClientDebug
+    ./gradlew connectedClientAndroidTest   # 71 tests across 8 files
+
+    # Signing flavor (offline signing APK, TASK-P1-033c):
+    ./gradlew installSigningDebug
+    # No instrumented tests for signing flavor as of Z-17.
 
 ### Tor mode toggle
 
@@ -6437,7 +6582,7 @@ Rebuild after flipping — read at HttpClient construction time.
   question's unit. When N looks wrong, verify the metric before
   concluding the content is wrong.
 
-Current verified state: **260 Android JVM tests** (2026-10-20),
+Current verified state: **260 Android JVM tests (client flavor) / 274 (signing flavor)** (2026-10-20),
 **71 androidTest** (2026-10-18, 8 files, from connectedAndroidTest XML
 aggregate `<testsuites tests="71">` -- not grep-summed), and **263
 backend tests** (2026-10-20, 20 files), all from runner output.
