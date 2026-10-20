@@ -771,7 +771,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-027b | CI enforcement gate for dep review | 1 | New |
 | TASK-P1-028 | Log redaction audit | 10 | New |
 | TASK-P1-029a | Signing-key custody — design | 1 | Executed 2026-10-19 |
-| TASK-P1-029b | Signing-key custody — implementation | 1 | New |
+| TASK-P1-029b | Signing-key custody — implementation | 1 | Executed 2026-10-19 |
 | TASK-P1-030 | Replacement-device flow | 9 | Updated |
 | TASK-P1-031 | Audit hash-chain verification | 10 | Restored |
 | TASK-P1-032 | Resolved-dependency inspection | 1 | New |

@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-19 (Session Z-12 — Phase 1 DoD design gap closed for P1-029: **`docs/ops/KEY-CUSTODY.md` landed** at `29cd7bf` (287 lines, 9 sections). StrongBox-backed dedicated Android device (Pixel 7+ / Titan M2) chosen over YubiKey and air-gapped-computer alternatives — reasoning recorded in §1 of the doc. Covers generation ceremony, storage (two safes, two-person control), use procedure (operationalizes Build Master §3.6's 9-step workflow), routine + emergency rotation, retirement, audit, offline device spec, client DEBUG/PROD split design, drill schedule, threats matrix. **TASK-P1-029 split:** design complete (this session); implementation (ProvisioningKeys.kt DEBUG/PROD split + ProvisioningKeysTest new assertion) is next. Same pattern as P1-027 → 027a/027b. Registry v0.8 → v0.9, total 44 → 45. Backend 254, Android JVM 244, androidTest 71 — all unchanged (doc-only). **Next: P1-029 implementation (ProvisioningKeys split, 1 session) OR P1-033 (offline signer, design now exists) OR P1-035 (recovery key) OR P1-027b (needs CI provider) OR nothing — choice, not obligation.)
+Last updated: 2026-10-19 (Session Z-13 — Phase 1 DoD gap CLOSED for P1-029: design (029a) at `29cd7bf` + implementation (029b) at `7c02d16`. `ProvisioningKeys.kt` split into `TEST_*` (current seed, pinned to vector file) / `PRODUCTION_*` (43 underscores = 32B of 0xFF placeholder, replaced by TASK-P1-033's offline-signer integration) / `CURRENT_*` (`val`, routed via `BuildConfig.DEBUG`). Startup assertion in `UmojaApplication.kt` refuses release builds where `CURRENT` resolves to `TEST` — catches the routing-failure case that ships the test key. Recovery key untouched (P1-035 territory). Android JVM 244 → 246 (+2 §5.1 tests). Backend 254 unchanged. **Next: P1-033 (offline signer — design exists, generates PRODUCTION key) OR P1-035 (recovery key ceremony) OR P1-027b (needs CI provider) OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -93,7 +93,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 244** (verified 2026-10-18 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests. Session Z-3: AdminScreenStateTest, 22 JVM tests. Session Z-4: ChatViewModelTest, 10 JVM tests.)
+- **JVM unit tests: 246** (verified 2026-10-19 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests. Session Z-3: AdminScreenStateTest, 22 JVM tests. Session Z-4: ChatViewModelTest, 10 JVM tests. Session Z-13: 029b ProvisioningKeysTest, 2 JVM tests.)
 - **androidTest: 8 files, 71 tests** (verified 2026-10-18 from
   connectedAndroidTest XML aggregate `<testsuites tests="71">` -- not
   grep-summed; see §7 twelfth lesson. Session Z-1 added `AckDialogTest.kt`
@@ -4148,6 +4148,99 @@ ceremony) has the ceremony spec it will operationalize.
 **Counts.** Backend 254, Android JVM 244, androidTest 71 per
 emulator — all unchanged (doc-only session).
 
+
+### Session Z-13 — TASK-P1-029b DONE: ProvisioningKeys DEBUG/PROD split (2026-10-19)
+
+The implementation half of the P1-029 split. **P1-029 is now DONE
+end-to-end.** One commit: `7c02d16` (3 files, ~164 insertions, ~16
+deletions).
+
+**WHAT CHANGED — three files.**
+
+`ProvisioningKeys.kt` (62 → 114 lines):
+  - `TEST_PROVISIONING_PUBKEY_B64U` (new `const val`) — the current
+    test seed, byte-identical to `canonical-matrix-test-vectors.json`'s
+    `expected_provisioning_public_key_base64url`.
+  - `PRODUCTION_PROVISIONING_PUBKEY_B64U` (new `const val`) — 43
+    underscores decoding to 32 bytes of 0xFF. Not a valid Ed25519
+    public key; a release that ships it fails matrix verification at
+    runtime (safe failure, not silent-accept). Replaced by P1-033's
+    ceremony.
+  - `CURRENT_PROVISIONING_PUBKEY_B64U` (was `const val`, now `val`) —
+    `if (BuildConfig.DEBUG) TEST else PRODUCTION`.
+  - Class KDoc rewritten: names all three constants and their roles;
+    corrects prior drift that claimed both keys were P1-029's
+    (recovery is P1-035's).
+  - `import com.umoja.secure.BuildConfig` added.
+
+`ProvisioningKeysTest.kt` (53 → 73 lines):
+  - +2 tests per §5.1: `production provisioning pubkey differs from
+    test key` (`assertNotEquals`); `production provisioning pubkey
+    decodes to 32 bytes`.
+  - Existing 3 tests unchanged (they reference `CURRENT`, which still
+    resolves the same value in debug).
+
+`UmojaApplication.kt` (43 → 71 lines):
+  - Startup assertion parallel to the existing `TransportConfig.useTor`
+    canary: `check(BuildConfig.DEBUG || CURRENT != TEST) { "..." }`.
+  - Comment names the dangerous case it catches (release build with
+    broken routing → CURRENT = TEST → ships the test trust anchor)
+    and the fail-safe case it does NOT catch (release build with
+    PRODUCTION still placeholder → matrix verification fails at
+    runtime, not silent-accept).
+
+**WHY THE STARTUP ASSERTION IS IN THIS COMMIT — scope beyond §5.1's
+literal text.** §5.1's two tests catch copy-paste (`PROD == TEST`)
+and wrong-length (PROD decodes wrong). Neither catches the *routing*
+failure — the case where `if (BuildConfig.DEBUG)` is broken, removed,
+or bypassed so `CURRENT` resolves to `TEST` in release. That's the
+case that ships the test key, and it's exactly what P1-029b exists to
+prevent.
+
+The codebase already has the answer: `UmojaApplication.onCreate`'s
+`TransportConfig` assertion (Session Q, TASK-P1-039) is a canary for
+the same class of problem. The `ProvisioningKeys` assertion is the
+parallel application of an existing pattern, not new architecture.
+Session Z-12's close message named this gap and deferred it; this
+session closes it in the same task, on the grounds that a
+copy-paste-only test does not ensure "release build cannot ship the
+test key."
+
+**Scope honestly stated: what this session does NOT do.**
+
+- Recovery key untouched. §5.1 is provisioning-only; recovery
+  custody is TASK-P1-035's (`docs/ops/KEY-CUSTODY.md` §3).
+  `RECOVERY_PUBKEY_B64U` stays `const val` placeholder; its KDoc now
+  names P1-035 explicitly.
+- No offline signer (TASK-P1-033). `PRODUCTION_*` is a placeholder;
+  the ceremony generating the real value is P1-033's.
+- No matrix/notice/identity-change code touched. The 4 consumers of
+  `CURRENT_*` all do runtime `Base64.getUrlDecoder().decode(...)`;
+  none require `const`, so the `const → val` transition is
+  compile-only, no caller edits.
+
+**Verification.**
+
+  Build: `./gradlew :app:testDebugUnitTest --rerun-tasks`, exit 0,
+  0 compile errors, 0 test failures.
+  Tests: 246 (244 prior + 2 new §5.1). `ProvisioningKeysTest`: 5
+  tests (3 existing + 2 new), 0 failures. XML aggregate, not
+  grep-summed.
+
+  Runtime verification of the `UmojaApplication` assertion's *release*
+  path is NOT done. The debug path short-circuits (`BuildConfig.DEBUG`
+  true). The release path fires only when `CURRENT` resolves to
+  `TEST` — not reachable in a debug build. Exercising it would
+  require a temporary constant override; the assertion is a canary,
+  not a state-machine. Same precedent as the `TransportConfig`
+  assertion, whose comment says "tautological on the current code."
+  Recorded as a manual verification candidate for the release-build
+  acceptance pass.
+
+**Counts.** Backend 254 unchanged. Android JVM 244 → 246 (+2).
+androidTest 71 unchanged. Registry v0.9 unchanged (029b status:
+New → Executed 2026-10-19; no count change — split was at Z-12).
+
 ---
 
 ## 4. Known issues
@@ -4869,14 +4962,15 @@ Original phrasing preserved below for history:
       `runBlocking` bridge removed; §8 transport deferral closed.
       `HttpClientRetryTest` 7 tests unchanged; JVM 244/244;
       androidTest 71/71 per emulator.
-    - **Phase-1 DoD gaps (Build Master §10) — P1-029 DESIGN
-      LANDED.** `docs/ops/KEY-CUSTODY.md` at `29cd7bf` (Session Z-12):
-      287 lines, StrongBox-backed dedicated Android device, all
-      ceremonies specified. **Implementation next:**
-      `ProvisioningKeys.kt` DEBUG/PROD split + `ProvisioningKeysTest`
-      new assertion (1 session). **After P1-029 implementation:** P1-033
-      (offline signer — the design now exists to build against),
-      P1-035 (recovery key ceremony). **Hardware-blocked:** P1-021a
+    - **Phase-1 DoD gaps (Build Master §10) — P1-029 DONE.**
+      Design (029a) landed at `29cd7bf` (`KEY-CUSTODY.md`, 287 lines).
+      Implementation (029b) landed at `7c02d16` (ProvisioningKeys
+      DEBUG/PROD split, 2 new §5.1 tests, `UmojaApplication` startup
+      assertion). **Next unblocked:** P1-033 (offline signer — the
+      design exists; generates the production key that replaces the
+      `PRODUCTION_PROVISIONING_PUBKEY_B64U` placeholder), P1-035
+      (recovery-key ceremony — also has its design in
+      `docs/ops/KEY-CUSTODY.md` §3). **Hardware-blocked:** P1-021a
       (emergency lock), P1-021b (duress wipe), P1-034 (TEE Ed25519
       verification on target hardware). **Organizational-blocked:**
       P1-027b (CI-provider decision). **Independent of all:** P1-024
@@ -6014,7 +6108,7 @@ Rebuild after flipping — read at HttpClient construction time.
   question's unit. When N looks wrong, verify the metric before
   concluding the content is wrong.
 
-Current verified state: **244 Android JVM tests** (2026-10-18),
+Current verified state: **246 Android JVM tests** (2026-10-19),
 **71 androidTest** (2026-10-18, 8 files, from connectedAndroidTest XML
 aggregate `<testsuites tests="71">` -- not grep-summed), and **254
 backend tests** (2026-10-18, 20 files), all from runner output.
