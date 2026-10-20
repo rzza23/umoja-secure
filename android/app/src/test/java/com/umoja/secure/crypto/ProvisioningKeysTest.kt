@@ -2,6 +2,7 @@ package com.umoja.secure.crypto
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 import java.io.File
 import java.util.Base64
@@ -48,6 +49,25 @@ class ProvisioningKeysTest {
     @Test
     fun `recovery pubkey decodes to 32 bytes`() {
         val raw = Base64.getUrlDecoder().decode(ProvisioningKeys.RECOVERY_PUBKEY_B64U)
+        assertEquals(32, raw.size)
+    }
+
+    @Test
+    fun `production provisioning pubkey differs from test key`() {
+        assertNotEquals(
+            "PRODUCTION_PROVISIONING_PUBKEY_B64U must not equal "
+                + "TEST_PROVISIONING_PUBKEY_B64U; the production key must "
+                + "be injected from the custody ceremony's output, not "
+                + "copied from the test seed (docs/ops/KEY-CUSTODY.md §5.1)",
+            ProvisioningKeys.TEST_PROVISIONING_PUBKEY_B64U,
+            ProvisioningKeys.PRODUCTION_PROVISIONING_PUBKEY_B64U,
+        )
+    }
+
+    @Test
+    fun `production provisioning pubkey decodes to 32 bytes`() {
+        val raw = Base64.getUrlDecoder()
+            .decode(ProvisioningKeys.PRODUCTION_PROVISIONING_PUBKEY_B64U)
         assertEquals(32, raw.size)
     }
 }
