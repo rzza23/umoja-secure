@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-19 (Session Z-11 — Phase 2, **suspend HTTP surface refactor DONE** at `6c7830e`. Phase 2's substantive remaining item executed. 10 production files, 1 test file, 1 doc file, 12 total. Every API class method became `suspend fun`; `HttpClient`'s `runBlocking` bridge (040-D KDoc's Phase-1 trade-off) removed; `MatrixApi.fetchFn` and `IdentityChangeController`'s `listNotices`/`postAck` lambda params became `suspend`; `MatrixApiTest`'s 5 fetch calls wrapped in `runBlocking {}`. **Zero caller source changes** — verified exhaustively; every existing caller already in a suspend context. Handoff §8's transport deferral from Z-10 closed in the same commit. Gate: JVM 244/244 (incl. `HttpClientRetryTest` 7 tests unchanged — `shouldRetryAfter401` predicate untouched), androidTest 71/71 per emulator both machines. Backend 254 unchanged (Android-only refactor). **No blocking work remains.** Phase 2 remaining: TASK-P1-027b only (CI enforcement gate; blocked on CI-provider decision, organizational). **Next substantive: P1-029 signing-key custody** (Phase-1 DoD gap: test keys currently in production paths). Design-first session per ADR precedent (Session G). Alternatives: P1-033/P1-035 (unblock once P1-029 lands), P1-027b (blocked on CI-provider decision, organizational), P1-021a/b + P1-034 (hardware-blocked), OR nothing — choice, not obligation.)
+Last updated: 2026-10-19 (Session Z-12 — Phase 1 DoD design gap closed for P1-029: **`docs/ops/KEY-CUSTODY.md` landed** at `29cd7bf` (287 lines, 9 sections). StrongBox-backed dedicated Android device (Pixel 7+ / Titan M2) chosen over YubiKey and air-gapped-computer alternatives — reasoning recorded in §1 of the doc. Covers generation ceremony, storage (two safes, two-person control), use procedure (operationalizes Build Master §3.6's 9-step workflow), routine + emergency rotation, retirement, audit, offline device spec, client DEBUG/PROD split design, drill schedule, threats matrix. **TASK-P1-029 split:** design complete (this session); implementation (ProvisioningKeys.kt DEBUG/PROD split + ProvisioningKeysTest new assertion) is next. Same pattern as P1-027 → 027a/027b. Registry v0.8 → v0.9, total 44 → 45. Backend 254, Android JVM 244, androidTest 71 — all unchanged (doc-only). **Next: P1-029 implementation (ProvisioningKeys split, 1 session) OR P1-033 (offline signer, design now exists) OR P1-035 (recovery key) OR P1-027b (needs CI provider) OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -4072,6 +4072,82 @@ Applied, not re-learned.
 **Counts.** Backend 254 (Android-only refactor), Android JVM 244,
 androidTest 71 per emulator — all unchanged.
 
+
+### Session Z-12 — Phase 1 DoD, TASK-P1-029 design: KEY-CUSTODY.md (2026-10-19)
+
+Seventh Phase-1-DoD session (after Phase 2 closure). One commit:
+`29cd7bf` — `docs/ops/KEY-CUSTODY.md` (287 lines, 9 sections). No
+code changes, no test changes. The doc explicitly required by Build
+Master §3.6: "docs/ops/KEY-CUSTODY.md (TASK-P1-029) documents
+generation ceremony, storage, access control, use procedure,
+rotation, retirement, and audit for both the provisioning key and
+the recovery key."
+
+**THE DECISION.** Dedicated Android device (Pixel 7+, StrongBox /
+Titan M2) chosen over YubiKey (Ed25519) and air-gapped-computer
+alternatives. Reasoning captured in the doc's §1 with a decision
+matrix:
+
+- **StrongBox is a dedicated secure element**, not a TEE. Key
+  material generated in StrongBox never enters the Android OS
+  address space, not even the TEE's. Highest key-at-rest assurance
+  on commodity mobile hardware in 2026.
+- **Zero new hardware category** — the project already targets
+  GrapheneOS on Pixel. Pixel 7+ has Titan M2. Verified.
+- **`MatrixSigner` unchanged.** The offline signing app is the
+  admin app with the network stack removed and a "sign this
+  matrix" button. `MatrixSigner.sign(signed: SignedMatrix,
+  privateKey: PrivateKey): String` already exists.
+- **Operationally bounded.** YubiHSM 2 requires PKCS#11 tooling and
+  ~$650 hardware; YubiKey needs a hardened host machine; Option 3
+  keeps the key in extractable form during signing. None are strong
+  enough for the primary trust anchor of a government/security
+  product.
+
+**CAVEATS NAMED, NOT HIDDEN.** StrongBox requires Pixel 7 or later —
+the doc says Pixel 6 and earlier are NOT acceptable. Hardware
+attestation at generation is a ceremony step, not an assumption.
+Firmware updates are allowed only via signed OTA on physical media
+(ceremony lead installs, no network). A stolen offline device with
+StrongBox is a brick (key non-extractable) but can be used to sign
+arbitrary matrices if unlocked — two-person control + strong
+passcode + safe storage are the countermeasures. Recovery-key
+compromise has no cryptographic recovery path — physical
+re-provisioning of all devices is the terminal state, which is why
+recovery custody is the strictest control in the system.
+
+**WHAT THE DOC COVERS** (9 sections): decision + alternatives matrix;
+provisioning key (8-step generation, Safe #1 + two-person control,
+9-step use procedure per §3.6, routine + emergency rotation,
+retirement, audit); recovery key (separate device, Safe #2 different
+physical location, three-person ceremony, annual rotation, terminal
+state if compromised, audit); offline device spec (Pixel 7+
+StrongBox, GrapheneOS, ADB install, `dumpsys connectivity`
+pre-ceremony check, tamper bag); client implementation notes
+(ProvisioningKeys.kt DEBUG/PROD split design, ProvisioningKeysTest
+new assertion, rotation seam usage); drill schedule (annual
+test-signing + annual recovery-retrieval); threats matrix (7
+threats); related docs; approval.
+
+**TASK-P1-029 SPLIT, IMPLICIT.** The task covers design +
+implementation. This session completes the design half. The
+implementation half — `ProvisioningKeys.kt`'s DEBUG/PROD split,
+`ProvisioningKeysTest`'s new assertion that production differs from
+test seed, and the client wiring that consumes the new constant —
+is the next session. Same split pattern as TASK-P1-027 →
+027a/027b. The registry row is split in this session's close commit
+to reflect both halves.
+
+**PHASE-1 DoD PROGRESS.** The DoD tier surfaced in Z-11's correction
+named P1-029 as the highest-priority unblocked item because the
+current provisioning key is a test key. That gap is now closed at
+the design layer; implementation lands next. P1-033 (offline
+signer) now has the design to build against; P1-035 (recovery key
+ceremony) has the ceremony spec it will operationalize.
+
+**Counts.** Backend 254, Android JVM 244, androidTest 71 per
+emulator — all unchanged (doc-only session).
+
 ---
 
 ## 4. Known issues
@@ -4793,20 +4869,19 @@ Original phrasing preserved below for history:
       `runBlocking` bridge removed; §8 transport deferral closed.
       `HttpClientRetryTest` 7 tests unchanged; JVM 244/244;
       androidTest 71/71 per emulator.
-    - **Phase-1 DoD gaps (Build Master §10) — the real substantive
-      next tier.** Phase 2 closed Phase-2 items; Phase 1 DoD still
-      requires: emergency lock (P1-021a), duress wipe (P1-021b),
-      hardware TEE Ed25519 verification (P1-034), signing-key custody
-      (P1-029), offline provisioning signer (P1-033), recovery key
-      (P1-035), independent security review (P1-024). **Highest
-      unblocked priority: P1-029** — `ProvisioningKeys.kt`'s KDoc
-      names the current provisioning pubkey as a test key; every matrix
-      push uses it; no production deployment is possible without real
-      key custody. Design-first session (Session G precedent:
-      ADR-IDENTITY-CHANGE-001, 401 lines of design, zero code).
-      P1-033 and P1-035 unblock once P1-029 lands. P1-021a/b and
-      P1-034 are hardware-blocked (spare hardware / target Pixel
-      required for acceptance).
+    - **Phase-1 DoD gaps (Build Master §10) — P1-029 DESIGN
+      LANDED.** `docs/ops/KEY-CUSTODY.md` at `29cd7bf` (Session Z-12):
+      287 lines, StrongBox-backed dedicated Android device, all
+      ceremonies specified. **Implementation next:**
+      `ProvisioningKeys.kt` DEBUG/PROD split + `ProvisioningKeysTest`
+      new assertion (1 session). **After P1-029 implementation:** P1-033
+      (offline signer — the design now exists to build against),
+      P1-035 (recovery key ceremony). **Hardware-blocked:** P1-021a
+      (emergency lock), P1-021b (duress wipe), P1-034 (TEE Ed25519
+      verification on target hardware). **Organizational-blocked:**
+      P1-027b (CI-provider decision). **Independent of all:** P1-024
+      (external security review), scheduled against a candidate
+      release.
     - **TASK-P1-027b** — CI enforcement gate + Android dependency
       tooling. Blocked on CI-provider decision (organizational, not
       technical). Session opens when that decision exists.

@@ -1,7 +1,7 @@
 # US-TASK-P1-001-v0.8 — Phase 1 Task Registry Reconciliation
 
 Document ID: US-TASK-P1-001
-Version: 0.8
+Version: 0.9
 Date: October 2026
 Supersedes: v0.7
 Purpose: Reconcile the Phase 1 task registry with UMOJA-SECURE-BUILD-MASTER.md v1.4.2.
@@ -649,6 +649,13 @@ Test coverage required:
 
 ### TASK-P1-029 — Signing-key custody
 
+**Design complete 2026-10-19 (Session Z-12):** `docs/ops/KEY-CUSTODY.md`
+at `29cd7bf` (287 lines, 9 sections). StrongBox-backed dedicated Android
+device (Pixel 7+, Titan M2) chosen over YubiKey and air-gapped-computer
+alternatives. **Implementation pending (TASK-P1-029b):**
+`ProvisioningKeys.kt` DEBUG/PROD split + `ProvisioningKeysTest` new
+assertion.
+
 Custody procedure must cover BOTH:
 - Organization provisioning key (TASK-P1-033).
 - Organization recovery key (TASK-P1-035).
@@ -763,7 +770,8 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-027a | SBOM + dependency review, per-session | 1 | Executed 2026-10-19 |
 | TASK-P1-027b | CI enforcement gate for dep review | 1 | New |
 | TASK-P1-028 | Log redaction audit | 10 | New |
-| TASK-P1-029 | Signing-key custody | 3.5 | Updated |
+| TASK-P1-029a | Signing-key custody — design | 1 | Executed 2026-10-19 |
+| TASK-P1-029b | Signing-key custody — implementation | 1 | New |
 | TASK-P1-030 | Replacement-device flow | 9 | Updated |
 | TASK-P1-031 | Audit hash-chain verification | 10 | Restored |
 | TASK-P1-032 | Resolved-dependency inspection | 1 | New |
@@ -778,7 +786,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-041 | Failed-verification operator logging | 1 | Proposed |
 | TASK-P1-042 | WS revocation listener reconnect + re-reconcile | 1 | DONE |
 
-**Total Phase 1 task identifiers:** 44 (001–020, 021a, 021b, 022–026, 027a, 027b, 028–042).
+**Total Phase 1 task identifiers:** 45 (001–020, 021a, 021b, 022–026, 027a, 027b, 028, 029a, 029b, 030–042).
 
 **Execution order (dependency-respecting):**
 TASK-P1-001 → TASK-P1-002 → TASK-P1-027 → TASK-P1-032 → TASK-P1-003 → TASK-P1-034 → TASK-P1-004 → TASK-P1-005 → TASK-P1-006 → TASK-P1-013 → TASK-P1-007 → TASK-P1-008 → TASK-P1-025 → TASK-P1-026 → TASK-P1-029 → TASK-P1-033 → TASK-P1-035 → TASK-P1-014 → TASK-P1-015 → TASK-P1-016 → TASK-P1-009 → TASK-P1-010 → TASK-P1-011 → TASK-P1-012 → TASK-P1-019 → TASK-P1-020 → TASK-P1-021a → TASK-P1-021b → TASK-P1-030 → TASK-P1-017 → TASK-P1-018 → TASK-P1-022 → TASK-P1-023 → TASK-P1-024 → TASK-P1-028 → TASK-P1-031
