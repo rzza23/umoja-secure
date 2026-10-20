@@ -300,10 +300,10 @@ fun AppRoot(lifecycle: Lifecycle) {
                 val token = SessionManager(context).currentSession()?.sessionToken
                 if (token != null) {
                     try {
-                        val api = MatrixApi { t ->
+                        val api = MatrixApi(fetchFn = { t ->
                             HttpClient(HttpClient.DEV_BASE_URL)
                                 .get("/me/matrix", bearer = t)
-                        }
+                        })
                         val remote = api.fetch(token)
                         if (remote != null) {
                             matrixStore.accept(
@@ -473,6 +473,13 @@ fun AppRoot(lifecycle: Lifecycle) {
 
         AppScreen.Admin -> {
             val adminApi = remember { AdminApi(HttpClient(HttpClient.DEV_BASE_URL)) }
+            val adminMatrixApi = remember {
+                val http = HttpClient(HttpClient.DEV_BASE_URL)
+                MatrixApi(
+                    fetchFn = { t -> http.get("/me/matrix", bearer = t) },
+                    pushFn = { path, body, t -> http.postJson(path, body, bearer = t) },
+                )
+            }
             val adminSessionToken = remember(deviceId) {
                 SecureStorage(context).get("session_token")
             }
@@ -483,6 +490,7 @@ fun AppRoot(lifecycle: Lifecycle) {
                     listContactsFn = adminApi::listContacts,
                     createTokenFn = adminApi::createEnrollmentToken,
                     authorizeContactFn = adminApi::authorizeContact,
+                    pushFn = adminMatrixApi::push,
                 )
             }
             AdminScreen(

@@ -4,6 +4,7 @@ import com.umoja.secure.crypto.MatrixBuilder
 import com.umoja.secure.crypto.ProvisioningBundle
 import com.umoja.secure.crypto.jcsCanonicalizeString
 import com.umoja.secure.transport.AdminApi
+import com.umoja.secure.transport.MatrixApi
 import com.umoja.secure.transport.AdminApiException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +45,8 @@ class AdminScreenState(
     private val listContactsFn: suspend (String) -> List<AdminApi.ContactEntry>,
     private val createTokenFn: suspend (AdminApi.CreateTokenRequest, String) -> AdminApi.CreatedToken,
     private val authorizeContactFn: suspend (String, String, String) -> Unit,
+    private val pushFn: suspend (String, MatrixApi.RemoteMatrix, String) -> MatrixApi.PushResult =
+        { _, _, _ -> error("AdminScreenState.pushSignedMatrix: pushFn not provided") },
 ) {
     private val _loading = MutableStateFlow(true)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
@@ -71,6 +74,12 @@ class AdminScreenState(
 
     private val _builtHash = MutableStateFlow<String?>(null)
     val builtHash: StateFlow<String?> = _builtHash.asStateFlow()
+
+    private val _importedSignature = MutableStateFlow<String?>(null)
+    val importedSignature: StateFlow<String?> = _importedSignature.asStateFlow()
+
+    private val _pushedMatrix = MutableStateFlow<MatrixApi.PushResult?>(null)
+    val pushedMatrix: StateFlow<MatrixApi.PushResult?> = _pushedMatrix.asStateFlow()
 
     suspend fun load() {
         if (sessionToken == null) {
@@ -179,9 +188,102 @@ class AdminScreenState(
                 .encodeToString(digest)
             _builtWrapperJson.value = wrapperStr
             _builtHash.value = hashB64
+            _pushedMatrix.value = null
             _statusMessage.value = "Matrix built - review hash and content"
         } catch (e: IllegalArgumentException) {
             _error.value = "Build failed: ${e.message}"
+        }
+    }
+
+    /**
+     * Import the signature produced by the offline signer for the
+     * currently-built matrix. Validates 86-char base64url (64-byte
+     * Ed25519 no-pad). Clearing the prior pushedMatrix is deliberate:
+     * a new signature invalidates any previously-pushed state.
+     *
+     * Task: TASK-P1-033b
+     */
+    fun importSignature(base64url: String) {
+        _error.value = null
+        _statusMessage.value = null
+        if (!base64url.matches(Regex("^[A-Za-z0-9_-]{86}$"))) {
+            _error.value = "signature must be 86-char base64url (64 bytes)"
+            return
+        }
+        _importedSignature.value = base64url
+        _pushedMatrix.value = null
+        _statusMessage.value = "Signature imported - review and push"
+    }
+
+    /**
+     * Clear imported signature and pushed state. Built wrapper/hash
+     * (from [buildMatrix]) are preserved -- they are the pre-signing
+     * artifact, orthogonal to the signature.
+     *
+     * Task: TASK-P1-033b
+     */
+    fun clearSignature() {
+        _importedSignature.value = null
+        _pushedMatrix.value = null
+        _error.value = null
+        _statusMessage.value = null
+    }
+
+    /**
+     * Push the built matrix + imported signature to the backend via
+     * POST /admin/matrices/:device_id (TASK-P1-033a's route).
+     *
+     * Requires: sessionToken (admin's), scannedBundle (target
+     * device_id), builtWrapperJson (canonical to push), and
+     * importedSignature (signature to attach). All four are checked
+     * before the network call -- missing inputs surface as specific
+     * error strings, not network failures.
+     *
+     * On success: poppedMatrix echoes the server's stored
+     * {device_id, version} (client can assert version matches what
+     * it built). On MatrixApiException: error code recorded.
+     *
+     * Task: TASK-P1-033b
+     */
+    suspend fun pushSignedMatrix() {
+        val tok = sessionToken
+        if (tok == null) {
+            _error.value = "Not authenticated"
+            return
+        }
+        val bundle = _scannedBundle.value
+        if (bundle == null) {
+            _error.value = "No scanned device"
+            return
+        }
+        val wrapper = _builtWrapperJson.value
+        if (wrapper == null) {
+            _error.value = "No built matrix to push"
+            return
+        }
+        val sig = _importedSignature.value
+        if (sig == null) {
+            _error.value = "No signature imported"
+            return
+        }
+        _error.value = null
+        _statusMessage.value = null
+        try {
+            val result = withContext(Dispatchers.IO) {
+                pushFn(
+                    bundle.deviceId,
+                    MatrixApi.RemoteMatrix(
+                        canonicalUtf8 = wrapper,
+                        signatureBase64url = sig,
+                    ),
+                    tok,
+                )
+            }
+            _pushedMatrix.value = result
+            _statusMessage.value =
+                "Matrix pushed (v${result.version})"
+        } catch (e: AdminApiException) {
+            _error.value = e.code
         }
     }
 

@@ -41,6 +41,8 @@ import org.json.JSONObject
  */
 class MatrixApi(
     private val fetchFn: suspend (sessionToken: String) -> HttpResult,
+    private val pushFn: suspend (path: String, body: String, sessionToken: String) -> HttpResult =
+        { _, _, _ -> error("MatrixApi.push: pushFn not provided") },
 ) {
     data class RemoteMatrix(
         val canonicalUtf8: String,
@@ -72,6 +74,58 @@ class MatrixApi(
             throw MatrixApiException("invalid_response", e)
         }
     }
+
+    /**
+     * Push a signed authorization matrix for [targetDeviceId] via
+     * POST /admin/matrices/:device_id (TASK-P1-033a's route).
+     *
+     * The body is `{canonical_utf8, signature_base64url}`. The
+     * server verifies the signature against its configured
+     * provisioning pubkey, enforces device_id-match, and rejects
+     * non-monotonic pushes 409. Returns the server's echo
+     * (`{device_id, version}`) so the caller can assert the stored
+     * version matches what was pushed.
+     *
+     * Error taxonomy mirrors [fetch]: `network_error` on transport
+     * failure, `{error_code_from_json}` on non-201, `invalid_response`
+     * on malformed 201 body.
+     *
+     * Task: TASK-P1-033b
+     * Depends: TASK-P1-033a (route)
+     */
+    suspend fun push(
+        targetDeviceId: String,
+        remote: RemoteMatrix,
+        sessionToken: String,
+    ): PushResult {
+        val body = JSONObject().apply {
+            put("canonical_utf8", remote.canonicalUtf8)
+            put("signature_base64url", remote.signatureBase64url)
+        }.toString()
+
+        val result = try {
+            pushFn("/admin/matrices/$targetDeviceId", body, sessionToken)
+        } catch (e: HttpException) {
+            throw MatrixApiException("network_error", e)
+        }
+        if (result.code != 201) {
+            throw MatrixApiException(errorCodeFrom(result), null, result.code)
+        }
+        return try {
+            val json = JSONObject(result.body)
+            PushResult(
+                deviceId = json.getString("device_id"),
+                version = json.getInt("version"),
+            )
+        } catch (e: Exception) {
+            throw MatrixApiException("invalid_response", e)
+        }
+    }
+
+    data class PushResult(
+        val deviceId: String,
+        val version: Int,
+    )
 
     private fun errorCodeFrom(result: HttpResult): String = try {
         JSONObject(result.body).optString("error", "unknown_error")

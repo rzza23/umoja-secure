@@ -1,6 +1,7 @@
 package com.umoja.secure.ui.admin
 
 import com.umoja.secure.transport.AdminApi
+import com.umoja.secure.transport.MatrixApi
 import com.umoja.secure.transport.AdminApiException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -93,12 +94,15 @@ class AdminScreenStateTest {
         createTokenFn: suspend (AdminApi.CreateTokenRequest, String) -> AdminApi.CreatedToken =
             { _, _ -> token() },
         authorizeContactFn: suspend (String, String, String) -> Unit = { _, _, _ -> },
+        pushFn: suspend (String, MatrixApi.RemoteMatrix, String) -> MatrixApi.PushResult =
+            { _, _, _ -> error("pushFn not configured in this test") },
     ) = AdminScreenState(
         sessionToken = sessionToken,
         listDevicesFn = listDevicesFn,
         listContactsFn = listContactsFn,
         createTokenFn = createTokenFn,
         authorizeContactFn = authorizeContactFn,
+        pushFn = pushFn,
     )
 
     // ============================================================
@@ -361,5 +365,149 @@ class AdminScreenStateTest {
         assertNull(s.statusMessage.value)
         s.setStatusMessage("hello")
         assertEquals("hello", s.statusMessage.value)
+    }
+
+    // ============================================================
+    // importSignature() -- TASK-P1-033b
+    // ============================================================
+
+    @Test
+    fun `importSignature sets signature on valid 86-char base64url`() {
+        val s = stateWith()
+        val sig = "A".repeat(86)
+        s.importSignature(sig)
+        assertEquals(sig, s.importedSignature.value)
+        assertNull(s.error.value)
+        assertEquals("Signature imported - review and push", s.statusMessage.value)
+    }
+
+    @Test
+    fun `importSignature sets error on wrong length`() {
+        val s = stateWith()
+        s.importSignature("too-short")
+        assertNull(s.importedSignature.value)
+        assertEquals(
+            "signature must be 86-char base64url (64 bytes)",
+            s.error.value,
+        )
+    }
+
+    @Test
+    fun `importSignature clears prior pushedMatrix`() = runBlocking {
+        val s = stateWith(
+            pushFn = { _, _, _ -> MatrixApi.PushResult("d-1", 1) },
+        )
+        s.loadBundle(validBundleJson())
+        s.buildMatrix(clearance = "SECRET", versionStr = "1", permittedContacts = emptyList())
+        s.importSignature("A".repeat(86))
+        s.pushSignedMatrix()
+        assertNotNull(s.pushedMatrix.value)
+        s.importSignature("B".repeat(86))
+        assertNull(s.pushedMatrix.value)
+        assertEquals("B".repeat(86), s.importedSignature.value)
+    }
+
+    // ============================================================
+    // clearSignature() -- TASK-P1-033b
+    // ============================================================
+
+    @Test
+    fun `clearSignature clears signature and pushedMatrix but preserves builtWrapperJson`() = runBlocking {
+        val s = stateWith(
+            pushFn = { _, _, _ -> MatrixApi.PushResult("d-1", 1) },
+        )
+        s.loadBundle(validBundleJson())
+        s.buildMatrix(clearance = "SECRET", versionStr = "1", permittedContacts = emptyList())
+        s.importSignature("A".repeat(86))
+        s.pushSignedMatrix()
+        assertNotNull(s.pushedMatrix.value)
+        val wrapperBefore = s.builtWrapperJson.value
+        assertNotNull(wrapperBefore)
+
+        s.clearSignature()
+
+        assertNull(s.importedSignature.value)
+        assertNull(s.pushedMatrix.value)
+        assertEquals(wrapperBefore, s.builtWrapperJson.value)
+        assertNull(s.error.value)
+    }
+
+    // ============================================================
+    // pushSignedMatrix() -- TASK-P1-033b
+    // ============================================================
+
+    @Test
+    fun `pushSignedMatrix sets error when sessionToken is null`() = runBlocking {
+        val s = stateWith(sessionToken = null)
+        s.pushSignedMatrix()
+        assertEquals("Not authenticated", s.error.value)
+    }
+
+    @Test
+    fun `pushSignedMatrix sets error when no scanned bundle`() = runBlocking {
+        val s = stateWith()
+        s.pushSignedMatrix()
+        assertEquals("No scanned device", s.error.value)
+    }
+
+    @Test
+    fun `pushSignedMatrix sets error when no built matrix`() = runBlocking {
+        val s = stateWith()
+        s.loadBundle(validBundleJson())
+        s.importSignature("A".repeat(86))
+        s.pushSignedMatrix()
+        assertEquals("No built matrix to push", s.error.value)
+    }
+
+    @Test
+    fun `pushSignedMatrix sets error when no imported signature`() = runBlocking {
+        val s = stateWith()
+        s.loadBundle(validBundleJson())
+        s.buildMatrix(clearance = "SECRET", versionStr = "1", permittedContacts = emptyList())
+        s.pushSignedMatrix()
+        assertEquals("No signature imported", s.error.value)
+    }
+
+    @Test
+    fun `pushSignedMatrix populates pushedMatrix and statusMessage on success`() = runBlocking {
+        var capturedTarget = ""
+        var capturedCanonical = ""
+        var capturedSig = ""
+        val s = stateWith(
+            pushFn = { target, remote, _ ->
+                capturedTarget = target
+                capturedCanonical = remote.canonicalUtf8
+                capturedSig = remote.signatureBase64url
+                MatrixApi.PushResult(deviceId = target, version = 3)
+            },
+        )
+        s.loadBundle(validBundleJson())
+        s.buildMatrix(clearance = "SECRET", versionStr = "3", permittedContacts = emptyList())
+        val wrapper = s.builtWrapperJson.value
+        assertNotNull(wrapper)
+        s.importSignature("A".repeat(86))
+        s.pushSignedMatrix()
+
+        assertEquals("11111111-2222-4333-8444-555555555555", capturedTarget)
+        assertEquals(wrapper, capturedCanonical)
+        assertEquals("A".repeat(86), capturedSig)
+        assertNotNull(s.pushedMatrix.value)
+        assertEquals(3, s.pushedMatrix.value?.version)
+        assertEquals("Matrix pushed (v3)", s.statusMessage.value)
+        assertNull(s.error.value)
+    }
+
+    @Test
+    fun `pushSignedMatrix sets error on AdminApiException from pushFn`() = runBlocking {
+        val s = stateWith(
+            pushFn = { _, _, _ -> throw AdminApiException("matrix_version_not_monotonic") },
+        )
+        s.loadBundle(validBundleJson())
+        s.buildMatrix(clearance = "SECRET", versionStr = "1", permittedContacts = emptyList())
+        s.importSignature("A".repeat(86))
+        s.pushSignedMatrix()
+
+        assertEquals("matrix_version_not_monotonic", s.error.value)
+        assertNull(s.pushedMatrix.value)
     }
 }

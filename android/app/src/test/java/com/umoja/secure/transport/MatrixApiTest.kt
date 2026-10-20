@@ -21,11 +21,12 @@ import org.junit.Test
  */
 class MatrixApiTest {
 
-    private fun apiReturning(result: HttpResult): MatrixApi = MatrixApi { _ -> result }
+    private fun apiReturning(result: HttpResult): MatrixApi =
+        MatrixApi(fetchFn = { _ -> result })
 
-    private fun apiThrowing(e: Exception): MatrixApi = MatrixApi { _ ->
+    private fun apiThrowing(e: Exception): MatrixApi = MatrixApi(fetchFn = { _ ->
         throw e
-    }
+    })
 
     private fun validMatrixJson(): String =
         """{"canonical_utf8":"{\"domain\":\"umoja.authorization-matrix.v1\",\"matrix\":{}}","signature_base64url":"${"A".repeat(86)}"}"""
@@ -75,6 +76,67 @@ class MatrixApiTest {
         val api = apiThrowing(HttpException("boom"))
         val e = assertThrows(MatrixApiException::class.java) {
             runBlocking { api.fetch("test-token") }
+        }
+        assertEquals("network_error", e.code)
+        assertTrue(e.cause is HttpException)
+    }
+
+    // ============================================================
+    // push() — TASK-P1-033b
+    // ============================================================
+
+    private fun apiForPush(result: HttpResult): MatrixApi =
+        MatrixApi(
+            fetchFn = { _ -> error("fetchFn should not be called in push tests") },
+            pushFn = { _, _, _ -> result },
+        )
+
+    private fun validRemoteMatrix() = MatrixApi.RemoteMatrix(
+        canonicalUtf8 = "{\"domain\":\"umoja.authorization-matrix.v1\",\"matrix\":{}}",
+        signatureBase64url = "A".repeat(86),
+    )
+
+    @Test
+    fun `push returns PushResult on 201`() {
+        val api = apiForPush(
+            HttpResult(201, """{"device_id":"d-abc","version":3}"""),
+        )
+        val pr = runBlocking {
+            api.push("d-abc", validRemoteMatrix(), "test-token")
+        }
+        assertEquals("d-abc", pr.deviceId)
+        assertEquals(3, pr.version)
+    }
+
+    @Test
+    fun `push throws error code from body on 409 non-monotonic`() {
+        val api = apiForPush(
+            HttpResult(409, """{"error":"matrix_version_not_monotonic"}"""),
+        )
+        val e = assertThrows(MatrixApiException::class.java) {
+            runBlocking { api.push("d-abc", validRemoteMatrix(), "test-token") }
+        }
+        assertEquals("matrix_version_not_monotonic", e.code)
+        assertEquals(409, e.httpCode)
+    }
+
+    @Test
+    fun `push throws invalid_response on malformed 201 body`() {
+        val api = apiForPush(HttpResult(201, "not-json"))
+        val e = assertThrows(MatrixApiException::class.java) {
+            runBlocking { api.push("d-abc", validRemoteMatrix(), "test-token") }
+        }
+        assertEquals("invalid_response", e.code)
+    }
+
+    @Test
+    fun `push throws network_error on HttpException from pushFn`() {
+        val api = MatrixApi(
+            fetchFn = { _ -> error("fetchFn should not be called in push tests") },
+            pushFn = { _, _, _ -> throw HttpException("boom") },
+        )
+        val e = assertThrows(MatrixApiException::class.java) {
+            runBlocking { api.push("d-abc", validRemoteMatrix(), "test-token") }
         }
         assertEquals("network_error", e.code)
         assertTrue(e.cause is HttpException)

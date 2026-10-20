@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -35,8 +36,11 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.asImageBitmap
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import com.journeyapps.barcodescanner.BarcodeEncoder
+import com.google.zxing.BarcodeFormat
 import com.umoja.secure.crypto.ProvisioningBundle
 import com.umoja.secure.transport.AdminApi
 import com.umoja.secure.ui.common.SecureScreen
@@ -63,6 +67,8 @@ fun AdminScreen(
     val createdToken by state.createdToken.collectAsState()
     val builtWrapperJson by state.builtWrapperJson.collectAsState()
     val builtHash by state.builtHash.collectAsState()
+    val importedSignature by state.importedSignature.collectAsState()
+    val pushedMatrix by state.pushedMatrix.collectAsState()
 
     var ownerDeviceId by remember { mutableStateOf("") }
     var contactDeviceId by remember { mutableStateOf("") }
@@ -75,6 +81,16 @@ fun AdminScreen(
         val contents = result.contents
         if (contents != null) {
             state.loadBundle(contents)
+        }
+    }
+
+    val pushScope = rememberCoroutineScope()
+    var importedSigText by remember { mutableStateOf("") }
+    val sigScanLauncher = rememberLauncherForActivityResult(contract = ScanContract()) { result ->
+        val contents = result.contents
+        if (contents != null) {
+            importedSigText = contents
+            state.importSignature(contents)
         }
     }
 
@@ -273,6 +289,72 @@ fun AdminScreen(
                                     clipboard.setText(AnnotatedString(h))
                                     state.setStatusMessage("Hash copied")
                                 }) { Text("Copy hash") }
+                            }
+                        } }
+                    }
+                }
+                builtHash?.let { _ ->
+                    item {
+                        Card { Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                            Text("Push signed matrix (TASK-P1-033b)", style = MaterialTheme.typography.titleSmall)
+                            Spacer(Modifier.height(8.dp))
+                            builtWrapperJson?.let { w ->
+                                val qrBitmap = remember(w) {
+                                    try {
+                                        BarcodeEncoder().encodeBitmap(w, BarcodeFormat.QR_CODE, 640, 640)
+                                    } catch (_: Exception) { null }
+                                }
+                                if (qrBitmap != null) {
+                                    Image(
+                                        bitmap = qrBitmap.asImageBitmap(),
+                                        contentDescription = "Signed matrix QR",
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                }
+                            }
+                            OutlinedTextField(
+                                value = importedSigText,
+                                onValueChange = { importedSigText = it },
+                                label = { Text("Signature (86-char base64url)") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Row {
+                                Button(onClick = {
+                                    sigScanLauncher.launch(ScanOptions().apply {
+                                        setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                        setPrompt("Scan signature QR")
+                                        setBeepEnabled(false)
+                                        setOrientationLocked(false)
+                                    })
+                                }) { Text("Scan signature") }
+                                Spacer(Modifier.width(8.dp))
+                                Button(onClick = {
+                                    state.importSignature(importedSigText.trim())
+                                }) { Text("Import signature") }
+                            }
+                            importedSignature?.let { sig ->
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "Signature imported: ${sig.take(12)}…",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Button(
+                                    onClick = { pushScope.launch { state.pushSignedMatrix() } },
+                                    enabled = pushedMatrix == null,
+                                ) {
+                                    Text(if (pushedMatrix == null) "Push signed matrix" else "Pushed")
+                                }
+                                pushedMatrix?.let { pr ->
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "Pushed: ${pr.deviceId.take(8)}… at v${pr.version}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
                             }
                         } }
                     }
