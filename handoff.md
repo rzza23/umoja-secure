@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-19 (Session Z-11 — Phase 2, **suspend HTTP surface refactor DONE** at `6c7830e`. Phase 2's substantive remaining item executed. 10 production files, 1 test file, 1 doc file, 12 total. Every API class method became `suspend fun`; `HttpClient`'s `runBlocking` bridge (040-D KDoc's Phase-1 trade-off) removed; `MatrixApi.fetchFn` and `IdentityChangeController`'s `listNotices`/`postAck` lambda params became `suspend`; `MatrixApiTest`'s 5 fetch calls wrapped in `runBlocking {}`. **Zero caller source changes** — verified exhaustively; every existing caller already in a suspend context. Handoff §8's transport deferral from Z-10 closed in the same commit. Gate: JVM 244/244 (incl. `HttpClientRetryTest` 7 tests unchanged — `shouldRetryAfter401` predicate untouched), androidTest 71/71 per emulator both machines. Backend 254 unchanged (Android-only refactor). **No blocking work remains.** Phase 2 remaining: TASK-P1-027b only (CI enforcement gate; blocked on CI-provider decision, organizational). Next: P1-027b OR nothing — choice, not obligation.)
+Last updated: 2026-10-19 (Session Z-11 — Phase 2, **suspend HTTP surface refactor DONE** at `6c7830e`. Phase 2's substantive remaining item executed. 10 production files, 1 test file, 1 doc file, 12 total. Every API class method became `suspend fun`; `HttpClient`'s `runBlocking` bridge (040-D KDoc's Phase-1 trade-off) removed; `MatrixApi.fetchFn` and `IdentityChangeController`'s `listNotices`/`postAck` lambda params became `suspend`; `MatrixApiTest`'s 5 fetch calls wrapped in `runBlocking {}`. **Zero caller source changes** — verified exhaustively; every existing caller already in a suspend context. Handoff §8's transport deferral from Z-10 closed in the same commit. Gate: JVM 244/244 (incl. `HttpClientRetryTest` 7 tests unchanged — `shouldRetryAfter401` predicate untouched), androidTest 71/71 per emulator both machines. Backend 254 unchanged (Android-only refactor). **No blocking work remains.** Phase 2 remaining: TASK-P1-027b only (CI enforcement gate; blocked on CI-provider decision, organizational). **Next substantive: P1-029 signing-key custody** (Phase-1 DoD gap: test keys currently in production paths). Design-first session per ADR precedent (Session G). Alternatives: P1-033/P1-035 (unblock once P1-029 lands), P1-027b (blocked on CI-provider decision, organizational), P1-021a/b + P1-034 (hardware-blocked), OR nothing — choice, not obligation.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -4791,11 +4791,25 @@ Original phrasing preserved below for history:
     - **Phase 2 preparation** — **suspend HTTP surface refactor
       DONE** at `6c7830e` (Session Z-11). All API classes suspend;
       `runBlocking` bridge removed; §8 transport deferral closed.
-      `HttpClientRetryTest` 7 tests unchanged (predicate untouched);
-      JVM 244/244; androidTest 71/71 per emulator. **Remaining:**
-      TASK-P1-027b (CI enforcement gate + Android tooling; blocked on
-      CI-provider decision, organizational, not technical). Nothing
-      else in the current Phase-2 backlog.
+      `HttpClientRetryTest` 7 tests unchanged; JVM 244/244;
+      androidTest 71/71 per emulator.
+    - **Phase-1 DoD gaps (Build Master §10) — the real substantive
+      next tier.** Phase 2 closed Phase-2 items; Phase 1 DoD still
+      requires: emergency lock (P1-021a), duress wipe (P1-021b),
+      hardware TEE Ed25519 verification (P1-034), signing-key custody
+      (P1-029), offline provisioning signer (P1-033), recovery key
+      (P1-035), independent security review (P1-024). **Highest
+      unblocked priority: P1-029** — `ProvisioningKeys.kt`'s KDoc
+      names the current provisioning pubkey as a test key; every matrix
+      push uses it; no production deployment is possible without real
+      key custody. Design-first session (Session G precedent:
+      ADR-IDENTITY-CHANGE-001, 401 lines of design, zero code).
+      P1-033 and P1-035 unblock once P1-029 lands. P1-021a/b and
+      P1-034 are hardware-blocked (spare hardware / target Pixel
+      required for acceptance).
+    - **TASK-P1-027b** — CI enforcement gate + Android dependency
+      tooling. Blocked on CI-provider decision (organizational, not
+      technical). Session opens when that decision exists.
     - **Backlog hygiene** — `MessageStore` SQLite connection leak
       (production bug, dozens/sec during cold launch); KI-016
       base64url validator dedupe; KI-008 `canonicalJson` dedupe;
