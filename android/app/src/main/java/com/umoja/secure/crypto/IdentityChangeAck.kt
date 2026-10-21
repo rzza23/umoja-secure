@@ -49,7 +49,7 @@ data class IdentityChangeAck(
             require(decision == "accept" || decision == "reject") {
                 "decision: expected \"accept\" or \"reject\", got \"$decision\""
             }
-            require(IC_ISO8601_UTC_RE.matches(issuedAt)) {
+            require(ISO8601_UTC_RE.matches(issuedAt)) {
                 "issued_at: expected ISO 8601 UTC with trailing Z, got $issuedAt"
             }
             return IdentityChangeAck(
@@ -103,8 +103,6 @@ data class SignedIdentityChangeAck(
 // (Error subclass with .name); Kotlin uses the built-in.
 
 private val IC_BASE64URL32_RE = Regex("^[A-Za-z0-9_-]{43}$")
-private val IC_ISO8601_UTC_RE =
-    Regex("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$")
 
 private fun IC_REQUIRE_STRING(value: Any?, field: String): String {
     val s = value as? String

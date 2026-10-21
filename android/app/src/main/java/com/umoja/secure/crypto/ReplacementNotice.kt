@@ -54,7 +54,7 @@ data class ReplacementNotice(
             require(fromDeviceId != toDeviceId) {
                 "from_device_id and to_device_id must differ"
             }
-            require(RN_ISO8601_UTC_RE.matches(issuedAt)) {
+            require(ISO8601_UTC_RE.matches(issuedAt)) {
                 "issued_at: expected ISO 8601 UTC with trailing Z, got $issuedAt"
             }
             return ReplacementNotice(
@@ -97,9 +97,3 @@ data class SignedReplacementNotice(
 }
 
 // ---------- validation helpers ----------
-//
-// File-private, mirroring AuthorizationMatrix.kt's pattern. Kotlin
-// top-level `private` is file-scoped, so no conflict with the matrix
-// validators despite identical names.
-
-private val RN_ISO8601_UTC_RE = Regex("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$")

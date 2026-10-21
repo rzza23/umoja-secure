@@ -117,27 +117,6 @@ data class SignedMatrix(
 
 // ---------- validation helpers ----------
 
-private val ISO8601_UTC_RE = Regex("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$")
-
-private fun requirePositiveInt(value: Any?, field: String): Int {
-    val n = when (value) {
-        is Int -> value
-        is Long -> {
-            require(value in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) {
-                "$field: out of Int range"
-            }
-            value.toInt()
-        }
-        else -> throw IllegalArgumentException(
-            "$field: expected positive integer, got ${value?.let { it::class.simpleName } ?: "null"}",
-        )
-    }
-    if (n < 1) {
-        throw IllegalArgumentException("$field: expected positive integer, got $n")
-    }
-    return n
-}
-
 @Suppress("UNCHECKED_CAST")
 private fun requireStringList(value: Any?, field: String): List<String> {
     val list = value as? List<Any?>
