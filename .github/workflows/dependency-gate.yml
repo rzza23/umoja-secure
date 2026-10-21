@@ -1,0 +1,50 @@
+name: Dependency Gate
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  backend-dependency-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: umoja
+          POSTGRES_PASSWORD: umoja
+          POSTGRES_DB: umoja
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run sbom
+      - run: python3 ../scripts/ci/check-prohibited.py sbom.json
+      - run: npm audit --json > /tmp/audit.json || true
+      - run: python3 ../scripts/ci/check-cve-exceptions.py /tmp/audit.json ../docs/security/DEPENDENCY-EXCEPTIONS.md
+      - run: python3 ../scripts/ci/check-dep-tree-refresh.py
+      - run: npm test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-dep-artifacts
+          path: |
+            backend/sbom.json
+            artifacts/dep-tree.json
+            /tmp/audit.json
