@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-20 (Session Z-23 — **P1-035c DONE** at `456adf5`. Recovery ceremony runbook: 682-line three-person procedure composing `PROVISIONING-CEREMONY.md` for the shared steps, authoritative only where the recovery ceremony diverges (three operators, split passcode, Safe #2). Parts A (generation) + B (use per notice) with print-ready paper logs; C (annual rotation, three ceremonies); D (compromise = physical re-provisioning, documented terminal state); E-G (failure/audit/scope). Doc-only. Counts unchanged (backend 291, JVM 288/302). **P1-035 is 3/4** — only 035d (hardware-blocked drill, same constraint as 033e) remains. **Next: 035d** on hardware, OR P1-036 (client handlers, now unblocked by 035b's signer), OR P1-027b (CI-provider decision), OR nothing.)
+Last updated: 2026-10-21 (Session Z-24 — **P1-036 DONE** at `cc0db1e`. Client-side `key_rotation` + `key_revocation` handlers: `RecoveryNoticeStore` verifies recovery-key-signed notices, enforces global monotonic `recovery_key_version`, applies state to `ProvisioningKeys` SecureStorage slots; `currentTrustedProvisioningKeys` is read-gated on the overlap window. Revoke-only ruling (§B line 292-294 literal — no install). Both `MatrixStore.accept` and `IdentityChangeController` call sites switch to the dynamic trusted set; `provisioningPublicKey()` helper + duplicate `ED25519_SPKI_PREFIX` deleted. Two §B drifts corrected in implementation (§285: `key_rotation` verifies against recovery key, not provisioning; §267: inverted previous/current phrasing — acceptance criterion was already correct). 12 JVM tests. Counts: backend 291, client JVM 288→300, signing 302→314 (shared test source set runs in both flavors). **P1-035 is 3/4** — only 035d (hardware-blocked drill) remains. **Next: 035d** on hardware, OR P1-033e (hardware-blocked), OR P1-027b (CI-provider decision), OR nothing.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -101,7 +101,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 288 client / 302 signing** (verified 2026-10-19 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests. Session Z-3: AdminScreenStateTest, 22 JVM tests. Session Z-4: ChatViewModelTest, 10 JVM tests. Session Z-13: 029b ProvisioningKeysTest, 2 JVM tests. Session Z-16: 033b MatrixApiTest +4, AdminScreenStateTest +10. Session Z-17: 033c build flavor split, SigningStateTest +14 under `testSigningDebugUnitTest` (client 260 unchanged, signing 274).)
+- **JVM unit tests: 300 client / 314 signing** (verified 2026-10-21 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests. Session Z-3: AdminScreenStateTest, 22 JVM tests. Session Z-4: ChatViewModelTest, 10 JVM tests. Session Z-13: 029b ProvisioningKeysTest, 2 JVM tests. Session Z-16: 033b MatrixApiTest +4, AdminScreenStateTest +10. Session Z-17: 033c build flavor split, SigningStateTest +14 under `testSigningDebugUnitTest` (client 260 unchanged, signing 274).)
 - **androidTest: 8 files, 71 tests** (verified 2026-10-18 from
   connectedAndroidTest XML aggregate `<testsuites tests="71">` -- not
   grep-summed; see §7 twelfth lesson. Session Z-1 added `AckDialogTest.kt`
@@ -5383,6 +5383,155 @@ needs two).
   decision (organizational, not technical).
 - **Nothing**: map accurate, no blocking work.
 
+### Session Z-24 — TASK-P1-036 DONE: client-side key_rotation + key_revocation handlers (2026-10-21)
+
+Client-side notice handlers landed end-to-end. One implementation
+commit (`cc0db1e`, 4 files: 2 modified, 2 new) plus this handoff
+close. **P1-036 DONE.**
+
+**What shipped.**
+
+- `RecoveryNoticeStore.kt` (new, ~230 lines): verifies
+  recovery-key-signed notices, enforces global `recovery_key_version`
+  monotonicity, applies state to `ProvisioningKeys` SecureStorage
+  slots, exposes `version: StateFlow<Long>`. Two public handlers —
+  `recordKeyRotation` and `recordKeyRevocation` — both verify against
+  `RECOVERY_PUBKEY_B64U`. `clear()` wipes all five storage slots,
+  falling back to BuildConfig on next read.
+- `ProvisioningKeys.kt` (+~140 lines): 3 new storage constants
+  (`STORAGE_KEY_CURRENT_PROVISIONING_PUBKEY`,
+  `STORAGE_KEY_PREVIOUS_PROVISIONING_PUBKEY_OVERLAP_ENDS_AT_MILLIS`,
+  `STORAGE_KEY_REVOKED_PROVISIONING_KEY_FINGERPRINTS`) + 6 helpers
+  (`effectiveCurrentPubkey`, `currentTrustedProvisioningKeys`,
+  `applyKeyRotation`, `addRevokedFingerprint`, `decodePubkey`,
+  `fingerprintOf`). Two pre-existing seam KDocs corrected
+  ("Nothing writes it in P1-026" → "Written by RecoveryNoticeStore").
+- `MainActivity.kt`: both `MatrixStore.accept` and
+  `IdentityChangeController` call sites switch from
+  `setOf(provisioningPublicKey())` to
+  `ProvisioningKeys.currentTrustedProvisioningKeys(store, now)`.
+  `provisioningPublicKey()` helper + its duplicate
+  `ED25519_SPKI_PREFIX` deleted (dead after the two-site switch).
+- `RecoveryNoticeStoreTest.kt` (new, 12 JVM tests, ~235 lines):
+  includes the four moved from P1-035 v0.12 (TEST-RECKEY-007..010)
+  plus TEST-NOTICE-STORE-CLEAR and 7 supporting tests.
+
+**Composition (Z-23's lesson applied to code).** No `SPKI_PREFIX`
+redeclaration. `ProvisioningKeys.decodePubkey` delegates to
+`MatrixSigner.publicKeyFromRaw` (raw-size guard lives there);
+`fingerprintOf` delegates SPKI→raw stripping to
+`DeviceIdentity.rawPublicKey`. Both public surfaces already existed —
+MainActivity's duplicate prefix is deleted, not extracted to a
+fourth location.
+
+**Two registry drifts corrected in implementation (§B amendments in
+the same commit).**
+
+1. **§B line 285 (acceptance criterion).** Was "verifies signature
+   against `current_provisioning_pubkey`"; corrected to
+   `recovery_pubkey`. Residual pre-Z-20 drift — line 265-266 already
+   said recovery, per Build Master §3.6 §1 and ADR §2 Q6.
+   Implementing line 285 literally would let a provisioning key
+   authorize its own rotation (escape-from-revocation). The
+   `RecoveryNoticeStore` KDoc names the conflict at the resolution
+   site.
+2. **§B line 267 (objective phrasing).** Said "store the new key as
+   `previous_provisioning_pubkey`" — inverted. Acceptance criterion
+   287-288 was already correct (previous = old current, current =
+   new). Implemented per 287-288; §B line 267 untouched in v0.13
+   (acceptance is authoritative).
+
+**Five design rulings (settled at session opening, recorded so a
+future reader sees them).**
+
+- **D1 transport:** none — handler input is a signed notice.
+  §B line 281-282 says "Do NOT implement notice transport."
+- **D2 overlap closure:** read-time gate, `now < effective_at +
+  overlap_window_seconds`. No timer, no storage mutation. Duration
+  is data on the notice; closure rule in
+  `ProvisioningKeys.currentTrustedProvisioningKeys` KDoc.
+- **D3 order guard:** global `recovery_key_version`, `version <=
+  highest → reject`. `<=` (not `<`) rejects same-version conflicts
+  (TEST-RECKEY-010).
+- **D4 post-revocation:** reject new, preserve stored matrix. No
+  clear; next valid matrix supersedes via normal anti-rollback.
+- **D5 state ownership:** `ProvisioningKeys` owns state +
+  transitions; `RecoveryNoticeStore` orchestrates; `MatrixStore`
+  unchanged (its `trustedKeys` param already existed).
+
+**Revoke-only ruling (registered in §B v0.13).**
+`key_revocation`'s `new_provisioning_key` is parsed but not
+installed. Revoking the current key leaves the trusted set empty;
+`MatrixVerifier` fails closed on empty set; all matrix accepts
+rejected until a separate `key_rotation` installs a new key. The
+schema's `revokedProvisioningKeyId != fingerprint(newProvisioningKey)`
+cross-field check is a coherence guard, not an install directive.
+
+**Two call sites, not one.** §B objective names `MatrixStore.accept`,
+but the same seam feeds `IdentityChangeController`'s `trustedKeys`
+(replacement-notice verification). After a rotation, notices signed
+by the new key must verify — the second site is an in-scope side
+effect of the same seam. Both switch in the same commit.
+
+**Scope (per §B line 263).** Two notice types, not three.
+`recovery_key_rotation` changes the recovery trust anchor (pinned in
+the APK); applying it client-side would require an APK rebuild.
+Rebuild is the ceremony's channel. No runtime handler for
+`recovery_key_rotation`.
+
+**Three process findings (all pre-commit, none shipped wrong).**
+
+1. **Test file in the wrong source set.** First compile attempt
+   failed with `Unresolved reference 'junit'` on every test method —
+   `RecoveryNoticeStoreTest.kt` was written to `main/java/...`
+   instead of `test/java/...`. Session K's failure #1 exactly (§7
+   has the rule). Not a new lesson — a delivery gap on the response
+   side (I named the file content but not the target path in a
+   scannable position). Correction: `### file: <path>` header line
+   on every "here's a file" message from here forward.
+2. **Test bug (1 of 12 failed).** `TEST-NOTICE-STORE-CLEAR` used
+   `assertNull(kv.get(...)?.let { "" })` — the `?.let { "" }`
+   returns `""` (not null) when present, so `assertNull("")` fails
+   by design. I flagged this exact line as awkward when drafting and
+   then didn't include the fix. Correct form:
+   `assertEquals("1", kv.get(...))` — the intent is "prove rotation
+   wrote version before clear." Fix landed in a follow-up block
+   before commit; scoped run then passed 12/12.
+3. **`str.count()` substring collision.** MainActivity edit's first
+   attempt used `src.count(SITE1_OLD)` where `SITE1_OLD` (16 spaces +
+   `trustedKeys...`) is a suffix of `SITE2_OLD` (32 spaces +
+   `trustedKeys...`). `count` returned 2, preflight aborted before
+   write. New §7 bullet records the fix shape: newline-wrapped
+   anchors.
+
+**One count correction.** My first commit-message draft claimed
+"signing 302 unchanged" — wrong. `testClientDebugUnitTest` and
+`testSigningDebugUnitTest` share the `test/` source set; a new shared
+test class lands in both flavors. Real counts: 288 → 300 client,
+302 → 314 signing. §7's "counts from runner output, not inference"
+caught the misprediction — I inferred "no signing source changed → 302
+unchanged" and missed the shared test source set. The commit's count
+block records the runner truth (300/314), not the draft.
+
+**A second template-anchor collision on the docs close.** §B's
+`**Status:** Proposed` appears 7 times (one per task). The first
+docs-close edit script used `\n**Status:** Proposed\n` as the anchor
+and preflight caught it (count=7, expected 1) before any write. Fix:
+anchor on the smallest unique surrounding context, which for P1-036
+is the preceding test line `- TEST-RECKEY-010 (moved from P1-035
+v0.12): ...`. §7 records the general form.
+
+**Counts.** Backend 291 (unchanged), Android JVM 288 → 300 client /
+302 → 314 signing (+12 in each, shared test source set),
+androidTest 71 (unchanged — no androidTest changes).
+
+**Arc status.** P1-036 DONE. P1-035 3/4 (035d hardware-blocked),
+P1-033 4/5 (033e hardware-blocked). Both arcs remain at their
+hardware boundaries. **Next: 035d** (hardware), **P1-033e**
+(hardware), **P1-027b** (CI decision), OR nothing.
+
+---
+
 ---
 
 ## 4. Known issues
@@ -7295,8 +7444,33 @@ Rebuild after flipping — read at HttpClient construction time.
   it (the source is valid Kotlin), only the JVM-target compile
   does. Corollary: the recovery was `v5-to-v6` (not `v5v6`,
   `v5_to_v6`, or dropping the boundary descriptor entirely) so
+- **`str.count()` on plain substrings anchors on the file layer
+  exactly as poorly as `grep` does on the shell layer.** Session Z-24's
+  MainActivity edit used `src.count(SITE1_OLD)` where `SITE1_OLD` was
+  `                trustedKeys = setOf(provisioningPublicKey()),` (16
+  spaces) and `SITE2_OLD` was
+  `                                trustedKeys = setOf(provisioningPublicKey()),`
+  (32 spaces). The shorter string is a suffix of the longer, so
+  `count(SITE1_OLD)` returned 2, not 1 — preflight aborted before
+  write, no damage. **Fix:** wrap the anchor in newlines
+  (`src.count('\n' + X + '\n')`), which enforces "this exact line at
+  this exact indentation." Same fix shape as grep's `-F` / `^...$`
+  anchors, one layer lower. Not a new family — Z-2's
+  substring-anchors lesson applied to Python's `str.count()`, not
+  just `grep`.
+- **Template anchors need task-specific context, not the template
+  text.** Session Z-24's block 14 hit this on the registry:
+  `**Status:** Proposed` appears 7 times — once per task entry. The
+  anchor `\n**Status:** Proposed\n` returned 7, not 1, and preflight
+  aborted. **Fix:** anchor on the smallest *unique* surrounding
+  context, not the shortest repeated token. For the P1-036 §B block,
+  the preceding test line
+  `- TEST-RECKEY-010 (moved from P1-035 v0.12): ...` disambiguates
+  from the other six. Same family as `str.count()` on plain
+  substrings (previous bullet), one layer up: anchor on context, not
+  on the shortest match. Preflight caught it; nothing shipped wrong.
   the test name still names what it exercises.
-Current verified state: **288 Android JVM tests (client flavor) / 302 (signing flavor)** (2026-10-20),
+Current verified state: **300 Android JVM tests (client flavor) / 314 (signing flavor)** (2026-10-21),
 **71 androidTest** (2026-10-18, 8 files, from connectedAndroidTest XML
 aggregate `<testsuites tests="71">` -- not grep-summed), and **291
 backend tests** (2026-10-20, 22 files), all from runner output.

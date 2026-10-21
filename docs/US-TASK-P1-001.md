@@ -1,9 +1,9 @@
-# US-TASK-P1-001-v0.12 — Phase 1 Task Registry Reconciliation
+# US-TASK-P1-001-v0.13 — Phase 1 Task Registry Reconciliation
 
 Document ID: US-TASK-P1-001
-Version: 0.12
+Version: 0.13
 Date: October 2026
-Supersedes: v0.11
+Supersedes: v0.12
 Purpose: Reconcile the Phase 1 task registry with UMOJA-SECURE-BUILD-MASTER.md v1.4.2.
 Authority: Derived from US-MASTER-001 + US-ADD-001. Cannot override them.
 
@@ -283,7 +283,7 @@ P1-035 is four sessions of work, not one. Sub-tasks numbered 035a–035d. Each l
 
 **Acceptance criteria:**
 - [ ] `key_rotation` handler verifies signature against
-      `current_provisioning_pubkey`; on success, sets
+      `recovery_pubkey`; on success, sets
       `previous_provisioning_pubkey = current_provisioning_pubkey`,
       `current_provisioning_pubkey = new_key`, opens overlap window of
       documented duration.
@@ -313,7 +313,26 @@ P1-035 is four sessions of work, not one. Sub-tasks numbered 035a–035d. Each l
 - TEST-RECKEY-009 (moved from P1-035 v0.12): Out-of-order recovery notice rejected
 - TEST-RECKEY-010 (moved from P1-035 v0.12): Conflicting same-version notices: second rejected
 
-**Status:** Proposed
+**Status:** **EXECUTED 2026-10-21** — implementation at `cc0db1e`.
+
+**Implementation notes (v0.13, 2026-10-21):**
+
+- **Revoke-only ruling.** `key_revocation`'s `new_provisioning_key`
+  is parsed but not installed. Revoking the current key leaves the
+  trusted set empty; `MatrixVerifier` fails closed on empty set; all
+  matrix accepts rejected until a separate `key_rotation` notice
+  installs a new key. The schema's
+  `revokedProvisioningKeyId != fingerprint(newProvisioningKey)`
+  cross-field check is a coherence guard, not an install directive.
+- **Two call sites, not one.** `MatrixStore.accept` (the primary
+  target) and `IdentityChangeController`'s trusted-key set
+  (replacement-notice verification). Both consume the provisioning
+  key; both switch to `currentTrustedProvisioningKeys` in the same
+  implementation. The second site is an in-scope side effect of the
+  same seam, not a scope expansion.
+- **Line 285 corrected in v0.13.** Was "verifies signature against
+  `current_provisioning_pubkey`"; corrected to `recovery_pubkey`.
+  Residual pre-Z-20 drift (lines 265-266 already said recovery).
 
 ---
 
@@ -882,7 +901,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-035b | Recovery key — Kotlin schema + signer | 1 | Executed 2026-10-20 |
 | TASK-P1-035c | Recovery key — ceremony runbook | 1 | Executed 2026-10-20 |
 | TASK-P1-035d | Recovery key — end-to-end drill (hardware-blocked) | 0.5 | New |
-| TASK-P1-036 | Provisioning-key rotation & recovery-key revocation notices | 3.5 | Proposed |
+| TASK-P1-036 | Provisioning-key rotation & recovery-key revocation notices | 3.5 | Executed 2026-10-21 |
 | TASK-P1-037 | Matrix transport | 3.5 | Proposed |
 | TASK-P1-038 | Send-path matrix enforcement verification | 1 | Proposed |
 | TASK-P1-039 | Release-build hardening | 1 | Proposed |
