@@ -228,7 +228,10 @@ fun AppRoot(lifecycle: Lifecycle) {
                 sessionTokenProvider = {
                     SessionManager(context).currentSession()?.sessionToken
                 },
-                trustedKeys = setOf(provisioningPublicKey()),
+                trustedKeys = ProvisioningKeys.currentTrustedProvisioningKeys(
+                    store = SecureStorage(context),
+                    nowMillis = System.currentTimeMillis(),
+                ),
                 failureLog = failureStore,
             )
         }
@@ -309,7 +312,10 @@ fun AppRoot(lifecycle: Lifecycle) {
                             matrixStore.accept(
                                 canonical = remote.canonicalUtf8.toByteArray(Charsets.UTF_8),
                                 signatureBase64url = remote.signatureBase64url,
-                                trustedKeys = setOf(provisioningPublicKey()),
+                                trustedKeys = ProvisioningKeys.currentTrustedProvisioningKeys(
+                                    store = SecureStorage(context),
+                                    nowMillis = System.currentTimeMillis(),
+                                ),
                             )
                         }
                     } catch (_: MatrixApiException) {
@@ -745,21 +751,3 @@ private suspend fun enrollDevice(
     }
 }
 
-// Ed25519 SubjectPublicKeyInfo prefix per RFC 8410 §4. Wraps a raw
-// 32-byte Ed25519 public key into the DER form KeyFactory expects.
-// Duplicated from MatrixSigner.SPKI_PREFIX; consolidated later if a
-// fourth consumer appears (three-file threshold rule).
-private val ED25519_SPKI_PREFIX = byteArrayOf(
-    0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
-)
-
-private fun provisioningPublicKey(): PublicKey {
-    val raw = Base64.getUrlDecoder()
-        .decode(ProvisioningKeys.CURRENT_PROVISIONING_PUBKEY_B64U)
-    require(raw.size == 32) {
-        "expected 32-byte provisioning pubkey, got ${raw.size}"
-    }
-    val spki = ED25519_SPKI_PREFIX + raw
-    return KeyFactory.getInstance("Ed25519")
-        .generatePublic(X509EncodedKeySpec(spki))
-}
