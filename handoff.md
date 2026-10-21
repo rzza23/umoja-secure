@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-21 (Session Z-24 — **P1-036 DONE** at `cc0db1e`. Client-side `key_rotation` + `key_revocation` handlers: `RecoveryNoticeStore` verifies recovery-key-signed notices, enforces global monotonic `recovery_key_version`, applies state to `ProvisioningKeys` SecureStorage slots; `currentTrustedProvisioningKeys` is read-gated on the overlap window. Revoke-only ruling (§B line 292-294 literal — no install). Both `MatrixStore.accept` and `IdentityChangeController` call sites switch to the dynamic trusted set; `provisioningPublicKey()` helper + duplicate `ED25519_SPKI_PREFIX` deleted. Two §B drifts corrected in implementation (§285: `key_rotation` verifies against recovery key, not provisioning; §267: inverted previous/current phrasing — acceptance criterion was already correct). 12 JVM tests. Counts: backend 291, client JVM 288→300, signing 302→314 (shared test source set runs in both flavors). **P1-035 is 3/4** — only 035d (hardware-blocked drill) remains. **Next: 035d** on hardware, OR P1-033e (hardware-blocked), OR P1-027b (CI-provider decision), OR nothing.)
+Last updated: 2026-10-21 (Session Z-25 — **P1-027b decision DONE** at `f6a0c20`. `ADR-CI-GATE-001` (369 lines, 10 sections) resolves the CI-provider blocker that §B P1-027b line 75-76 named. Two rulings: (D1) provider = GitHub Actions — native integration eliminates auth surface; `services: postgres:` gives Postgres 16; `android-actions/setup-android` matches AGP 9.4.1 / Kotlin 2.2.10 / Gradle 9.8.0; branch protection integrates natively and IS the actual enforcement. (D2) enforcement = every PR, fail-closed — §B line 71-74 is explicit "per-PR"; a transitive CVE can be disclosed against a dep no PR touches; exception escape valve is Build Master §6 DEPENDENCY-EXCEPTIONS.md §1 with expiry ≤90 days, not silence. Fail-closed on the gate itself. Three load-bearing sections: §6 (branch protection is the merge refusal, not the workflow), §7 (test matrix maps §B four TEST-CI-* to exercise procedures), §8 (CVE exceptions time-limited, §11 carve-outs semantic not time-limited; fail-closed on unreadable exception file). Staged rollout per §B line 76-78: Z-26 backend workflow + throwaway-branch end-to-end; Z-27 Android workflow + end-to-end. Incidental §7 fix from Z-24: JVM-method-names bullet tail was displaced when the new §7 bullets were inserted; corollary tightened, orphan removed. Doc-only. Counts unchanged (backend 291, JVM 300/314). **P1-035 3/4** (035d hardware-blocked), **P1-033 4/5** (033e hardware-blocked). **Next: Z-26** backend workflow implementation, OR hardware sessions for 033e/035d, OR nothing.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -5532,6 +5532,95 @@ hardware boundaries. **Next: 035d** (hardware), **P1-033e**
 
 ---
 
+### Session Z-25 — P1-027b decision: ADR-CI-GATE-001 (2026-10-21)
+
+Design-only session resolving P1-027b's CI-provider blocker. One
+implementation commit (`f6a0c20`, new file, 370 lines) plus this
+handoff close. **P1-027b decision DONE** — implementation splits to
+sessions Z-26 (backend) and Z-27 (Android).
+
+**The blocker, resolved.** Registry §B P1-027b line 75-76 was
+explicit: "Do NOT bake a specific CI provider into this section's
+acceptance until the provider is chosen." This session chose one,
+recorded as design-first (Session G / Z-6 precedent). Implementation
+follows per §B line 76-78's own staged-rollout instruction.
+
+**Two rulings.**
+
+- **D1 provider: GitHub Actions.** Repo lives at
+  github.com:rzza23/umoja-secure. Native integration eliminates the
+  auth surface; `services: postgres:` gives Postgres 16 natively;
+  `android-actions/setup-android` matches AGP 9.4.1 / Kotlin 2.2.10 /
+  Gradle 9.8.0; branch protection integrates natively — and branch
+  protection is the actual enforcement, not the workflow. Alternatives
+  (CircleCI, GitLab CI, Buildkite, pre-commit hooks) each rejected
+  with named reasoning in ADR §2.
+- **D2 enforcement: every PR, fail-closed.** §B line 71-74 is
+  explicit: "Per-PR: generate SBOM, run npm audit --audit-level=high
+  (block on high/critical)." Every PR, not just lockfile-change PRs —
+  a transitive CVE can be disclosed against a dep no PR touches. The
+  exception escape valve is Build Master §6's
+  DEPENDENCY-EXCEPTIONS.md §1 (expiry ≤90 days), not silence, not
+  --omit. Fail-closed on the gate itself: workflow cannot run → gate
+  fails, not passes. Same discipline as MatrixVerifier on an empty
+  trusted set.
+
+**ADR structure.** 10 sections, 369 lines. Three are load-bearing:
+
+- **§6 branch protection.** The workflow runs. Branch protection
+  refuses the merge. Both required. §6 names the four settings as
+  acceptance requirements and notes they live in GitHub repository
+  settings, not YAML — a manual setup step, documented.
+- **§7 test matrix.** Maps §B's four required tests
+  (TEST-CI-PROHIBITED-BLOCKED, -HIGH-CVE-BLOCKED, -CLEAN-PASSES,
+  -ANDROID-DEP-PARSE) to specific workflow + branch-protection
+  behavior. §B line 89-90's "both a clean pass and a deliberately-
+  failing case" is the per-test pairing: a gate that only passes the
+  clean case is indistinguishable from a gate that never fires.
+  Z-24 / P D-1 lesson applied to CI.
+- **§8 exception mechanism.** DEPENDENCY-EXCEPTIONS.md §1 (CVE,
+  expiry ≤90 days) and §2 (§11 interpretation carve-outs, no expiry).
+  §1 is time-limited; §2 is not (a "does not constitute Google
+  runtime service" statement cannot expire). Fail-closed on
+  unreadable exception file: "cannot determine what to match" is
+  not the same as "nothing to match."
+
+**Staged rollout.** Z-26 backend workflow first, end-to-end verified
+on a throwaway branch (clean + failing case). Z-27 extends to
+Android. §B line 76-78's own instruction, not a session-invented
+split. Two jobs, not one commit, because an ambiguous failing
+surface costs a session.
+
+**Process note — heredoc fragmentation, again.** First write attempt
+offered a 248-line heredoc for a file with YAML code fences and
+pipe-delimited tables. Fragmented on paste. Recovered via editor
+paste (TextEdit + Cmd+Down + Return); the first paste omitted the
+closing fence for the workflow YAML block. Caught by ADR verification
+(fence count 1, odd, unclosed); fixed via a one-line Python heredoc
+(safe — no fences in payload). Final: 2 fences at lines 199 + 250.
+§7 gains a refinement: heredoc fitness is not just a line count —
+payloads with code fences, deep indentation, or tables fragment
+regardless of size.
+
+**Incidental fix — §7 tail displacement from Z-24.** Z-24's §7
+insertion anchored on `  the test name still names what it exercises.`
+— the last line of an existing JVM-method-names bullet — and placed
+the new bullets *before* it, leaving the JVM bullet ending with a
+dangling `) so` line and the tail orphaned after the new bullets.
+Fixed this session: corollary tightened to a complete sentence
+(`) so` → `).`), orphan tail removed. The JVM bullet closes
+properly; the two Z-24 bullets sit between it and Current verified
+state without mid-sentence interruption.
+
+**Counts.** Backend 291, Android JVM 300 client / 314 signing,
+androidTest 71 — all unchanged (doc-only session).
+
+**Arc status.** P1-027b decision DONE at `f6a0c20`, implementation
+splits Z-26 (backend) + Z-27 (Android). No unblocked
+P1-033/035/036 work remains (both arcs at hardware boundaries).
+**Next: Z-26** backend workflow implementation, OR hardware sessions
+for 033e/035d, OR nothing.
+
 ---
 
 ## 4. Known issues
@@ -6286,12 +6375,14 @@ Original phrasing preserved below for history:
       **P1-036** (client notice handlers, unblocked by 035b).
       **Hardware-blocked:** P1-021a (emergency lock), P1-021b (duress
       wipe), P1-034 (TEE Ed25519 verification on target hardware),
-      P1-033e, P1-035d. **Organizational-blocked:** P1-027b (CI-provider
-      decision). **Independent of all:** P1-024 (external security
+      P1-033e, P1-035d. **Decided, in-flight:** P1-027b — CI provider
+      chosen 2026-10-21 (`ADR-CI-GATE-001`, `f6a0c20`); implementation
+      Z-26 + Z-27. **Independent of all:** P1-024 (external security
       review), scheduled against a candidate release.
     - **TASK-P1-027b** — CI enforcement gate + Android dependency
-      tooling. Blocked on CI-provider decision (organizational, not
-      technical). Session opens when that decision exists.
+      tooling. **Decision done 2026-10-21** (ADR-CI-GATE-001,
+      `f6a0c20`). Implementation: Z-26 (backend workflow + end-to-end),
+      Z-27 (Android workflow + end-to-end).
     - **Backlog hygiene** — `MessageStore` SQLite connection leak
       (production bug, dozens/sec during cold launch); KI-016
       base64url validator dedupe; KI-008 `canonicalJson` dedupe;
@@ -7443,7 +7534,7 @@ Rebuild after flipping — read at HttpClient construction time.
   rule, not a pattern-matching failure: no grep would have caught
   it (the source is valid Kotlin), only the JVM-target compile
   does. Corollary: the recovery was `v5-to-v6` (not `v5v6`,
-  `v5_to_v6`, or dropping the boundary descriptor entirely) so
+  `v5_to_v6`, or dropping the boundary descriptor entirely).
 - **`str.count()` on plain substrings anchors on the file layer
   exactly as poorly as `grep` does on the shell layer.** Session Z-24's
   MainActivity edit used `src.count(SITE1_OLD)` where `SITE1_OLD` was
@@ -7469,7 +7560,20 @@ Rebuild after flipping — read at HttpClient construction time.
   from the other six. Same family as `str.count()` on plain
   substrings (previous bullet), one layer up: anchor on context, not
   on the shortest match. Preflight caught it; nothing shipped wrong.
-  the test name still names what it exercises.
+- **Heredoc fitness is not a line count — it's whether the payload
+  contains constructs that fragment.** Session Z-25 offered a
+  248-line heredoc for a markdown file with YAML code fences,
+  pipe-delimited tables, and 6-space indentation inside a code block.
+  It fragmented on paste. The §7 rule "prefer a text editor for
+  content over ~150 lines" is necessary but not sufficient; the
+  sharper form is "prefer a text editor whenever the payload contains
+  code fences, deep indentation, or tables, regardless of line count."
+  Editor paste handles any size; the cost is zero when the file opens
+  reliably. Same family as Session A's ADR fragmentation and Z-18's
+  PROVISIONING-CEREMONY fragmentation — a track record, not a new
+  failure class. What's new this session: the failure shape (YAML
+  block) is identifiable before the write, not after.
+
 Current verified state: **300 Android JVM tests (client flavor) / 314 (signing flavor)** (2026-10-21),
 **71 androidTest** (2026-10-18, 8 files, from connectedAndroidTest XML
 aggregate `<testsuites tests="71">` -- not grep-summed), and **291

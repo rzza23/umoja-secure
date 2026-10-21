@@ -1,9 +1,9 @@
-# US-TASK-P1-001-v0.13 — Phase 1 Task Registry Reconciliation
+# US-TASK-P1-001-v0.14 — Phase 1 Task Registry Reconciliation
 
 Document ID: US-TASK-P1-001
-Version: 0.13
+Version: 0.14
 Date: October 2026
-Supersedes: v0.12
+Supersedes: v0.13
 Purpose: Reconcile the Phase 1 task registry with UMOJA-SECURE-BUILD-MASTER.md v1.4.2.
 Authority: Derived from US-MASTER-001 + US-ADD-001. Cannot override them.
 
@@ -61,7 +61,7 @@ added)
 
 **Phase:** 1
 **Priority:** Medium
-**Dependencies:** TASK-P1-027a (recommended before this); CI provider decision
+**Dependencies:** TASK-P1-027a (recommended before this); ADR-CI-GATE-001 (v0.1, 2026-10-21)
 **Security classification:** Internal
 
 **Objective and non-goals:**
@@ -95,7 +95,15 @@ added)
 - TEST-CI-CLEAN-PASSES
 - TEST-ANDROID-DEP-PARSE
 
-**Status:** Blocked on CI provider decision (project-level)
+**Status:** **DECISION DONE 2026-10-21** — provider chosen and documented in ADR-CI-GATE-001 (`f6a0c20`). Implementation split: Z-26 (backend workflow + end-to-end), Z-27 (Android workflow + end-to-end), per §B line 76-78's staged rollout instruction.
+
+**Implementation notes (v0.14, 2026-10-21):**
+
+- **Provider: GitHub Actions.** Repo lives at github.com:rzza23/umoja-secure. Native integration; `services: postgres:` gives Postgres 16 natively; `android-actions/setup-android` matches AGP 9.4.1 / Kotlin 2.2.10 / Gradle 9.8.0; branch protection integrates natively. Alternatives (CircleCI, GitLab CI, Buildkite, pre-commit hooks) rejected with reasoning in ADR §2.
+- **Enforcement: every PR, fail-closed.** §B line 71-74 already said "per-PR." A transitive CVE can be disclosed against a dep no PR touches; every PR is a chance to catch drift. Exception escape valve is Build Master §6's DEPENDENCY-EXCEPTIONS.md §1 (expiry ≤90 days), not silence, not --omit. Fail-closed on the gate itself: workflow cannot run → gate fails.
+- **Branch protection is the actual enforcement.** The workflow runs; branch protection refuses the merge. Both required. ADR §6 names the four repository settings as acceptance requirements. Same discipline as P1-038's three-case acceptance — a gate that only passes the clean case is indistinguishable from one that never fires.
+- **Staged rollout.** Backend workflow first (Z-26), end-to-end verified on a throwaway branch; then Android (Z-27). §B line 76-78's own instruction.
+
 
 ### TASK-P1-033: Offline provisioning-key signing workflow
 
@@ -884,7 +892,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-025 | Admin provisioning tool | 3.5 | New |
 | TASK-P1-026 | Authorization matrix + verification | 3.5 | Updated |
 | TASK-P1-027a | SBOM + dependency review, per-session | 1 | Executed 2026-10-19 |
-| TASK-P1-027b | CI enforcement gate for dep review | 1 | New |
+| TASK-P1-027b | CI enforcement gate for dep review | 1 | Decision 2026-10-21 |
 | TASK-P1-028 | Log redaction audit | 10 | New |
 | TASK-P1-029a | Signing-key custody — design | 1 | Executed 2026-10-19 |
 | TASK-P1-029b | Signing-key custody — implementation | 1 | Executed 2026-10-19 |
