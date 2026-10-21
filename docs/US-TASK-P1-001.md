@@ -880,7 +880,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-034 | Hardware-backed Ed25519 Keystore verification | 2 | New |
 | TASK-P1-035a | Recovery key — backend notice schema (rotation + revocation) | 1 | Executed 2026-10-20 |
 | TASK-P1-035b | Recovery key — Kotlin schema + signer | 1 | Executed 2026-10-20 |
-| TASK-P1-035c | Recovery key — ceremony runbook | 1 | New |
+| TASK-P1-035c | Recovery key — ceremony runbook | 1 | Executed 2026-10-20 |
 | TASK-P1-035d | Recovery key — end-to-end drill (hardware-blocked) | 0.5 | New |
 | TASK-P1-036 | Provisioning-key rotation & recovery-key revocation notices | 3.5 | Proposed |
 | TASK-P1-037 | Matrix transport | 3.5 | Proposed |

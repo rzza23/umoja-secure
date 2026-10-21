@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-20 (Session Z-22 — **P1-035b DONE** at `59f7d81`. Kotlin recovery-notice schema + signer + 28 tests. **5 cross-language vectors pass** — Kotlin and TS produce byte-identical canonical bytes, digest, and signature across all three notice types plus two boundary cases. Android JVM 260 → 288 (client flavor). Signer KDoc corrected from "throws on malformed" to fail-closed before any test asserted the wrong contract. **Next: P1-035c** (ceremony runbook, doc-only) → 035d (hardware-blocked drill). Backend 291 unchanged.)
+Last updated: 2026-10-20 (Session Z-23 — **P1-035c DONE** at `456adf5`. Recovery ceremony runbook: 682-line three-person procedure composing `PROVISIONING-CEREMONY.md` for the shared steps, authoritative only where the recovery ceremony diverges (three operators, split passcode, Safe #2). Parts A (generation) + B (use per notice) with print-ready paper logs; C (annual rotation, three ceremonies); D (compromise = physical re-provisioning, documented terminal state); E-G (failure/audit/scope). Doc-only. Counts unchanged (backend 291, JVM 288/302). **P1-035 is 3/4** — only 035d (hardware-blocked drill, same constraint as 033e) remains. **Next: 035d** on hardware, OR P1-036 (client handlers, now unblocked by 035b's signer), OR P1-027b (CI-provider decision), OR nothing.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -58,6 +58,9 @@ Authoritative documents (all exist on disk):
   `POST /admin/matrices/:device_id` + verify-on-write + 9 route
   tests. Session Z-21 added `recovery-notice.ts` schema (3 notice
   types) + 5 test vectors + 28 tests. Session Z-22 added Kotlin
+  schema + signer + 28 tests (5-vector cross-language parity).
+  Session Z-23 added `RECOVERY-CEREMONY.md` (682 lines, doc-only;
+  no test count change);
   schema + signer + 28 tests (5-vector cross-language parity);
   types) + 5 test vectors + 28 tests.)
 - Server-blind: routes ciphertext envelopes, never decrypts
@@ -5228,6 +5231,158 @@ location, annual rotation per KEY-CUSTODY §3.5, compromise →
 physical re-provisioning per §3.6. Paper log template.
 Doc-only, ~1 session.
 
+
+### Session Z-23 — TASK-P1-035c DONE: recovery ceremony runbook (2026-10-20)
+
+Third of four P1-035 sub-tasks. The operational runbook for the
+three-person recovery-key ceremonies. Doc-only: no code, no tests,
+no count change. One commit: `456adf5`. **035c DONE.** P1-035 arc
+is 3/4; only 035d (hardware-blocked drill) remains.
+
+**THE DESIGN DECISION — COMPOSE, NOT DUPLICATE.** The recovery
+ceremony shares substantial mechanical procedure with the
+provisioning ceremony: network isolation check, APK hash
+verification, StrongBox assertion, device unlock via ADB, QR
+transfer, paper-log transcription. Both run against the same
+`signing` flavor APK. KEY-CUSTODY §3.1 and §3.4 already record
+the design as "Same as §2.1 / §2.4, with these additions."
+
+The new `RECOVERY-CEREMONY.md` follows that phrasing: it references
+`PROVISIONING-CEREMONY.md` Part A.2 and B.2 for the shared steps
+and is authoritative only where the recovery ceremony diverges
+(three operators instead of two, split device passcode, separate
+Safe #2 in a different physical location, recovery-key-version
+tracking, full notice-payload review). The rationale, stated in
+the doc's Purpose: re-describing the shared procedure would
+create two byte-similar procedural texts that drift independently.
+Same hazard U-1/Z-22's code extractions removed from helpers;
+same composition discipline `RecoveryNoticeSigner` uses to reuse
+`MatrixSigner` primitives rather than reimplementing SHA-256.
+
+The alternative (Part F extension of `PROVISIONING-CEREMONY.md`)
+was rejected because that document's Purpose explicitly says it
+does NOT cover recovery-key custody (TASK-P1-035, KEY-CUSTODY
+§3). Appending a 300-line Part F would contradict the scoping
+statement and mix two custody models in one document.
+
+**WHAT SHIPPED.** `docs/ops/RECOVERY-CEREMONY.md` (682 lines, 11
+sections, 15 three-operator initial lines). Structure:
+- Purpose: three operators, composes `PROVISIONING-CEREMONY.md`,
+  does NOT stand alone, does NOT cover provisioning-key ops.
+- Execution status: specification-of-procedure; P1-035d is the
+  drill; hardware-blocked (two air-gapped Pixel 7+ devices needed:
+  one Safe #1 + one Safe #2).
+- Part A (generation): prerequisites + 3 additions to
+  `PROVISIONING-CEREMONY.md` A.2 (A.2.2.1 split passcode
+  verification, A.2.5.1 recovery_key_version recorded, A.2.6.1
+  three-person seal) + print-ready paper log + completion.
+- Part B (use per notice): all three notice types with 4 additions
+  to `PROVISIONING-CEREMONY.md` B.2 (B.2.1.1 full payload review,
+  B.2.2.1 split passcode, B.2.5.1 `RecoveryNoticeSigner` invocation
+  via `signWithDeviceKey`, B.2.6.1 unanimous signature prefix
+  confirmation) + print-ready paper log + completion.
+- Part C (annual rotation): three ceremonies (Part A + Part B +
+  old-key destruction); names that rotation requires ALL THREE.
+- Part D (compromise): no Part D ceremony to run. Physical
+  re-provisioning of all devices is the terminal state.
+- Part E (failure handling): abort and restart, never resume
+  partial. Part A abort -> deleteKey + restart. Part B abort ->
+  retry allowed (deterministic Ed25519 means same payload
+  produces same signature).
+- Part F (audit trail): Safe #2, 7-year minimum, three-person
+  retrieval, custodian signature on every record.
+- Part G (out of scope): six explicitly-named items.
+- Cross-references: KEY-CUSTODY, Build Master, ADR,
+  PROVISIONING-CEREMONY, recovery-notice.ts, RecoveryNotice.kt,
+  RecoveryNoticeSigner.kt, vectors.
+- Revision history: v0.1, 2026-10-21.
+
+**THREE SAFETY PROPERTIES NAMED, NOT HIDDEN.**
+
+1. Split passcode verified BEFORE keypair generation (A.2.2.1).
+   Proves the split works before the ceremony commits to
+   generating a key. A split silently given to one person is
+   discovered here. Discovered after generation, the recovery
+   key would be unusable custody-wise.
+
+2. Three-person seal (A.2.6.1) is stricter than the provisioning
+   ceremony's two-person seal. Any of three operators absent at
+   seal time aborts the ceremony even if prior steps succeeded.
+   A key whose custody ceremony was attended by only two of
+   three required operators is not valid per KEY-CUSTODY §3.1.
+
+3. Emergency rotation (Part D) has NO procedural fix. Names the
+   terminal state honestly: no Part D ceremony exists because
+   physical re-provisioning is the only recovery from recovery-
+   key compromise. Pretending a procedural fix exists would be
+   the exact overclaim the strictest custody in the system is
+   designed to prevent.
+
+**CONNECTS TO THE CODE THAT JUST SHIPPED.** Part B.2.5.1 names
+`RecoveryNoticeSigner.signKeyRotationWithDeviceKey` (and the
+revocation / recovery-key-rotation variants) with `signingFn =
+{ digest -> deviceKeyManager.sign(digest) }`. The Keystore-backed
+recovery private key never leaves the offline device. This is
+where 035c meets 035b: the ceremony operator follows Part B; the
+code path is already tested (28 Kotlin tests, 5 cross-language
+vectors against 035a's TS).
+
+**PROCESS NOTE — HEREDOC FRAGMENTATION, THEN EDITOR.** The first
+write attempt used a 682-line `python3 <<'PYEOF'` heredoc. The
+paste fragmented mid-block; zsh left the terminal waiting for the
+closing delimiter. Recovery: `touch` + `open -e` + editor paste,
+then a two-stage verify (line count + section/marker check). This
+is exactly §7's "prefer a text editor over terminal heredocs
+for anything over ~150 lines" guidance, which the session
+violated and then re-validated. **Third occurrence this project**
+(Session A's ADR, Z-18's PROVISIONING-CEREMONY.md, this session).
+Not a new lesson — an instance of the existing one. The pattern
+has been recorded honestly each time; what changes is how quickly
+the session recovers to the editor path. This time within one
+round-trip.
+
+**TWO VERIFY-PATTERN MISSES, BOTH BENIGN.**
+
+1. Initial leakage check used a word-boundary regex for "here is"
+   and flagged 4 matches. All were legitimate prose ("there is no
+   cryptographic path", "There is no Part D ceremony to run", "the
+   recovery runbook's job here is to name the terminal state
+   honestly"). Check tightened to specific chat-boilerplate shapes
+   ("here is the full content", "after saving:", etc.); 0 real
+   leaks. Same family as §7's "substring anchors match
+   prefixes of longer identifiers" — pattern bug, not content bug.
+
+2. Pre-commit counts of my own doc predictions were off across the
+   board: predicted 470 lines actual 682, predicted 10 `## ` headers
+   actual 11, predicted 7 three-initial lines actual 15. All
+   undercounts from the paper-log templates (each ~80 lines). Same
+   pattern as every count prediction this session arc; runner/grep
+   output authoritative, not estimates.
+
+**COUNTS.** Backend 291 unchanged, Android JVM 288 client / 302
+signing unchanged, androidTest 71 unchanged. Doc-only session.
+Registry v0.12 total 52 unchanged (035c status New → Executed
+2026-10-20 in this close).
+
+**ARC STATUS — P1-035 is 3/4.** 035a (TS schema, `8c356d8`),
+035b (Kotlin parity, `59f7d81`), 035c (runbook, `456adf5`). Only
+035d remains, hardware-blocked. **P1-035 and P1-033 are now in the
+same state:** 033 is 4/5 with 033e blocked, 035 is 3/4 with 035d
+blocked. Both arcs are complete except for end-to-end drills that
+require two air-gapped Pixel 7+ devices (033e needs one, 035d
+needs two).
+
+**NEXT.** Multiple options, none obligated:
+- **P1-036** (client-side notice handlers, `Proposed` in registry):
+  NOW UNBLOCKED by 035a+035b. The schemas exist, the signer exists,
+  the vectors prove byte-identity. P1-036 builds the client parser
+  on top. ~1-2 sessions. This is the natural next code task.
+- **P1-035d / P1-033e**: hardware-blocked end-to-end drills. Both
+  wait on the same physical environment.
+- **P1-027b**: CI enforcement gate, still blocked on CI-provider
+  decision (organizational, not technical).
+- **Nothing**: map accurate, no blocking work.
+
 ---
 
 ## 4. Known issues
@@ -5956,7 +6111,7 @@ Original phrasing preserved below for history:
       `runBlocking` bridge removed; §8 transport deferral closed.
       `HttpClientRetryTest` 7 tests unchanged; JVM 244/244;
       androidTest 71/71 per emulator.
-    - **Phase-1 DoD gaps (Build Master §10) — P1-033 4/5, P1-035 2/4.**
+    - **Phase-1 DoD gaps (Build Master §10) — P1-033 4/5, P1-035 3/4.**
       **P1-029 DONE:** design `29cd7bf` (`KEY-CUSTODY.md`, 287 lines);
       implementation `7c02d16` (ProvisioningKeys DEBUG/PROD split,
       `UmojaApplication` startup assertion). **P1-033 split into
@@ -5974,14 +6129,17 @@ Original phrasing preserved below for history:
       air-gapped Pixel 7+ StrongBox. **P1-035 split into 035a–035d
       (Z-20); 035a DONE at `8c356d8`** (TS schema + 5 vectors + 28
       tests); **035b DONE at `59f7d81`** (Kotlin schema + signer +
-      28 tests; 5 cross-language vectors prove byte-identical output).
-      **Next: 035c** (ceremony runbook, doc-only) → 035d
-      (hardware-blocked drill). **Hardware-blocked:** P1-021a
-      (emergency lock), P1-021b (duress wipe), P1-034 (TEE Ed25519
-      verification on target hardware), P1-033e, P1-035d.
-      **Organizational-blocked:** P1-027b (CI-provider decision).
-      **Independent of all:** P1-024 (external security review),
-      scheduled against a candidate release.
+      28 tests; 5 cross-language vectors prove byte-identical output);
+      **035c DONE at `456adf5`** (`docs/ops/RECOVERY-CEREMONY.md`,
+      682-line three-person runbook composing PROVISIONING-CEREMONY;
+      Parts A/B paper logs; Part D compromise = physical
+      re-provisioning). **Next: 035d** (hardware-blocked drill) OR
+      **P1-036** (client notice handlers, unblocked by 035b).
+      **Hardware-blocked:** P1-021a (emergency lock), P1-021b (duress
+      wipe), P1-034 (TEE Ed25519 verification on target hardware),
+      P1-033e, P1-035d. **Organizational-blocked:** P1-027b (CI-provider
+      decision). **Independent of all:** P1-024 (external security
+      review), scheduled against a candidate release.
     - **TASK-P1-027b** — CI enforcement gate + Android dependency
       tooling. Blocked on CI-provider decision (organizational, not
       technical). Session opens when that decision exists.
