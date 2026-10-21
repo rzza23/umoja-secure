@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-20 (Session Z-21 — **P1-035a DONE** at `8c356d8`. Backend signing-side schema for three recovery-notice types (`key_rotation`, `key_revocation`, `recovery_key_rotation`) + 5 test vectors (R-001...R-005) + 28 tests. Backend 263 → 291. **Three types, not two:** v0.12 §B P1-035 objective said two, but TEST-RECKEY-005 required `recovery_key_rotation`; shipped all three. **Next: P1-035b** (Kotlin parity on 035a vectors, ~1 session).)
+Last updated: 2026-10-20 (Session Z-22 — **P1-035b DONE** at `59f7d81`. Kotlin recovery-notice schema + signer + 28 tests. **5 cross-language vectors pass** — Kotlin and TS produce byte-identical canonical bytes, digest, and signature across all three notice types plus two boundary cases. Android JVM 260 → 288 (client flavor). Signer KDoc corrected from "throws on malformed" to fail-closed before any test asserted the wrong contract. **Next: P1-035c** (ceremony runbook, doc-only) → 035d (hardware-blocked drill). Backend 291 unchanged.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -57,6 +57,8 @@ Authoritative documents (all exist on disk):
   016, GET /me/matrix, 5 route tests. Session Z-15 added
   `POST /admin/matrices/:device_id` + verify-on-write + 9 route
   tests. Session Z-21 added `recovery-notice.ts` schema (3 notice
+  types) + 5 test vectors + 28 tests. Session Z-22 added Kotlin
+  schema + signer + 28 tests (5-vector cross-language parity);
   types) + 5 test vectors + 28 tests.)
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
@@ -96,7 +98,7 @@ Endpoints:
 - Contacts screen wired to GET /me/contacts
 - Admin screen (device list, enrollment tokens, contact pairs, and
   as of Session A, the TASK-P1-025 provisioning flow)
-- **JVM unit tests: 260 client / 274 signing** (verified 2026-10-19 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests. Session Z-3: AdminScreenStateTest, 22 JVM tests. Session Z-4: ChatViewModelTest, 10 JVM tests. Session Z-13: 029b ProvisioningKeysTest, 2 JVM tests. Session Z-16: 033b MatrixApiTest +4, AdminScreenStateTest +10. Session Z-17: 033c build flavor split, SigningStateTest +14 under `testSigningDebugUnitTest` (client 260 unchanged, signing 274).)
+- **JVM unit tests: 288 client / 302 signing** (verified 2026-10-19 from XML; Session R-3's 1 clear() test, then Session R-4's 7 HttpClientRetryTest tests. Sessions L and M added Compose UI and lifecycle code with no JVM tests; verified manually on emulator. Session N design-only. Session O-1 backend-only. Session O-2 client work verified on emulator (highestSeenVersion=1). Session P: 038 send gate, three-case emulator acceptance. Session R-2: 040-B state machine, 12 JVM tests. Session R-3: 040-C routing rewrite, smoke verified three user flows. Session R-4: 040-D interceptor, TEST-SESSION-REVOKED-ON-DEVICE passed. Session R-5: 040-E manual acceptance, no JVM changes. Session T-1: 041 failed-verification log, 14 JVM tests. Session Z-3: AdminScreenStateTest, 22 JVM tests. Session Z-4: ChatViewModelTest, 10 JVM tests. Session Z-13: 029b ProvisioningKeysTest, 2 JVM tests. Session Z-16: 033b MatrixApiTest +4, AdminScreenStateTest +10. Session Z-17: 033c build flavor split, SigningStateTest +14 under `testSigningDebugUnitTest` (client 260 unchanged, signing 274).)
 - **androidTest: 8 files, 71 tests** (verified 2026-10-18 from
   connectedAndroidTest XML aggregate `<testsuites tests="71">` -- not
   grep-summed; see §7 twelfth lesson. Session Z-1 added `AckDialogTest.kt`
@@ -5104,6 +5106,128 @@ cross-language byte-identity tests on 035a's 5 vectors. ~1 session.
 Blocks P1-036 (client-side parsing). 035c runbook and 035d drill
 remain.
 
+
+### Session Z-22 — TASK-P1-035b DONE: Kotlin recovery-notice schema (2026-10-20)
+
+Second code session of the P1-035 arc. Kotlin implementation of
+the three recovery-notice types (key_rotation, key_revocation,
+recovery_key_rotation), byte-compatible with TASK-P1-035a's TS
+schema. Three commits: `2a69f80` (pre-condition refactor),
+`59f7d81` (035b proper), plus this close. **035b DONE.** Android
+JVM 260 → 288 client (+28).
+
+**THE LOAD-BEARING ACCEPTANCE** — 5 cross-language vector tests
+pass. Each vector (R-001..R-005, 3 notice types + 2 boundary cases)
+asserts three separate properties with named failure messages:
+canonical bytes byte-match (JCS drift), SHA-256 hex-match (digest
+drift), and signature verifies against published pubkey (Ed25519
+drift). With 035a's TS test suite as the other half, these 5
+Kotlin tests prove TS and Kotlin produce byte-identical output on
+identical input. If the JCS canonicalizer, digest, or signing path
+drifts on either language, one of these 5 fails rather than the
+drift shipping silently.
+
+**PRE-CONDITION REFACTOR (`2a69f80`).** The ISO 8601 UTC regex
+had reached its fourth file-private copy (AuthorizationMatrix,
+ReplacementNotice, IdentityChangeAck, and would-be RecoveryNotice).
+`requirePositiveInt` had two. Both extracted to
+`Base64UrlValidation.kt` before 035b wrote new code against them.
+Pure refactor: 39/39 scoped tests (23+7+9) preserved, 260/260 full
+client JVM preserved. Backlog item filed: IdentityChangeAck's
+remaining `IC_REQUIRE_STRING` / `IC_REQUIRE_BASE64URL32` /
+`IC_BASE64URL32_RE` are three file-private copies of helpers
+Base64UrlValidation.kt already provides; noted in that file's KDoc
+as "known remaining duplication (backlog item, not this session)".
+
+**WHAT SHIPPED (`59f7d81`).** Three files new:
+- `RecoveryNotice.kt` (327 lines): 3 data classes + 3 wrapper data
+  classes. Each inner class `toJsonMap()` / `fromJsonMap()` with
+  per-field validation via shared helpers. Three cross-field
+  fail-closed checks matching TS: KeyRevocationNotice rejects when
+  revokedProvisioningKeyId == base64url(SHA-256(newProvisioningKey
+  raw bytes)); RecoveryKeyRotationNotice requires
+  newRecoveryKeyVersion > recoveryKeyVersion (strict).
+- `RecoveryNoticeSigner.kt` (205 lines): 12 functions (digest/sign/
+  verify/signWithDeviceKey × 3 types). Composes `MatrixSigner`
+  primitives (`matrixDigestRaw` for SHA-256, `verifyRaw` for
+  Ed25519 verify); `Signature.getInstance("Ed25519")` for signing.
+  Dual entry points per Session J precedent: `sign(signed,
+  PrivateKey)` for callers holding a key; `signWithDeviceKey(signed,
+  signingFn)` for Keystore-custody (production wires
+  `deviceKeyManager.sign(digest)`).
+- `RecoveryNoticeTest.kt` (521 lines, 28 tests): 3 schema roundtrip,
+  3 wrong-domain, 2 cross-field (fingerprint self-replacement, RKR
+  version not-greater), 3 malformed-field, 3 sign/verify roundtrip,
+  3 tamper, 3 signWithDeviceKey, 1 signWithDeviceKey bad-function,
+  1 fail-closed (assertFalse on malformed sig, NOT assertThrows),
+  1 VECTOR-FILE-READY sanity, 5 cross-language vector tests.
+
+**SIGNER KDoc CORRECTED BEFORE TESTS.** Original KDoc said verify*
+"throws on malformed"; implementation delegated to
+`MatrixSigner.verifyRaw`, which returns false. Fixed in block
+3b-3d-2a before any test could assert the wrong behavior. Contract
+now: fail-closed (returns false on malformed), matching
+`MatrixVerifier` precedent (client-side wire-data verifier), not
+`MatrixSigner.verify` (whose throw-on-malformed contract is for
+callers that have already parsed a typed notice). P1-036 is the
+wire-data consumer here. Documenting the choice at the failure
+site (KDoc) rather than changing the code preserves the existing
+behavior while making the contract explicit.
+
+**THREE TYPECHECK FIXES, ONE NEW LESSON.**
+
+1. Preflight Python f-string with a backslash in an expression
+   (`v["generated"]` inside `{...}`). Python <3.12 rejects any
+   backslash in an f-string expression. Fixed by extracting to a
+   local before the f-string. Same family as earlier heredoc-
+   quoting lessons.
+
+2. Test name `TEST-RECOVERY-NOTICE-VECTOR-R005 (... v5->v6)`
+   contained `>`. **JVM spec forbids `<` and `>` in method names**
+   (they are reserved for `<init>`/`<clinit>`). Renamed to
+   `v5-to-v6`. New §7 lesson; see below.
+
+3. My verify regex after fix 2 was over-broad (`` `[^`]*[<>][^`]*` ``)
+   matched across the whole file, treating one test's closing
+   backtick as another's opening, catching `->` inside lambda
+   bodies as "backtick content." Corrected to line-anchored
+   `` ^\s*fun `([^`]*)` `` extraction. Same class as §7's
+   pattern-not-content lessons.
+
+**THE PRE-CONDITION REFACTOR AS DISCIPLINE.** The 035b session had
+three failed write attempts (f-string backslash in 3b-3b-1's first
+attempt; KDoc/impl drift caught in 3b-3d-2a preflight; backtick
+name in 3b-3d-2c's compile). Every one caught before the wrong
+thing shipped to origin. 035b could have skipped the pre-condition
+refactor and let 035b's file carry the fourth ISO regex copy; the
+refactor-first sequence meant the schema landed on clean
+foundations, and the "test asserts wrong contract" trap was
+avoided by fixing the KDoc before writing tests.
+
+**COUNTS.**
+
+  Backend:     291 (unchanged; 035a covered it)
+  Android JVM: 260 → 288 client / 274 → 302 signing
+                (client runner-verified: 288/0 across 26 files;
+                signing = 274 baseline + 28 new by superset
+                property, not this session's runner output)
+  androidTest: 71  (unchanged)
+  Registry:    v0.12, total 52 (035b status: New → Executed
+               2026-10-20 in this close)
+
+**ARC STATUS — P1-035 is 2/4.** 035a (TS schema) Executed at
+`8c356d8`. 035b (Kotlin parity) Executed at `59f7d81`. 035c
+(ceremony runbook, doc-only) and 035d (end-to-end drill,
+hardware-blocked like 033e) remain.
+
+**NEXT: P1-035c** — recovery ceremony runbook. Extend
+`docs/ops/PROVISIONING-CEREMONY.md` (Part F) or new
+`RECOVERY-CEREMONY.md`: three-person ceremony (lead + witness +
+custodian), split device passcode, Safe #2 different physical
+location, annual rotation per KEY-CUSTODY §3.5, compromise →
+physical re-provisioning per §3.6. Paper log template.
+Doc-only, ~1 session.
+
 ---
 
 ## 4. Known issues
@@ -5832,7 +5956,7 @@ Original phrasing preserved below for history:
       `runBlocking` bridge removed; §8 transport deferral closed.
       `HttpClientRetryTest` 7 tests unchanged; JVM 244/244;
       androidTest 71/71 per emulator.
-    - **Phase-1 DoD gaps (Build Master §10) — P1-033 4/5, P1-035 1/4.**
+    - **Phase-1 DoD gaps (Build Master §10) — P1-033 4/5, P1-035 2/4.**
       **P1-029 DONE:** design `29cd7bf` (`KEY-CUSTODY.md`, 287 lines);
       implementation `7c02d16` (ProvisioningKeys DEBUG/PROD split,
       `UmojaApplication` startup assertion). **P1-033 split into
@@ -5848,15 +5972,16 @@ Original phrasing preserved below for history:
       `docs/ops/PROVISIONING-CEREMONY.md`, the two-person runbook.
       **033e BLOCKED on hardware** — end-to-end drill needs an
       air-gapped Pixel 7+ StrongBox. **P1-035 split into 035a–035d
-      (Z-20); 035a DONE at `8c356d8`** — `recovery-notice.ts`
-      schema (3 notice types) + 5 test vectors + 28 tests (backend
-      263 → 291). **Next: 035b** (Kotlin parity) → 035c
-      (ceremony runbook) → 035d (hardware-blocked drill).
-      **Hardware-blocked:** P1-021a (emergency lock), P1-021b (duress
-      wipe), P1-034 (TEE Ed25519 verification on target hardware),
-      P1-033e, P1-035d. **Organizational-blocked:** P1-027b (CI-provider
-      decision). **Independent of all:** P1-024 (external security
-      review), scheduled against a candidate release.
+      (Z-20); 035a DONE at `8c356d8`** (TS schema + 5 vectors + 28
+      tests); **035b DONE at `59f7d81`** (Kotlin schema + signer +
+      28 tests; 5 cross-language vectors prove byte-identical output).
+      **Next: 035c** (ceremony runbook, doc-only) → 035d
+      (hardware-blocked drill). **Hardware-blocked:** P1-021a
+      (emergency lock), P1-021b (duress wipe), P1-034 (TEE Ed25519
+      verification on target hardware), P1-033e, P1-035d.
+      **Organizational-blocked:** P1-027b (CI-provider decision).
+      **Independent of all:** P1-024 (external security review),
+      scheduled against a candidate release.
     - **TASK-P1-027b** — CI enforcement gate + Android dependency
       tooling. Blocked on CI-provider decision (organizational, not
       technical). Session opens when that decision exists.
@@ -6997,7 +7122,23 @@ Rebuild after flipping — read at HttpClient construction time.
   question's unit. When N looks wrong, verify the metric before
   concluding the content is wrong.
 
-Current verified state: **260 Android JVM tests (client flavor) / 274 (signing flavor)** (2026-10-20),
+- **JVM method names cannot contain `<` or `>`.** Kotlin backtick
+  identifiers let you write ``fun `name with -> arrow`()`` at the
+  source level, but the JVM target reserves `<` and `>` for
+  `<init>` and `<clinit>`; the compiler rejects the method name
+  with `Name contains illegal characters: >`. Session Z-22 hit
+  this on `` `TEST-RECOVERY-NOTICE-VECTOR-R005 (... v5->v6)` ``;
+  renamed to `v5-to-v6`. **Rule:** any backtick test name or
+  identifier that might later be a real JVM method name should
+  use `-to-` (or prose) for ranges, not `->`. Same forbidden set
+  also includes `.`, `;`, `[`, `/` — but those are obvious in a
+  name; `->` looks benign until compile fails. This is a language
+  rule, not a pattern-matching failure: no grep would have caught
+  it (the source is valid Kotlin), only the JVM-target compile
+  does. Corollary: the recovery was `v5-to-v6` (not `v5v6`,
+  `v5_to_v6`, or dropping the boundary descriptor entirely) so
+  the test name still names what it exercises.
+Current verified state: **288 Android JVM tests (client flavor) / 302 (signing flavor)** (2026-10-20),
 **71 androidTest** (2026-10-18, 8 files, from connectedAndroidTest XML
 aggregate `<testsuites tests="71">` -- not grep-summed), and **291
 backend tests** (2026-10-20, 22 files), all from runner output.
