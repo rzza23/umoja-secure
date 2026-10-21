@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-20 (Session Z-19 — **P1-021b RE-SCOPED.** GrapheneOS Duress is the wipe mechanism. Registry v0.11, THREAT-MODEL-001 v0.4. WipeConfirmationKeyManager KDoc updated; sign() reserved for future. No code change, no test change. Next: P1-035 (recovery-key ceremony).)
+Last updated: 2026-10-20 (Session Z-20 — **P1-035 SPLIT into 035a–035d.** Registry v0.11 → v0.12, total 49 → 52. Scoping session; no code, no tests. Recon found **three drifts** before the split could be written: **D1** — P1-036 §B said `key_rotation` signed by "current provisioning key"; Build Master §3.6 §1 says "currently-trusted recovery key". **D2** — P1-035/P1-036 cited "ADR-PROVISIONING-001 §3.6/§3.7"; those sections don’t exist (ADR §3 = Signing Protocol, §4 = Matrix Schema). ADR §2 Q6 explicitly defers: "Fully specified in Build Master §3.6; no design gap." **D3** — four tests (TEST-RECKEY-007/008/009/010) were in P1-035 but are client-side; moved to P1-036. Split shape: **035a** backend notice schema (rotation+revocation), **035b** Kotlin schema+signer, **035c** ceremony runbook, **035d** end-to-end drill (hardware-blocked, same as 033e). §5 backlog cleaned: two closed items (MessageStore SQLite leak U-1; migration 017 U-2) removed. Next: P1-035a (backend notice schema, ~1 session).)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -4886,6 +4886,130 @@ decision pending. The P1-021b re-scope moves P1-021a (emergency lock)
 off the critical path as a distinct task; P1-035 was already next,
 unaffected.
 
+
+### Session Z-20 — TASK-P1-035 SPLIT into 035a–035d (2026-10-20)
+
+Scoping session. Registry v0.11 → v0.12, total 49 → 52 (+3 net:
+P1-035 was 1 task, is now 4). No code, no tests. The commit is the
+registry amendment plus this handoff close. **Three drifts found
+during recon, before any split could be written.**
+
+**THE THREE DRIFTS.**
+
+Recon read `replacement-notice.ts` (schema template), the vector-file
+shape, ADR-PROVISIONING-001 §2 Q6, and both registry §B bodies. Three
+discrepancies surfaced that would have shipped wrong in a naive split:
+
+- **D1 — `key_rotation` signature authority.** P1-036 §B line 245
+  said `key_rotation` was "signed by the current provisioning key."
+  Build Master §3.6 §1 says "signed by the currently-trusted recovery
+  key"; P1-035's own TEST-RECKEY-004 ("self-rotation rejected") and
+  P1-036's own objective ("Do NOT use provisioning key to authorize
+  its own revocation") both agree with Build Master. **The single
+  line in P1-036 was the outlier.** A provisioning key authorizing
+  its own rotation is functionally escape-from-revocation, so this
+  wasn't a wording issue — it would have shipped a security hole
+  if implemented per the drift. Corrected to "signed by the current
+  recovery key (per Build Master §3.6 §1 and ADR §2 Q6)."
+
+- **D2 — nonexistent ADR citations.** Both P1-035 §B and P1-036 §B
+  cited "ADR-PROVISIONING-001 §3.6 (rotation ceremony) and §3.7
+  (recovery-key authorization)". **Those sections don't exist.**
+  ADR-PROVISIONING-001 has §3 = Signing Protocol, §4 = Matrix Schema,
+  §5 = Test Plan, §6 = Implementation Plan. No rotation section
+  anywhere. ADR §2 Q6 (Provisioning key compromise) is the only
+  rotation-adjacent authority, and it explicitly defers: "Fully
+  specified in Build Master §3.6; no design gap." Corrected to
+  "Build Master §3.6 §1 + ADR §2 Q6" in both §B bodies. The
+  alternative — letting the drift stand — would have a future
+  session write a new §3.6 that duplicates Build Master §3.6,
+  creating the same drift in a new location.
+
+- **D3 — cross-task test ownership.** Four tests were in P1-035's
+  required-tests list under v0.11 that are genuinely client-side:
+  TEST-RECKEY-007 (post-revocation matrix rejected), -008 (new-matrix
+  accepted), -009 (out-of-order notice rejected), -010 (conflicting
+  same-version). Every one of those requires P1-036's consumer
+  (parse notice, verify against trusted keys, apply state updates)
+  to exist. Keeping them in P1-035 would have made P1-035's
+  acceptance criteria unsatisfiable in isolation — the task
+  couldn't close without P1-036 shipping first, inverting the
+  registry's stated dependency (P1-035 → P1-036).
+
+**WHY THE SPLIT SHAPE.**
+
+Recon read the existing 3 vectors (R-001/002/003 in
+`canonical-replacement-notice-test-vectors.json`) and the generator's
+HKDF derivation. Both extend cleanly for two new notice types.
+055a produces: schema + generator + vector file in the same shape
+Session F produced for replacement notices. 035b produces: Kotlin
+parity for cross-language signing (Session I's `identity-change-ack`
+pattern). 035c extends the runbook apparatus from 033d. 035d is the
+hardware drill, same constraint as 033e.
+
+The four sub-tasks sum to weight 3.5 (1+1+1+0.5) — the same
+registry weight P1-035 carried as a single task. Total bump 49 → 52
+is +3 net (4 sub-task identifiers − 1 parent identifier).
+
+**WHY NOT MERGE P1-035 AND P1-036.**
+
+Earlier session analysis (Z-19 close) raised the option of merging
+the two tasks since they form a coherent whole. Rejected:
+- 035 is signing-side (schemas, ceremony, key custody).
+- 036 is client-side (parsers, trust-set updates, overlap windows).
+- Different languages (TS+Kotlin for 035, Kotlin-only for 036).
+- Different trust anchors exercised (recovery private key vs
+  device-local state).
+- P1-036's existing tests (TEST-ROTATION-*, TEST-REVOCATION-*) are
+  handler-level and orthogonal to 035's signing tests.
+
+The split respects these seams. Merging would force a 3.5-weight task
+into an 7-weight monolith that's harder to review, harder to
+test-layer, and harder to pick up mid-way.
+
+**§5 BACKLOG CLEANUP.**
+
+Two items were marked closed in later sessions but remained in the
+"Backlog items (not scheduled)" list. Removed this session:
+- `MessageStore` SQLite connection leak — fixed Session U-1 at `644d5cf`.
+  The handoff §5 line still claimed it was open. It's been fixed for
+  over a month (project-time).
+- Migration 017 `used_by_device_id ON DELETE SET NULL` — landed
+  Session U-2 at `3b0c33a`. Same: marked closed in the U-2 session
+  entry but the §5 line still read as open.
+
+Both were identified during this session's recon as "the handoff's
+backlog overstates open work." No code change, no new finding —
+documentation accurate against territory.
+
+**THE RECON-FIRST DISCIPLINE, AGAIN.** This is the fourth scoping
+session in a row where pre-write recon found something the naive
+read missed: Z-9 found the ws CVE (via dependency review); Z-14 found
+the route-shape error (`/me/matrix` → `/admin/matrices/:device_id`);
+Z-19's recon (this session's opening) found the P1-021b re-scope was
+internally consistent across 3 docs but only because 3 docs were
+written the same day. This session's recon found D1 (security
+authority error), D2 (citation to nonexistent sections), D3
+(cross-task scope inversion). None of those would have been caught by
+reading the registry in isolation — they required reading ADR §2 Q6,
+Build Master §3.6 §1, P1-035's body, P1-036's body, and the client
+code (which grep proved had no `key_rotation` parser) in the same
+pass. The discipline that matters: **read every source of truth the
+task cites, not just the task itself.** Z-19's close said the same
+thing about the four-surface version-metadata rule; this session's
+iteration extends it to signature authority.
+
+**COUNTS.** Backend 263, Android JVM 260 client / 274 signing,
+androidTest 71 — all unchanged (doc-only). Registry v0.12, total 52
+(§B P1-035 body replaced with 4 sub-task bullets; §B P1-036 gains
+four moved tests; §C row split into 4).
+
+**NEXT: P1-035a** — backend recovery-notice schema (signing-side),
+new `backend/src/crypto/recovery-notice.ts` covering `key_rotation`
+and `key_revocation` types, `canonical-recovery-notice-test-vectors.json`,
+generator extension, ~12 tests. Deps 029, 033 are done. 035a can open
+fresh next session.
+
 ---
 
 ## 4. Known issues
@@ -5686,19 +5810,6 @@ Original phrasing preserved below for history:
   also corrected a UX drift from ADR-HARDENING-001 §2. Verified:
   post-trigger `/me/matrix` count 3 → 2 (single fetch + interceptor
   retry on same port). Full session entry in §3 Session Z-1.
-- **Consider making `enrollment_tokens.used_by_device_id`
-  `ON DELETE SET NULL`.** Session R-4's device-row deletion hit
-  the `NO ACTION` FK, requiring manual token cleanup. In a test
-  environment that's noise; in production it might be a
-  deliberate audit-preservation choice. **Migration 017
-  territory, not a fix for R-4.** Either adopt `SET NULL` (keeps
-  the token row, drops the FK to the deleted device) or document
-  that device deletion requires pre-cleaning enrollment_tokens.
-- **`MessageStore` SQLite connection leak** (Session R-3): logcat
-  shows `SQLiteConnectionPool: A SQLiteConnection object for
-  database '...umoja_local.db' was leaked!` at ~dozens/sec during
-  cold launch. Pre-dates 040-C-2. Cursors opened without closing,
-  or `messagesVersion` bump loop in `ChatScreen`. Not blocking.
 
 ---
 

@@ -1,9 +1,9 @@
-# US-TASK-P1-001-v0.11 — Phase 1 Task Registry Reconciliation
+# US-TASK-P1-001-v0.12 — Phase 1 Task Registry Reconciliation
 
 Document ID: US-TASK-P1-001
-Version: 0.11
+Version: 0.12
 Date: October 2026
-Supersedes: v0.10
+Supersedes: v0.11
 Purpose: Reconcile the Phase 1 task registry with UMOJA-SECURE-BUILD-MASTER.md v1.4.2.
 Authority: Derived from US-MASTER-001 + US-ADD-001. Cannot override them.
 
@@ -198,39 +198,59 @@ P1-033 is five sessions of work, not one. Sub-tasks are numbered 033a–033e. Ea
 **Dependencies:** TASK-P1-025, TASK-P1-026, TASK-P1-029, TASK-P1-033
 **Security classification:** Internal
 
-**Objective and non-goals:**
+**Objective and non-goals (v0.12 split — signing-side only):**
 - Generate a distinct Ed25519 organization recovery keypair, independent of the provisioning key.
-- Pin recovery public key on every device at provisioning.
-- Implement recovery-key-authorized revocation workflow for the provisioning key.
-- Implement recovery key rotation with monotonic version enforcement.
-- Document recovery key compromise → physical re-provisioning.
-- Do NOT use provisioning key to authorize its own revocation.
+- Pin the recovery public key on every device at provisioning.
+- Produce signed `key_rotation` and `key_revocation` notices per Build Master §3.6 §1 and §3.8.
+- Recovery key rotation with monotonic version enforcement — the signing side.
+- Document recovery key compromise → physical re-provisioning (ceremony runbook).
+- Do NOT use provisioning key to authorize its own revocation (authority is recovery key per Build Master §3.6 §1).
 - Do NOT store recovery private key on admin app or any online device.
+- **Out of scope for P1-035 (owned by TASK-P1-036):** client-side parsing of notices, verification against trusted keys, applying `previous_provisioning_pubkey`/`highest_recovery_key_version` updates, overlap window enforcement. See "Deferred to TASK-P1-036" below.
 
-**Acceptance criteria:**
+**Acceptance criteria (signing-side, verifiable against test vectors):**
 - [ ] Recovery keypair generated via documented ceremony.
 - [ ] Public key pinned on every device at provisioning.
-- [ ] `key_revocation` message includes `recovery_key_version` (monotonic).
-- [ ] Revocation workflow implemented and tested.
-- [ ] Rotation workflow implemented and tested.
-- [ ] Out-of-order recovery notices rejected (`version ≤ highest_recovery_key_version`).
-- [ ] Conflicting notices at same version: first accepted, subsequent rejected.
+- [ ] `key_rotation` notice signed by recovery key produces a valid Ed25519 signature per §3.8.
+- [ ] `key_revocation` notice signed by recovery key produces a valid Ed25519 signature per §3.8.
+- [ ] Both notice types include `recovery_key_version` (monotonic integer).
+- [ ] `key_revocation` includes `revoked_provisioning_key_id`, `new_provisioning_key`, `effective_at`, `nonce`, `event_id`.
 - [ ] Recovery key compromise documented as requiring physical re-provisioning.
-- [ ] Audit events written for all recovery operations.
+- [ ] Audit events written for all recovery-key signing operations.
+- [ ] Cross-language (TS ↔ Kotlin) byte-identical signing on the R-series test vectors.
 
-**Required tests:**
+**Required tests (P1-035 scope):**
 - TEST-RECKEY-001: Recovery keypair generates a valid Ed25519 key.
-- TEST-RECKEY-002: Provisioning key revocation signed by recovery key accepted.
-- TEST-RECKEY-003: Provisioning key self-revocation rejected.
-- TEST-RECKEY-004: Provisioning key rotation signed by recovery key accepted.
-- TEST-RECKEY-005: Recovery key rotation signed by current recovery key accepted.
-- TEST-RECKEY-006: Recovery key rollback rejected.
-- TEST-RECKEY-007: Post-revocation matrix signed by revoked provisioning key rejected.
-- TEST-RECKEY-008: New matrix signed by new provisioning key accepted.
-- TEST-RECKEY-009: Out-of-order recovery notice rejected.
-- TEST-RECKEY-010: Conflicting same-version notices: second rejected.
+- TEST-RECKEY-002: `key_revocation` notice signed by recovery key produces byte-identical output in TS and Kotlin (R-001 cross-language vector).
+- TEST-RECKEY-003: `key_rotation` notice signed by recovery key produces byte-identical output in TS and Kotlin (R-002 cross-language vector).
+- TEST-RECKEY-004: `key_rotation` notice signed by provisioning key fails verification (self-rotation rejected).
+- TEST-RECKEY-005: Recovery-key rotation notice signed by current recovery key produces byte-identical output in TS and Kotlin (R-003 cross-language vector).
+- TEST-RECKEY-006: `recovery_key_version` monotonicity field is present and correct in the signed artifact (end-to-end rollback rejection is P1-036's TEST-REVOCATION-ROLLBACK-REJECTED).
 
-**Status:** Proposed
+**Deferred to TASK-P1-036 (v0.12 split).** Four tests were in P1-035 §B under v0.11 but are client-side — they require P1-036's consumer to exist. Moved here so P1-035 stays signing-side-only:
+- TEST-RECKEY-007 (v0.11): Post-revocation matrix signed by revoked provisioning key rejected → **P1-036**
+- TEST-RECKEY-008 (v0.11): New matrix signed by new provisioning key accepted → **P1-036**
+- TEST-RECKEY-009 (v0.11): Out-of-order recovery notice rejected → **P1-036**
+- TEST-RECKEY-010 (v0.11): Conflicting same-version notices: second rejected → **P1-036**
+
+P1-036 §B receives these four in its Required-tests list in the same commit as this split.
+
+**Drift corrections (v0.12, 2026-10-20).** Three drifts corrected during split scoping:
+- **D1** — v0.11 cited "ADR-PROVISIONING-001 §3.6 / §3.7" as design authority. Those sections don't exist (ADR §3 is Signing Protocol, §4 is Matrix Schema, §5 is Test Plan, §6 is Implementation Plan; no rotation ceremony section). ADR §2 Q6 explicitly defers: "Fully specified in Build Master §3.6; no design gap." Citations corrected to Build Master §3.6 §1 + ADR §2 Q6.
+- **D2** — P1-036 §B line 245 said `key_rotation` was "signed by the current provisioning key". Build Master §3.6 §1 says "signed by the currently-trusted recovery key". P1-036's own objective and P1-035's TEST-RECKEY-004 both agree with Build Master. Corrected in P1-036 §B.
+- **D3** — Four tests (TEST-RECKEY-007/008/009/010) were in P1-035 but are client-side. Moved to P1-036 (see "Deferred" above).
+
+**Sub-task breakdown (v0.12, 2026-10-20).**
+
+P1-035 is four sessions of work, not one. Sub-tasks numbered 035a–035d. Each lands as its own commit; the drill (035d) is last.
+
+- **P1-035a — Backend recovery-notice schema (signing-side).** New `backend/src/crypto/recovery-notice.ts` covering both `key_rotation` and `key_revocation` types with `validate*/digest*/sign*/verify*` per §3.8. New `docs/reference/canonical-recovery-notice-test-vectors.json` (R-001…R-N). Generator extension. ~12 tests. **Blocks 035b** (vectors) and **P1-036** (its tests consume the vectors).
+- **P1-035b — Kotlin recovery-notice schema + signer.** `RecoveryNotice.kt`, `RecoveryNoticeSigner.kt` (parallel to `MatrixSigner.kt`), `RecoveryNoticeTest.kt`. Cross-language byte-identity test on 035a's vectors. ~8 tests. **Blocks P1-036** (client parsing).
+- **P1-035c — Recovery ceremony runbook.** Extends `docs/ops/PROVISIONING-CEREMONY.md` (Part F) or new `RECOVERY-CEREMONY.md`: three-person ceremony (lead + witness + custodian), split device passcode, Safe #2 different physical location, annual rotation per KEY-CUSTODY §3.5, compromise → physical re-provisioning per §3.6. Paper log template. Doc-only.
+- **P1-035d — End-to-end drill.** Three-person, air-gapped Pixel 7+ × 2. **Hardware-blocked** — same constraint as 033e.
+
+**Status:** Split (035a–035d)
+
 
 ### TASK-P1-036: Provisioning-key rotation and recovery-key revocation notice handling
 
@@ -242,7 +262,8 @@ P1-033 is five sessions of work, not one. Sub-tasks are numbered 033a–033e. Ea
 **Objective and non-goals:**
 - Handle two client-side notice types: `key_rotation` and
   `key_revocation`.
-- `key_rotation`: signed by the current provisioning key. On receipt,
+- `key_rotation`: signed by the current recovery key (per Build Master
+  §3.6 §1 and ADR §2 Q6). On receipt,
   store the new key as `previous_provisioning_pubkey` and open the
   overlap window during which both keys are trusted for matrix
   verification.
@@ -255,8 +276,8 @@ P1-033 is five sessions of work, not one. Sub-tasks are numbered 033a–033e. Ea
   `highest_recovery_key_version` SecureStorage keys exist but are
   never written; `verifyMatrix` takes `Set<PublicKey>`. This task
   implements the handlers.
-- Per ADR-PROVISIONING-001 §3.6 (rotation ceremony) and §3.7
-  (recovery-key authorization).
+- Per Build Master §3.6 (rotation ceremony) and
+  ADR-PROVISIONING-001 §2 Q6 (provisioning-key compromise).
 - Do NOT implement the key custody ceremony (TASK-P1-029,
   TASK-P1-035 own that). Do NOT implement notice transport.
 
@@ -287,6 +308,10 @@ P1-033 is five sessions of work, not one. Sub-tasks are numbered 033a–033e. Ea
 - TEST-REVOCATION-ACCEPT-AFTER-RECOVERY-KEY-SIGNED-NOTICE
 - TEST-REVOCATION-REJECT-MATRIX-AFTER-REVOCATION
 - TEST-REVOCATION-ROLLBACK-REJECTED
+- TEST-RECKEY-007 (moved from P1-035 v0.12): Post-revocation matrix signed by revoked provisioning key rejected
+- TEST-RECKEY-008 (moved from P1-035 v0.12): New matrix signed by new provisioning key accepted
+- TEST-RECKEY-009 (moved from P1-035 v0.12): Out-of-order recovery notice rejected
+- TEST-RECKEY-010 (moved from P1-035 v0.12): Conflicting same-version notices: second rejected
 
 **Status:** Proposed
 
@@ -853,7 +878,10 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-033d | Offline signing — ceremony runbook | 0.5 | Executed 2026-10-20 |
 | TASK-P1-033e | Offline signing — end-to-end drill | 0.5 | New |
 | TASK-P1-034 | Hardware-backed Ed25519 Keystore verification | 2 | New |
-| TASK-P1-035 | Organization recovery key | 3.5 | New |
+| TASK-P1-035a | Recovery key — backend notice schema (rotation + revocation) | 1 | New |
+| TASK-P1-035b | Recovery key — Kotlin schema + signer | 1 | New |
+| TASK-P1-035c | Recovery key — ceremony runbook | 1 | New |
+| TASK-P1-035d | Recovery key — end-to-end drill (hardware-blocked) | 0.5 | New |
 | TASK-P1-036 | Provisioning-key rotation & recovery-key revocation notices | 3.5 | Proposed |
 | TASK-P1-037 | Matrix transport | 3.5 | Proposed |
 | TASK-P1-038 | Send-path matrix enforcement verification | 1 | Proposed |
@@ -862,7 +890,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-041 | Failed-verification operator logging | 1 | Proposed |
 | TASK-P1-042 | WS revocation listener reconnect + re-reconcile | 1 | DONE |
 
-**Total Phase 1 task identifiers:** 49 (001–020, 021a, 021b, 022–026, 027a, 027b, 028, 029a, 029b, 030–032, 033a–033e, 034–042).
+**Total Phase 1 task identifiers:** 52 (001–020, 021a, 021b, 022–026, 027a, 027b, 028, 029a, 029b, 030–032, 033a–033e, 034, 035a–035d, 036–042).
 
 **Execution order (dependency-respecting):**
 TASK-P1-001 → TASK-P1-002 → TASK-P1-027 → TASK-P1-032 → TASK-P1-003 → TASK-P1-034 → TASK-P1-004 → TASK-P1-005 → TASK-P1-006 → TASK-P1-013 → TASK-P1-007 → TASK-P1-008 → TASK-P1-025 → TASK-P1-026 → TASK-P1-029 → TASK-P1-033 → TASK-P1-035 → TASK-P1-014 → TASK-P1-015 → TASK-P1-016 → TASK-P1-009 → TASK-P1-010 → TASK-P1-011 → TASK-P1-012 → TASK-P1-019 → TASK-P1-020 → TASK-P1-021a → TASK-P1-021b → TASK-P1-030 → TASK-P1-017 → TASK-P1-018 → TASK-P1-022 → TASK-P1-023 → TASK-P1-024 → TASK-P1-028 → TASK-P1-031
