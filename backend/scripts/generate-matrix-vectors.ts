@@ -55,6 +55,7 @@ const ROOT = findRepoRoot();
 const MATRIX_VECTORS_PATH = join(ROOT, 'docs/reference/canonical-matrix-test-vectors.json');
 const NOTICE_VECTORS_PATH = join(ROOT, 'docs/reference/canonical-replacement-notice-test-vectors.json');
 const ACK_VECTORS_PATH = join(ROOT, 'docs/reference/canonical-identity-change-ack-test-vectors.json');
+const RECOVERY_NOTICE_VECTORS_PATH = join(ROOT, 'docs/reference/canonical-recovery-notice-test-vectors.json');
 
 const SEED_UTF8 = 'umoja-canonical-matrix-test-vectors-v1-DO-NOT-USE-IN-PRODUCTION';
 // PKCS8 wrapper for a 32-byte Ed25519 seed. RFC 8410.
@@ -137,6 +138,9 @@ function main(): void {
 
   const ackFilled = processDoc(ACK_VECTORS_PATH, priv, pubB64u);
   console.log(`Ack vectors filled: ${ackFilled}`);
+
+  const recoveryNoticeFilled = processDoc(RECOVERY_NOTICE_VECTORS_PATH, priv, pubB64u);
+  console.log(`Recovery notice vectors filled: ${recoveryNoticeFilled}`);
 
   console.log(`Public key: ${pubB64u}`);
 }

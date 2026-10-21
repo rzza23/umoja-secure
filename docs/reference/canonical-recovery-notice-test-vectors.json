@@ -1,0 +1,159 @@
+{
+  "document": "canonical-recovery-notice-test-vectors",
+  "version": "0.1",
+  "date": "2026-10-20",
+  "status": "draft",
+  "generated": true,
+  "authority": "UMOJA-SECURE-BUILD-MASTER.md section 3.6 (rotation + revocation authority), section 3.8 (signing protocol). ADR-PROVISIONING-001 section 2 Q6 (provisioning key compromise). docs/ops/KEY-CUSTODY.md section 3 (recovery key custody).",
+  "purpose": "Cross-language (TS ↔ Kotlin) and cross-implementation correctness for TASK-P1-035a's three recovery-notice schemas (key_rotation, key_revocation, recovery_key_rotation). Each vector's expected_* fields are populated by backend/scripts/generate-matrix-vectors.ts; the TS test suite (recovery-notice.test.ts) asserts byte identity, and the cross-language test file (TASK-P1-035b) will prove TS and Kotlin produce the same canonical bytes, digest, and signature.",
+  "signed_object_shapes": {
+    "key_rotation": {
+      "domain": "umoja.key-rotation.v1",
+      "notice": {
+        "new_provisioning_key": "<base64url 43 chars, 32 raw bytes>",
+        "overlap_window_seconds": "<positive integer>",
+        "effective_at": "<ISO 8601 UTC with trailing Z>",
+        "nonce": "<opaque string, replay protection>",
+        "event_id": "<opaque string, replay protection>",
+        "recovery_key_version": "<positive integer, monotonic>"
+      }
+    },
+    "key_revocation": {
+      "domain": "umoja.key-revocation.v1",
+      "notice": {
+        "revoked_provisioning_key_id": "<base64url SHA-256 fingerprint, 43 chars>",
+        "new_provisioning_key": "<base64url 43 chars, 32 raw bytes>",
+        "effective_at": "<ISO 8601 UTC with trailing Z>",
+        "nonce": "<opaque string, replay protection>",
+        "event_id": "<opaque string, replay protection>",
+        "recovery_key_version": "<positive integer, monotonic>"
+      }
+    },
+    "recovery_key_rotation": {
+      "domain": "umoja.recovery-key-rotation.v1",
+      "notice": {
+        "new_recovery_key": "<base64url 43 chars, 32 raw bytes>",
+        "new_recovery_key_version": "<positive integer, > recovery_key_version>",
+        "effective_at": "<ISO 8601 UTC with trailing Z>",
+        "nonce": "<opaque string, replay protection>",
+        "event_id": "<opaque string, replay protection>",
+        "recovery_key_version": "<positive integer, monotonic>"
+      }
+    }
+  },
+  "test_only_key_derivation": {
+    "note": "Same test key as canonical-matrix-test-vectors.json and canonical-replacement-notice-test-vectors.json. Same seed, same info string. In production, recovery-notice signatures verify against RECOVERY_PUBKEY_B64U (a distinct key from PROVISIONING_PUBKEY_B64U). Test vectors reuse the provisioning test seed so cross-language signing parity can be proven without a second test-seed derivation. Key separation between provisioning and recovery roles is asserted separately by ProvisioningKeysTest and by the release-path startup check in UmojaApplication.",
+    "seed_utf8": "umoja-canonical-matrix-test-vectors-v1-DO-NOT-USE-IN-PRODUCTION",
+    "info_utf8": "ed25519-test-key",
+    "kdf": "HKDF-SHA256 with empty salt, 32 bytes",
+    "expected_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M"
+  },
+  "vectors": [
+    {
+      "id": "R-001",
+      "description": "Baseline key_revocation: compromised provisioning key revoked, replacement named. Tests the fingerprint field and the six-field revocation shape.",
+      "type": "positive",
+      "notice_type": "key_revocation",
+      "input_wrapper": {
+        "domain": "umoja.key-revocation.v1",
+        "notice": {
+          "revoked_provisioning_key_id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "new_provisioning_key": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "effective_at": "2026-10-20T00:00:00Z",
+          "nonce": "00000000-0000-4000-8000-000000000001",
+          "event_id": "00000000-0000-4000-8000-0000000000e1",
+          "recovery_key_version": 1
+        }
+      },
+      "expected_canonical_bytes_utf8": "{\"domain\":\"umoja.key-revocation.v1\",\"notice\":{\"effective_at\":\"2026-10-20T00:00:00Z\",\"event_id\":\"00000000-0000-4000-8000-0000000000e1\",\"new_provisioning_key\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"nonce\":\"00000000-0000-4000-8000-000000000001\",\"recovery_key_version\":1,\"revoked_provisioning_key_id\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}}",
+      "expected_sha256_digest_hex": "0fde175638cf98fa635d6399561a069ff670c4a4a06e00c33292fa9f4fe92e77",
+      "expected_ed25519_signature_base64url": "OeYqkuva_ILWAklBIkUXwNt-6AowWOYn9sHqYdg6wNkONmAo5gqRZXRgKizb3rP6kms7YhnNAcxZ8fXkH562BQ",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M"
+    },
+    {
+      "id": "R-002",
+      "description": "Baseline key_rotation: 30-day overlap (2592000 seconds). Tests the field-set completion documented in recovery-notice.ts module KDoc (Build Master para 1 names only new key + overlap; nonce/event_id/effective_at/recovery_key_version added by analogy with para 2 for replay protection).",
+      "type": "positive",
+      "notice_type": "key_rotation",
+      "input_wrapper": {
+        "domain": "umoja.key-rotation.v1",
+        "notice": {
+          "new_provisioning_key": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "overlap_window_seconds": 2592000,
+          "effective_at": "2026-10-20T00:00:00Z",
+          "nonce": "00000000-0000-4000-8000-000000000002",
+          "event_id": "00000000-0000-4000-8000-0000000000e2",
+          "recovery_key_version": 1
+        }
+      },
+      "expected_canonical_bytes_utf8": "{\"domain\":\"umoja.key-rotation.v1\",\"notice\":{\"effective_at\":\"2026-10-20T00:00:00Z\",\"event_id\":\"00000000-0000-4000-8000-0000000000e2\",\"new_provisioning_key\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"nonce\":\"00000000-0000-4000-8000-000000000002\",\"overlap_window_seconds\":2592000,\"recovery_key_version\":1}}",
+      "expected_sha256_digest_hex": "1f516d5a49b086051c94b07b6d8276faf56c76fa92721d18df0a0cd10bdc9afc",
+      "expected_ed25519_signature_base64url": "NbXGRtjyq-9UrAP4IjJjrtW4K0E4WlYKILTkkjrsG_HFNIM3dK5dejUgX3jXly0KqK9J-xrqCTUfDoApKqY-AA",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M"
+    },
+    {
+      "id": "R-003",
+      "description": "Baseline recovery_key_rotation: v1 → v2. Tests the new_recovery_key field, new_recovery_key_version, and the cross-field constraint new_recovery_key_version > recovery_key_version.",
+      "type": "positive",
+      "notice_type": "recovery_key_rotation",
+      "input_wrapper": {
+        "domain": "umoja.recovery-key-rotation.v1",
+        "notice": {
+          "new_recovery_key": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+          "new_recovery_key_version": 2,
+          "effective_at": "2026-10-20T00:00:00Z",
+          "nonce": "00000000-0000-4000-8000-000000000003",
+          "event_id": "00000000-0000-4000-8000-0000000000e3",
+          "recovery_key_version": 1
+        }
+      },
+      "expected_canonical_bytes_utf8": "{\"domain\":\"umoja.recovery-key-rotation.v1\",\"notice\":{\"effective_at\":\"2026-10-20T00:00:00Z\",\"event_id\":\"00000000-0000-4000-8000-0000000000e3\",\"new_recovery_key\":\"DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD\",\"new_recovery_key_version\":2,\"nonce\":\"00000000-0000-4000-8000-000000000003\",\"recovery_key_version\":1}}",
+      "expected_sha256_digest_hex": "0d3346d55075334da88bdd8ba07de6b97b2567064a59d5d82ef1f4466b87dddf",
+      "expected_ed25519_signature_base64url": "cp05NasbDn038x1OhJDvMagOv1dLbAwwaFYG_ArVIMG8qmW4VpagaOlDplTCD7kWha0_VuEyqVJK91vS8vPoCg",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M"
+    },
+    {
+      "id": "R-004",
+      "description": "Boundary key_rotation: minimal valid overlap_window_seconds (1). Same shape as R-002 with different nonce/event_id. Proves the validator accepts the minimum positive integer without off-by-one.",
+      "type": "positive",
+      "notice_type": "key_rotation",
+      "input_wrapper": {
+        "domain": "umoja.key-rotation.v1",
+        "notice": {
+          "new_provisioning_key": "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+          "overlap_window_seconds": 1,
+          "effective_at": "2026-10-20T00:00:01Z",
+          "nonce": "00000000-0000-4000-8000-000000000004",
+          "event_id": "00000000-0000-4000-8000-0000000000e4",
+          "recovery_key_version": 2
+        }
+      },
+      "expected_canonical_bytes_utf8": "{\"domain\":\"umoja.key-rotation.v1\",\"notice\":{\"effective_at\":\"2026-10-20T00:00:01Z\",\"event_id\":\"00000000-0000-4000-8000-0000000000e4\",\"new_provisioning_key\":\"EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE\",\"nonce\":\"00000000-0000-4000-8000-000000000004\",\"overlap_window_seconds\":1,\"recovery_key_version\":2}}",
+      "expected_sha256_digest_hex": "51cb20d48cd259421cc950322dfbb1c6f02ebc3f364638b8e8498a981417e969",
+      "expected_ed25519_signature_base64url": "CkVvsguM_I9EAWdKRHMrRja2r2FOnDwe1woMUMl1JFpdEckvKzpt-mr7PDY6P8a7yANT0vyCluGyIf-mLz70Bg",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M"
+    },
+    {
+      "id": "R-005",
+      "description": "Boundary recovery_key_rotation: v5 → v6 (non-contiguous from R-003's v1 → v2). Proves the validator's cross-field check is strictly '>' not '==current+1'; recovery keys can jump versions when the admin's custody log records gaps.",
+      "type": "positive",
+      "notice_type": "recovery_key_rotation",
+      "input_wrapper": {
+        "domain": "umoja.recovery-key-rotation.v1",
+        "notice": {
+          "new_recovery_key": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+          "new_recovery_key_version": 6,
+          "effective_at": "2026-10-20T00:00:01Z",
+          "nonce": "00000000-0000-4000-8000-000000000005",
+          "event_id": "00000000-0000-4000-8000-0000000000e5",
+          "recovery_key_version": 5
+        }
+      },
+      "expected_canonical_bytes_utf8": "{\"domain\":\"umoja.recovery-key-rotation.v1\",\"notice\":{\"effective_at\":\"2026-10-20T00:00:01Z\",\"event_id\":\"00000000-0000-4000-8000-0000000000e5\",\"new_recovery_key\":\"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\",\"new_recovery_key_version\":6,\"nonce\":\"00000000-0000-4000-8000-000000000005\",\"recovery_key_version\":5}}",
+      "expected_sha256_digest_hex": "44a284e924712e09015797f0ac8ce12f96586900503707d169db22d1cab5fcb2",
+      "expected_ed25519_signature_base64url": "MDm-aYmM4GPs3qIFIrfFmfqo7BQFWpU9aq81cJ6-0vwvxzregDJFwZ0u39Y6dcZtIIZYZpfZlGQyKI3cN1ZiBg",
+      "expected_provisioning_public_key_base64url": "hL_X45qk5WrA9rSxtrQJyRzkDGT0eysDBtuWQosC30M"
+    }
+  ],
+  "generated_at": "2026-10-21T03:47:32.433Z"
+}
