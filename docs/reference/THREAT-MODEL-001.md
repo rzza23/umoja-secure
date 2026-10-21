@@ -1,7 +1,7 @@
 # THREAT-MODEL-001 — Umoja Secure Phase 1
 
 Document ID: THREAT-MODEL-001
-Version: 0.3 (TASK-P1-042 landed 2026-10-18)
+Version: 0.4 (TASK-P1-021b re-scoped 2026-10-20)
 Date: 2026-10-14
 Authority: Derived from UMOJA-SECURE-BUILD-MASTER.md v1.4.2, plus project-owner attestation on the same date.
 Status: Draft. Not yet in force. Subject to revision.
@@ -167,14 +167,15 @@ rely on them.
 What the app **does** guarantee:
 - Private keys live in Android Keystore (TEE-backed where available)
 - Local storage is AES-GCM encrypted with a Keystore-held key
-- Duress wipe (TASK-P1-021b) destroys keys and session material in ≤5s
-  — **planned; not yet shipped.** TASK-P1-021b status is "Updated",
-  implementation pending. The wipe-confirmation key manager exists
-  (Session A, `8bd4ab5`); the wipe flow that consumes it is designed
-  but not implemented. Until P1-021b lands, the app's erasure
-  guarantee is delivered by uninstall / `pm clear` behavior, not by
-  duress wipe.
-- Wipe-confirmation notification is best-effort (see §6.4)
+- Duress wipe: **GrapheneOS Duress** (TASK-P1-021b, re-scoped
+  2026-10-20) destroys the hardware-keystore keys, all user profiles,
+  and the eSIM, and powers off — the OS acts before any app code
+  can run. No app-level wipe flow is built; see §6.4. The erasure
+  guarantee is delivered by the OS feature, not by an app-level
+  duress flow.
+- No wipe-confirmation notification is emitted under the GrapheneOS
+  mechanism — the OS destroys the process before any app code can
+  sign a claim. See §6.4.
 
 What the app does **not** guarantee:
 - Forensic unrecoverability of storage remnants. Per Build Master §3.4,
@@ -183,6 +184,18 @@ What the app does **not** guarantee:
   physical remnant exists.
 
 ### §6.4 — Wipe-confirmation forgery
+
+> *v0.4 re-scope (2026-10-20):* **This section describes a protocol
+> that will not be built.** GrapheneOS Duress is the wipe mechanism
+> (registry v0.11, TASK-P1-021b re-scoped). It fires at the OS
+> credential-entry layer, destroys the hardware-keystore keys, wipes
+> all user profiles and the eSIM, and powers off — before any app
+> code can run. No notification can be sent; the OS is gone before
+> the app knows. The `device_reported_wipe_complete` protocol
+> described below cannot originate from a GrapheneOS duress event.
+> The analysis is preserved below as a historical record of the
+> pre-2026-10-20 design; the v0.2 status correction that follows
+> describes the same not-implemented state.
 
 The wipe-confirmation key signs a fire-and-forget notification that the
 device has wiped. A valid signature proves **the holder of the private
@@ -402,4 +415,4 @@ Explicitly not covered by this threat model:
 
 ---
 
-— end of THREAT-MODEL-001 v0.3 draft —
+— end of THREAT-MODEL-001 v0.4 draft —
