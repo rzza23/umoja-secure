@@ -1,9 +1,9 @@
-# US-TASK-P1-001-v0.8 — Phase 1 Task Registry Reconciliation
+# US-TASK-P1-001-v0.11 — Phase 1 Task Registry Reconciliation
 
 Document ID: US-TASK-P1-001
-Version: 0.10
+Version: 0.11
 Date: October 2026
-Supersedes: v0.7
+Supersedes: v0.10
 Purpose: Reconcile the Phase 1 task registry with UMOJA-SECURE-BUILD-MASTER.md v1.4.2.
 Authority: Derived from US-MASTER-001 + US-ADD-001. Cannot override them.
 
@@ -625,23 +625,77 @@ LIBSIGNAL-INTEGRATION.md`.
 
 **Status:** Proposed
 
-### TASK-P1-021b — Duress wipe
+### TASK-P1-021b — Duress wipe (RE-SCOPED 2026-10-20)
 
-Wipe-confirmation notification must include: `event_id` (UUID v4), `device_id`, `wipe_completed_at` (ISO8601 UTC), `nonce` (32 bytes from CSPRNG, base64url).
+**Status:** Re-scoped. GrapheneOS Duress is the wipe mechanism; no
+app-level wipe flow is built.
 
-Backend must:
-- Verify signature against registered wipe-confirmation public key.
-- Reject duplicate `event_id` (idempotent no-op).
-- Reject `wipe_completed_at` older than most recent wipe request.
-- Validate `nonce` length (base64url → exactly 32 bytes). Client responsible for CSPRNG.
-- Rate-limit per device and per source.
-- Record as `device_reported_wipe_complete`.
+**Ruling (2026-10-20).** GrapheneOS's OS-level Duress feature is the
+wipe mechanism for Umoja Secure. It fires on a designated duress
+credential anywhere the system asks for a passcode (lock screen, app
+unlock), destroys the hardware-keystore keys that derive the
+disk-encryption key, wipes all user profiles and the eSIM partition,
+and powers off. No confirmation prompt, no undo.
 
-Test coverage required:
-- Crash between key destruction and notification.
-- Tor unavailable at wipe time.
-- Duplicate notifications.
-- Old signed notification arriving after a newer wipe request.
+**Why app-level wipe is not built.** The system wipe destroys the OS
+before any app code can run. An app-level flow cannot:
+
+- Send a `device_reported_wipe_complete` notification (the app is
+  gone before it knows the wipe happened).
+- Perform its own key destruction (the OS has already destroyed the
+  Keystore entries that wrap them).
+- Report `wipe_completed_at`, a `nonce`, or any post-wipe state (no
+  process survives to emit them).
+- Handle "Tor unavailable at wipe time" (no network call is
+  attempted).
+
+A second, app-level duress credential would also introduce a weaker
+layer: checked in app code, against the app's threat model, with the
+app's bugs — independently probeable by an attacker who knows the
+app exists. The OS layer is protected by the system's own hardened
+credential-entry path.
+
+**What stays.** `WipeConfirmationKeyManager` generation and pubkey
+export remain: `pub_wipe_confirmation_key` is part of the enrollment
+QR payload (`umoja.enrollment-request.v1`, owner ruling 2026-10-14)
+and the matrix schema. The `sign()` method is retained for a future
+wipe-confirmation protocol that may not land on GrapheneOS; under
+the current design it is unused in production.
+
+**Superseded requirements (preserved for history).** The 2026-10
+version of this entry required: `event_id` (UUID v4), `device_id`,
+`wipe_completed_at` (ISO 8601 UTC), `nonce` (32 bytes CSPRNG,
+base64url); backend signature verification against the registered
+wipe-confirmation public key; duplicate-`event_id` idempotence;
+`wipe_completed_at` monotonicity against the most recent wipe
+request; nonce-length validation; per-device and per-source rate
+limiting; the `device_reported_wipe_complete` audit event. None of
+these can be satisfied under the GrapheneOS mechanism. The test list
+(crash between key destruction and notification; Tor unavailable;
+duplicate notifications; old notification after a newer wipe
+request) is likewise moot.
+
+**Acceptance criteria.**
+- [ ] This entry's re-scope is recorded in registry v0.11.
+- [ ] `WipeConfirmationKeyManager` KDoc names the GrapheneOS
+      mechanism and marks `sign()` as reserved-for-future.
+- [ ] THREAT-MODEL-001 §6.3 and §6.4 carry v0.4 notes pointing at
+      this ruling.
+- [ ] No code change; no test change; 7 existing androidTests
+      continue to pass.
+
+**Required tests.** None new. The 7 existing
+`WipeConfirmationKeyManager` androidTests (generation, sign, verify,
+delete) remain; they exercise the retained surface, not the
+superseded flow.
+
+**Dependencies.** TASK-P1-019 (wipe pubkey in QR payload) — done.
+TASK-P1-034 (TEE Ed25519) — unchanged, still hardware-blocked, still
+applies to the device auth key.
+
+**Related.** TASK-P1-021a (emergency lock) is a different feature
+(reversible, app-level, admin-triggered) and is unchanged by this
+re-scope.
 
 ### TASK-P1-026 — Authorization matrix
 
@@ -779,7 +833,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-019 | Device enrollment flow | 9 | Proposed |
 | TASK-P1-020 | Device revocation workflow | 9 | Proposed |
 | TASK-P1-021a | Emergency lock (reversible) | 9 | Split |
-| TASK-P1-021b | Duress wipe (destructive) | 9 | Updated |
+| TASK-P1-021b | Duress wipe (destructive) | 9 | Re-scoped |
 | TASK-P1-022 | Phase 1 security test suite | 10 | Proposed |
 | TASK-P1-023 | Threat simulation exercises | 10 | Proposed |
 | TASK-P1-024 | Independent security review | 10 | Proposed |
