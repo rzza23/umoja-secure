@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-20 (Session Z-20 — **P1-035 SPLIT into 035a–035d.** Registry v0.11 → v0.12, total 49 → 52. Scoping session; no code, no tests. Recon found **three drifts** before the split could be written: **D1** — P1-036 §B said `key_rotation` signed by "current provisioning key"; Build Master §3.6 §1 says "currently-trusted recovery key". **D2** — P1-035/P1-036 cited "ADR-PROVISIONING-001 §3.6/§3.7"; those sections don’t exist (ADR §3 = Signing Protocol, §4 = Matrix Schema). ADR §2 Q6 explicitly defers: "Fully specified in Build Master §3.6; no design gap." **D3** — four tests (TEST-RECKEY-007/008/009/010) were in P1-035 but are client-side; moved to P1-036. Split shape: **035a** backend notice schema (rotation+revocation), **035b** Kotlin schema+signer, **035c** ceremony runbook, **035d** end-to-end drill (hardware-blocked, same as 033e). §5 backlog cleaned: two closed items (MessageStore SQLite leak U-1; migration 017 U-2) removed. Next: P1-035a (backend notice schema, ~1 session).)
+Last updated: 2026-10-20 (Session Z-21 — **P1-035a DONE** at `8c356d8`. Backend signing-side schema for three recovery-notice types (`key_rotation`, `key_revocation`, `recovery_key_rotation`) + 5 test vectors (R-001...R-005) + 28 tests. Backend 263 → 291. **Three types, not two:** v0.12 §B P1-035 objective said two, but TEST-RECKEY-005 required `recovery_key_rotation`; shipped all three. **Next: P1-035b** (Kotlin parity on 035a vectors, ~1 session).)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -46,7 +46,7 @@ Authoritative documents (all exist on disk):
 
 - Node.js 24.x, Fastify 5.12.5, PostgreSQL 16
 - Docker-deployable (docker compose up -d --build from repo root)
-- **263 tests passing** (20 files; verified 2026-10-20 via
+- **291 tests passing** (22 files; verified 2026-10-20 via
   `npm test`. Sessions C–F added matrix-version, floor stamping,
   replacement-notice. Session H added identity-change services (7
   validator tests) and routes (17 route tests). Session I added the
@@ -56,7 +56,8 @@ Authoritative documents (all exist on disk):
   no backend changes. Session O-1 added matrix transport: migration
   016, GET /me/matrix, 5 route tests. Session Z-15 added
   `POST /admin/matrices/:device_id` + verify-on-write + 9 route
-  tests.)
+  tests. Session Z-21 added `recovery-notice.ts` schema (3 notice
+  types) + 5 test vectors + 28 tests.)
 - Server-blind: routes ciphertext envelopes, never decrypts
 - Exposed as a v3 onion service via the umoja-tor container
 
@@ -5010,6 +5011,99 @@ and `key_revocation` types, `canonical-recovery-notice-test-vectors.json`,
 generator extension, ~12 tests. Deps 029, 033 are done. 035a can open
 fresh next session.
 
+
+### Session Z-21 — TASK-P1-035a DONE: recovery-notice schema + vectors + tests (2026-10-20)
+
+First code session of the P1-035 arc. Backend signing-side schema
+for the three recovery-notice types that authorize provisioning-key
+rotation, provisioning-key revocation, and recovery-key rotation.
+Seven files, one commit: `8c356d8`. **035a DONE.** Backend 263 →
+291 (+28 tests).
+
+**THE FINDING THAT MATTERED — THREE TYPES, NOT TWO.** v0.12 §B
+P1-035 objective bullet 3 said "Produce signed `key_rotation` and
+`key_revocation` notices" — two types. But the same body's
+TEST-RECKEY-005 said "Recovery-key rotation notice signed by current
+recovery key produces byte-identical output" — requiring a third
+type (`recovery_key_rotation`). Build Master §3.6 step 5 describes
+recovery-key rotation as a distinct operation with its own
+monotonicity rules. Scoping recon caught the discrepancy before any
+schema was written. Corrected scope: three types, one quartet each.
+Same class of finding as Z-20's D1/D2/D3 — the split was correct in
+principle but the objective text was narrower than the tests required.
+
+**WHAT SHIPPED.** Three files new:
+- `backend/src/crypto/recovery-notice.ts` (549 lines). Three notice
+  types, one quartet each (`validate*/digest*/sign*/verify*`).
+  Field-set completion for `key_rotation` documented in module KDoc:
+  Build Master §3.6 para 1 names only new key + overlap, but a
+  stale rotation notice replayed after the overlap window closes
+  would downgrade the trusted set, so nonce/event_id/effective_at/
+  recovery_key_version are required by analogy with para 2. Two
+  cross-field fail-closed checks: `key_revocation` rejects when
+  `revoked_provisioning_key_id` equals the fingerprint of
+  `new_provisioning_key`; `recovery_key_rotation` requires
+  `new_recovery_key_version > recovery_key_version` (strict).
+- `backend/src/crypto/recovery-notice.test.ts` (486 lines, 28 tests):
+  5 vector tests (R-001...R-005), TEST-RECKEY-001..006 (registry-
+  named), 14 validator rejections, 3 roundtrip tests.
+- `docs/reference/canonical-recovery-notice-test-vectors.json`:
+  5 vectors populated, generated: true. R-001 (key_revocation),
+  R-002 (key_rotation 30-day overlap), R-003 (recovery_key_rotation
+  v1→v2), R-004 (key_rotation min overlap = 1 sec), R-005
+  (recovery_key_rotation non-contiguous v5→v6).
+
+Four files modified:
+- `backend/scripts/generate-matrix-vectors.ts` (+3 lines: path const,
+  processDoc call, log). `processDoc` is already generic — reads
+  input_wrapper, canonicalizes, hashes, signs, writes expected_*
+  back. No dispatch change needed; wrapper domain lives inside the
+  canonicalized bytes.
+- 3 existing vector files: `generated_at` refreshed, `expected_*`
+  byte-identical (verified by diff gate).
+
+**TWO TYPECHECK FIXES.**
+
+1. Preflight Python f-string with backslash in expression
+   (`v["generated"]` inside {...}) — Python <3.12 rejects
+   backslash in f-string expression. Fixed by extracting to local.
+
+2. `recovery-notice.test.ts` line 459 `sigBuf[0] ^= 0xff` under
+   `noUncheckedIndexedAccess`. Fixed via guarded extraction
+   (pattern (a) from Session H): extract firstByte, check undefined,
+   write back firstByte ^ 0xff. Explicit check over `!` because the
+   throw message documents the invariant at the failure site.
+
+**VERIFICATION.**
+
+  typecheck:    clean
+  scoped tests: 28 / 28 (recovery-notice.test.ts)
+  full suite:   291 passed / 291 (22 test files)
+                expected = 263 prior + 28 new; exact match
+  vectors:      5 / 5 populated; idempotent across two generator
+                runs (expected_* byte-identical, generated_at moves)
+
+Build Master §3.8 prehash protocol verified end-to-end on all 5
+vectors. If JCS / digest / signer drift in either language, the
+vector tests fail rather than the drift shipping silently.
+
+**TWO OBSERVATIONS FILED IN §5 BACKLOG.**
+
+1. **Test-file count: 20 stated, 22 actual.** §2 and §7 claimed
+   20 files; preflight find (7 in src/ + 15 in test/) = 22. Z-21
+   updates the count to 22; not in scope to audit when the drift
+   started.
+
+2. **Count-reconciliation grep needs ANSI stripping.** Full-suite
+   `grep "Tests\s+[0-9]+ passed"` returned zero (ANSI escape codes).
+   Count verified by eye via `grep "Tests "`. Future sessions: pipe
+   through `sed 's/\x1b\[[0-9;]*m//g'` or set `NO_COLOR=1`.
+
+**NEXT: P1-035b** — Kotlin recovery-notice schema + signer +
+cross-language byte-identity tests on 035a's 5 vectors. ~1 session.
+Blocks P1-036 (client-side parsing). 035c runbook and 035d drill
+remain.
+
 ---
 
 ## 4. Known issues
@@ -5738,7 +5832,7 @@ Original phrasing preserved below for history:
       `runBlocking` bridge removed; §8 transport deferral closed.
       `HttpClientRetryTest` 7 tests unchanged; JVM 244/244;
       androidTest 71/71 per emulator.
-    - **Phase-1 DoD gaps (Build Master §10) — P1-033 IN PROGRESS (4/5).**
+    - **Phase-1 DoD gaps (Build Master §10) — P1-033 4/5, P1-035 1/4.**
       **P1-029 DONE:** design `29cd7bf` (`KEY-CUSTODY.md`, 287 lines);
       implementation `7c02d16` (ProvisioningKeys DEBUG/PROD split,
       `UmojaApplication` startup assertion). **P1-033 split into
@@ -5751,17 +5845,18 @@ Original phrasing preserved below for history:
       build flavor + `SigningActivity` + `SigningScreen`; signing APK
       has no launcher, MainActivity removed, transport guarded,
       WebSocket skipped. **033d DONE at `dc01a1d`** —
-      `docs/ops/PROVISIONING-CEREMONY.md`, the two-person runbook
-      (Parts A/B with print-ready paper logs). **033e BLOCKED on
-      hardware** — end-to-end drill needs an air-gapped Pixel 7+
-      StrongBox; no such device available on this workstation.
-      **Also unblocked:** P1-035 (recovery key ceremony — design
-      exists in `docs/ops/KEY-CUSTODY.md` §3). **Hardware-blocked:**
-      P1-021a (emergency lock), P1-021b (duress wipe), P1-034 (TEE
-      Ed25519 verification on target hardware), P1-033e. **Organizational-
-      blocked:** P1-027b (CI-provider decision). **Independent of all:**
-      P1-024 (external security review), scheduled against a candidate
-      release.
+      `docs/ops/PROVISIONING-CEREMONY.md`, the two-person runbook.
+      **033e BLOCKED on hardware** — end-to-end drill needs an
+      air-gapped Pixel 7+ StrongBox. **P1-035 split into 035a–035d
+      (Z-20); 035a DONE at `8c356d8`** — `recovery-notice.ts`
+      schema (3 notice types) + 5 test vectors + 28 tests (backend
+      263 → 291). **Next: 035b** (Kotlin parity) → 035c
+      (ceremony runbook) → 035d (hardware-blocked drill).
+      **Hardware-blocked:** P1-021a (emergency lock), P1-021b (duress
+      wipe), P1-034 (TEE Ed25519 verification on target hardware),
+      P1-033e, P1-035d. **Organizational-blocked:** P1-027b (CI-provider
+      decision). **Independent of all:** P1-024 (external security
+      review), scheduled against a candidate release.
     - **TASK-P1-027b** — CI enforcement gate + Android dependency
       tooling. Blocked on CI-provider decision (organizational, not
       technical). Session opens when that decision exists.
@@ -5773,6 +5868,16 @@ Original phrasing preserved below for history:
       double-matrix-fetch dedupe (R-5 §7 note).
 
 **Backlog items (not scheduled):**
+- **Documentation counts: test-file count reconciliation (Z-21, 2026-10-20).**
+  Handoff §2 and §7 claimed "20 files" for the backend suite;
+  Z-21 preflight found 7 in src/ + 15 in test/ = 22. The 20 was stale
+  by (at least) one file prior to this session. Count updated to 22;
+  when the drift started is not audited.
+- **Count-reconciliation grep pattern needs ANSI stripping (Z-21, 2026-10-20).**
+  Full-suite `grep "Tests\s+[0-9]+ passed"` on vitest output returned
+  zero matches (ANSI escape codes around the summary line). Count was
+  verified by eye via `grep "Tests "`. Fix for future sessions: pipe
+  through `sed 's/\x1b\[[0-9;]*m//g'` or set `NO_COLOR=1`.
 - ~~Instrumented Compose tests for admin flows~~ — **RESOLVED
   2026-10-18, arc complete. 5 of 5 sub-deliverables landed.**
   **Delivered across the arc:** AckDialog (`bf13dcc`, 11 Compose
@@ -6894,8 +6999,8 @@ Rebuild after flipping — read at HttpClient construction time.
 
 Current verified state: **260 Android JVM tests (client flavor) / 274 (signing flavor)** (2026-10-20),
 **71 androidTest** (2026-10-18, 8 files, from connectedAndroidTest XML
-aggregate `<testsuites tests="71">` -- not grep-summed), and **263
-backend tests** (2026-10-20, 20 files), all from runner output.
+aggregate `<testsuites tests="71">` -- not grep-summed), and **291
+backend tests** (2026-10-20, 22 files), all from runner output.
 Android JVM and androidTest are tracked separately — they run on different
 infrastructure (Mac vs emulator) and must not be summed.
 
