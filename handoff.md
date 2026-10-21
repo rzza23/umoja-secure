@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-20 (Session Z-18 — **P1-033d DONE** at `dc01a1d`. Operational runbook `docs/ops/PROVISIONING-CEREMONY.md` (585 lines, 9 sections): the two-person procedure for key generation (Part A) and routine matrix signing (Part B). Two print-ready paper log templates. Step A.2.7 names the backend `PROVISIONING_PUBKEY_B64U` env config — a real 033a dependency not in Build Master §3.6. Step A.2.5 records attestation as "NOT AVAILABLE (pending P1-034)" — gap recorded, not hidden. Execution-status section honestly declares: no production ceremony executed; runbook is specification-of-procedure until P1-033e. **P1-033 arc is 4 of 5 sub-tasks closed; 033e is hardware-blocked** (needs air-gapped Pixel 7+ StrongBox; not available on this workstation). Backend 263, Android JVM 260 client / 274 signing, androidTest 71 — all unchanged (doc-only session). **Next: P1-035** (recovery-key ceremony — design exists, unblocked) OR P1-033e (blocked on hardware) OR P1-027b (needs CI provider) OR nothing — choice, not obligation.)
+Last updated: 2026-10-20 (Session Z-19 — **P1-021b RE-SCOPED.** GrapheneOS Duress is the wipe mechanism. Registry v0.11, THREAT-MODEL-001 v0.4. WipeConfirmationKeyManager KDoc updated; sign() reserved for future. No code change, no test change. Next: P1-035 (recovery-key ceremony).)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -4795,6 +4795,97 @@ P1-033e sits blocked on hardware; when an air-gapped Pixel 7+ is
 available, 033e opens as a ceremony-execution session against this
 runbook. P1-027b still needs a CI-provider decision.
 
+### Session Z-19 — P1-021b re-scoped: GrapheneOS Duress is the wipe mechanism (2026-10-20)
+
+Re-scope session, doc-only. **No code change. No test change.** Three
+commits. The registry's P1-021b entry (20 lines, pre-2026-10-20)
+specified an app-level wipe-confirmation notification protocol. That
+protocol cannot work on GrapheneOS: the OS-level Duress feature
+destroys the hardware-keystore keys, wipes all user profiles and the
+eSIM, and powers off before any app code can run. A
+`device_reported_wipe_complete` event, a `wipe_completed_at`
+timestamp, or a `nonce` cannot originate from a real duress event
+because the process that would emit them is gone.
+
+**What the reads established.** Registry §B body,
+`WipeConfirmationKeyManager.kt` KDoc + sign + deleteKey, THREAT-MODEL-001
+§6.3 + §6.4, and handoff §5 item 12 were all self-consistent:
+each described the notification protocol as "designed but not yet
+implemented." The re-scope is not fixing drift; it is replacing the
+design. Every document needed the same ruling, in the same commit
+set, so no intermediate state has one doc describing an app-level
+flow and another describing the OS mechanism. Same discipline as
+X-1's three-doc amendment sweep for TASK-P1-042.
+
+**The ruling, one sentence.** GrapheneOS Duress is the wipe mechanism;
+no app-level wipe flow is built. `WipeConfirmationKeyManager` stays
+because `pub_wipe_confirmation_key` is part of the enrollment QR
+payload (`umoja.enrollment-request.v1`) and the matrix schema;
+`sign()` is reserved for a future protocol that may not land on
+GrapheneOS.
+
+**Why not build both.** A second, app-level duress credential would
+be checked in app code against the app's threat model, independently
+probeable by an attacker who knows the app exists. The OS layer is
+protected by the system's own hardened credential-entry path. Adding
+an app-level layer does not strengthen the OS feature — it introduces
+a weaker path that the OS layer's existence does not make safe.
+
+**What stays unaffected.** `WipeConfirmationKeyManager` code is
+unchanged: 7 androidTests continue to pass (generation, sign, verify,
+delete). The QR payload format is unchanged
+(`pub_wipe_confirmation_key` field intact). The matrix schema is
+unchanged. TASK-P1-021a (emergency lock — reversible, app-level,
+admin-triggered) is a different feature and is unchanged.
+TASK-P1-034 (TEE Ed25519 verification) still applies to the device
+auth key.
+
+**What is now moot.** The 2026-10 version's requirements
+(`event_id`, `wipe_completed_at`, `nonce`, signature verification,
+duplicate idempotence, monotonicity, rate limiting,
+`device_reported_wipe_complete` audit event) and its test list
+(crash-between-key-destruction-and-notification, Tor-unavailable,
+duplicate-notifications, old-notification-after-newer-wipe-request)
+are superseded. Registry §B preserves them under a
+"Superseded requirements (preserved for history)" blockquote so a
+future reader sees the old design and the ruling in one place.
+
+**Commits.**
+- Commit 1 (registry + KDoc): `docs/US-TASK-P1-001.md` v0.10 → v0.11
+  (§B body replaced, §C row `Updated` → `Re-scoped`, plus
+  pre-existing H1/Supersedes drift fixed: H1 v0.8 → v0.11,
+  Supersedes v0.7 → v0.10); `WipeConfirmationKeyManager.kt`
+  KDoc-only (class paragraph after the TASK-P1-019 paragraph; new
+  KDoc above `sign()`; `deleteKey()` "implementation deferred"
+  paragraph).
+- Commit 2 (propagation): `THREAT-MODEL-001` v0.3 → v0.4. §6.3
+  "planned, not yet shipped" bullet rewritten; §6.4 gains a v0.4
+  re-scope blockquote at the top (the v0.2 status correction is
+  preserved below as history); end-of-doc version line bumped
+  alongside header per X-1's three-surface lesson.
+- Commit 3 (this handoff): header, §5 item 12, session entry.
+
+**Process note — version-metadata drift surfaced by preflight.** The
+registry's H1 read `v0.8` while `Version: 0.10` — two bumps (v0.9,
+v0.10) advanced the `Version:` field without touching the H1.
+`Supersedes:` was stuck at `v0.7` for the same reason. THREAT-MODEL-001's
+end-of-doc line was about to have the same problem. X-1's lesson
+("end-of-doc version lines are a staleness surface") generalizes:
+**version metadata has four surfaces** — H1, `Version:`, `Supersedes:`,
+and end-of-doc. Any bump touches all four in the same commit, or the
+file lies about itself across sections. This session's re-scope fixed
+three accumulated drift instances in registry + THREAT-MODEL as
+incidental cleanup; the lesson is now precise enough to check for.
+
+**Counts unchanged.** Backend 263, Android JVM 260 client / 274
+signing, androidTest 71 — all unchanged (doc + KDoc only).
+
+**Next: P1-035** (recovery-key ceremony). Design exists in
+`docs/ops/KEY-CUSTODY.md` §3; no hardware, no organizational
+decision pending. The P1-021b re-scope moves P1-021a (emergency lock)
+off the critical path as a distinct task; P1-035 was already next,
+unaffected.
+
 ---
 
 ## 4. Known issues
@@ -5399,7 +5490,14 @@ Original phrasing preserved below for history:
     view of tokens already in the DB. Restore list-unused + revoke
     under the inline flow.
 11. Emergency lock (TASK-P1-021a).
-12. Duress wipe (TASK-P1-021b).
+12. Duress wipe (TASK-P1-021b) — **RE-SCOPED 2026-10-20.**
+    GrapheneOS Duress is the wipe mechanism. App-level wipe cannot
+    work: the OS destroys the user profile and the app process
+    before any app code can run, so a `device_reported_wipe_complete`
+    notification can never fire. `WipeConfirmationKeyManager` stays
+    (QR + matrix protocol); `sign()` is reserved for a future
+    protocol. See registry §B P1-021b (v0.11) and THREAT-MODEL-001
+    §6.3 / §6.4 (v0.4).
 13. Signing-key custody (TASK-P1-029), recovery key (TASK-P1-035).
 14. Hardware-backed Ed25519 verification (TASK-P1-034). Requires
     physical hardware.
