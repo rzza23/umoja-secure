@@ -5647,7 +5647,7 @@ Backend CI dependency gate implemented and fully accepted. Five PRs, one merge, 
 - PR #3: Deliberately pin `ws@8.18.0`. Failed at check-cve-exceptions. Proved TEST-CI-HIGH-CVE-BLOCKED.
 - PR #4: Deliberately add `firebase-admin`. Failed at check-prohibited. Proved TEST-CI-PROHIBITED-BLOCKED.
 
-**Plan-tier limitation resolved.** Branch protection rulesets on private repos require GitHub Pro. The repo was made public to activate enforcement. Tested: green PRs enable merge; red PRs disable merge.
+**Plan-tier limitation & Toggle Workflow.** Branch protection requires GitHub Pro on private repos. The repo defaults to **private** for product privacy (ruleset dormant; workflow runs but does not block merges, so human discipline is required). To enforce the gate on critical PRs, the owner temporarily toggles the repo to **public**, merges, then toggles back to private. During Z-26, the toggle was exercised in the public phase: green PRs enabled merge; red PRs disabled merge.
 
 **Process lessons earned (now in §7).**
 - `path` is a zsh special variable (clobbers `$PATH`).

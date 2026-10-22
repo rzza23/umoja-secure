@@ -305,7 +305,7 @@ Structural JSON parse of SBOM `components`:
 
 These settings live in the GitHub repository settings UI. They are a manual setup step recorded in the implementation session's completion notes. The ADR names them as acceptance requirements.
 
-**Plan-Tier Requirement (Added 2026-10-22):** GitHub does not enforce rulesets on private repositories on the Free tier. Z-26-B initially configured this on a private repo and discovered the rulesets were saved but dormant. The repository was made public to activate enforcement. If the repo returns to private without upgrading to GitHub Pro/Team, these settings will silently revert to dormant.
+**Plan-Tier Requirement & Toggle Workflow (Updated 2026-10-22):** GitHub does not enforce rulesets on private repositories on the Free tier. The repo defaults to **private** for product privacy, where the ruleset is dormant (the workflow runs and reports, but the merge button is not blocked, so human discipline is required). **To enforce the gate**, the owner temporarily toggles the repository to **public** before merging security-critical PRs, allowing the ruleset to activate and block red merges. The repo is toggled back to private immediately after. If the repo remains private without a GitHub Pro/Team upgrade, all merges are advisory.
 
 **Verification per implementation session.** Completion criteria include: enable branch protection, open a deliberately-failing throwaway PR, observe the merge button refuses. The ADR names this as the acceptance test that distinguishes "workflow ran" from "gate worked" — the same discipline as P1-038's three-case acceptance (a green case alone cannot distinguish a working gate from a sticky-open one).
 
@@ -370,4 +370,4 @@ Named so a future session doesn't expand:
 | Version | Date | Changes |
 |---|---|---|
 | v0.1 | 2026-10-21 | Initial ADR. Provider (GitHub Actions), enforcement policy (every PR, fail-closed, §6 exception escape valve), staged rollout (backend then Android), workflow design, branch-protection requirements, test matrix, exception-mechanism detail. |
-| v0.2 | 2026-10-22 | Z-26 implementation corrections. §5 line 237 path fix (`sbom.json` not `backend/sbom.json`). §5 rule 288 amended to `lockfile_sha` freshness check (platform-invariant) instead of byte-identical `npm ls`. §6 note added on plan-tier ruleset limitations for private repos. |
+| v0.2 | 2026-10-22 | Z-26 implementation corrections. §5 line 237 path fix (`sbom.json` not `backend/sbom.json`). §5 rule 288 amended to `lockfile_sha` freshness check (platform-invariant) instead of byte-identical `npm ls`. §6 note updated for public/private toggle workflow. |
