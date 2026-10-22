@@ -2301,5 +2301,12 @@
       "resolved": "https://registry.npmjs.org/zod/-/zod-3.23.8.tgz",
       "overridden": false
     }
+  },
+  "_meta": {
+    "lockfile_sha": "50437ef1b44722ae1ebf2ab3dcc5426e8ec4bd94c494605f8c34039cb5a4f32d",
+    "lockfile_path": "backend/package-lock.json",
+    "schema": "umoja-dep-tree.v1",
+    "generated_at_utc": "2026-10-22T22:52:25Z",
+    "generated_by": "scripts/ci/regen-dep-tree.py"
   }
 }
