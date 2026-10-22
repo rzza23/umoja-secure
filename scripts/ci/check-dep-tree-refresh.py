@@ -67,6 +67,15 @@ TREE_REL_FROM_BACKEND = "../artifacts/dep-tree.json"
 LOCKFILE_REL_IN_REPO = "backend/package-lock.json"
 TREE_REL_IN_REPO = "artifacts/dep-tree.json"
 
+# Deps that legitimately vary by platform. `npm ls --all --json` only
+# includes optional deps whose `os` constraint matches the current
+# platform. macOS gets fsevents (via chokidar); Linux omits it. The
+# committed tree (generated on macOS at Z-9) and a CI-regenerated tree
+# (Linux) will differ byte-wise by exactly these entries -- that is
+# platform reality, not drift. When adding to this list, verify the
+# dep's `os` field in package-lock.json and record the platform here.
+PLATFORM_VARYING_DEPS = {"fsevents"}  # macOS-only; absent on Linux
+
 
 def detect_repo_root() -> Path:
     """cwd is backend/; repo root is its parent. Anchor on docker-compose.yml."""
@@ -143,6 +152,45 @@ def emit_diff(committed: bytes, regenerated: bytes) -> None:
     )
 
 
+def extract_dependency_set(tree_bytes: bytes) -> set:
+    """Extract (path, version) pairs from npm ls --all --json output.
+
+    Path is the nested dependency chain, so "vitest/chokidar/fsevents"
+    is distinct from "some-other-pkg/fsevents". Platform-varying deps
+    (see PLATFORM_VARYING_DEPS) are excluded so that trees generated
+    on macOS and Linux compare equal for the same lockfile.
+
+    Why semantic, not byte comparison: npm ls output varies by platform
+    (fsevents on macOS, absent on Linux) and by npm minor version
+    (formatting). Byte-identity was never achievable for a cross-platform
+    project. What rule 288 wants to catch -- tree stale relative to
+    lockfile -- is a semantic property, not a byte property.
+
+    Discovered at PR #2: the workflow reached this check for the first
+    time (PR #1 aborted earlier at check-prohibited) and failed with
+    "drift not tracked" on a tree that was semantically correct.
+    """
+    d = json.loads(tree_bytes)
+    result = set()
+
+    def walk(node, path):
+        deps = node.get("dependencies") or {}
+        if not isinstance(deps, dict):
+            return
+        for name, info in deps.items():
+            if not isinstance(info, dict):
+                continue
+            if name in PLATFORM_VARYING_DEPS:
+                continue
+            version = info.get("version")
+            if version:
+                result.add((path + name, version))
+            walk(info, path + name + "/")
+
+    walk(d, "")
+    return result
+
+
 def main() -> int:
     # Parse CLI
     skip_git = "--no-git" in sys.argv
@@ -204,13 +252,30 @@ def main() -> int:
         return 1
 
     committed = tree_path.read_bytes()
+
+    try:
+        committed_set = extract_dependency_set(committed)
+        regenerated_set = extract_dependency_set(regenerated)
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        print(f"::error::failed to parse dependency tree for comparison: {e}",
+              file=sys.stderr)
+        return 1
+
+    semantic_identical = (committed_set == regenerated_set)
     byte_identical = (regenerated == committed)
 
     print(
-        f"committed: {len(committed)} bytes; "
-        f"regenerated: {len(regenerated)} bytes; "
-        f"byte_identical={byte_identical}"
+        f"committed: {len(committed)} bytes, {len(committed_set)} deps; "
+        f"regenerated: {len(regenerated)} bytes, {len(regenerated_set)} deps; "
+        f"semantic_identical={semantic_identical} byte_identical={byte_identical}"
     )
+
+    if semantic_identical and not byte_identical:
+        print(
+            "::warning::committed tree differs byte-wise from regenerated "
+            "but semantic dependency set matches (likely platform variance "
+            "or npm formatting). PASS.",
+        )
 
     # Rule 287: lockfile changed but tree didn't → fail
     if lockfile_changed and not tree_changed:
@@ -222,12 +287,15 @@ def main() -> int:
         )
         return 1
 
-    # Byte comparison
-    if byte_identical:
-        print("PASS: committed tree is byte-identical to regenerated")
+    # Semantic comparison — the substantive check
+    if semantic_identical:
+        print("PASS: dependency set matches (platform-independent)")
         return 0
 
-    # Not byte-identical: fail-closed in all remaining cases
+    # Semantic set differs: fail-closed, with named missing/extra entries
+    missing = committed_set - regenerated_set
+    extra = regenerated_set - committed_set
+
     if skip_git:
         reason = "--no-git: committed tree differs from regenerated"
     elif lockfile_changed:
@@ -248,7 +316,18 @@ def main() -> int:
         )
 
     print(f"::error::{reason}", file=sys.stderr)
-    emit_diff(committed, regenerated)
+    if missing:
+        print(f"  missing from regenerated ({len(missing)} entries):", file=sys.stderr)
+        for path, version in sorted(missing)[:20]:
+            print(f"    {path}@{version}", file=sys.stderr)
+        if len(missing) > 20:
+            print(f"    ... and {len(missing) - 20} more", file=sys.stderr)
+    if extra:
+        print(f"  extra in regenerated ({len(extra)} entries):", file=sys.stderr)
+        for path, version in sorted(extra)[:20]:
+            print(f"    {path}@{version}", file=sys.stderr)
+        if len(extra) > 20:
+            print(f"    ... and {len(extra) - 20} more", file=sys.stderr)
     return 1
 
 
