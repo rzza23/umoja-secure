@@ -5,7 +5,7 @@ check-dep-tree-refresh.py -- fail-closed dep-tree refresh discipline check.
 Verifies that artifacts/dep-tree.json is consistent with
 backend/package-lock.json: if the lockfile changed in the PR, the tree
 must have been regenerated; and the committed tree must be byte-
-identical to a fresh `npm ls --all --json` output.
+identical to a fresh `npm ls --all --json --omit=optional` output.
 
 Usage (from backend/ cwd -- matches the workflow's working-directory):
   python3 ../scripts/ci/check-dep-tree-refresh.py [--no-git] [--base-ref=<ref>]
@@ -18,7 +18,7 @@ Implements ADR-CI-GATE-001 §5 lines 284-289:
   1. git diff --name-only <base>...HEAD.
   2. If package-lock.json changed but dep-tree.json did not → fail
      (rule 287: refresh discipline violated).
-  3. Regenerate with `npm ls --all --json`; if byte-identical to
+  3. Regenerate with `npm ls --all --json --omit=optional`; if byte-identical to
      committed → pass; if not byte-identical AND lockfile did not
      change → fail (rule 288: spurious refresh or unpinned state).
   4. Print a first-differing-line excerpt on failure.
@@ -67,7 +67,7 @@ TREE_REL_FROM_BACKEND = "../artifacts/dep-tree.json"
 LOCKFILE_REL_IN_REPO = "backend/package-lock.json"
 TREE_REL_IN_REPO = "artifacts/dep-tree.json"
 
-# Deps that legitimately vary by platform. `npm ls --all --json` only
+# Deps that legitimately vary by platform. `npm ls --all --json --omit=optional` only
 # includes optional deps whose `os` constraint matches the current
 # platform. macOS gets fsevents (via chokidar); Linux omits it. The
 # committed tree (generated on macOS at Z-9) and a CI-regenerated tree
@@ -112,6 +112,15 @@ def git_diff_names(base_ref: str, repo_root: Path) -> set:
 def regenerate_tree() -> bytes:
     """Run npm ls --all --json, return stdout bytes.
 
+    Uses --omit=optional to exclude platform-varying optional
+    dependencies. npm ls --all --json on macOS includes fsevents and
+    darwin-specific esbuild/rollup binaries; on Linux it includes the
+    linux-specific variants instead. Those are optional, os-constrained
+    deps. Excluding them makes the tree deterministic across platforms.
+    The SBOM check (check-prohibited.py) includes optional deps for
+    §11's absolute prohibition -- the tree is the human-review artifact,
+    the SBOM is the machine-check.
+
     Fails closed on non-zero exit. `npm ci` runs before this in CI, so
     the environment is clean and exit should be 0. Exit != 0 in CI
     means the lockfile/node_modules pair is inconsistent, which is
@@ -119,7 +128,7 @@ def regenerate_tree() -> bytes:
     tree was regenerated from the same broken state.
     """
     result = subprocess.run(
-        ["npm", "ls", "--all", "--json"],
+        ["npm", "ls", "--all", "--json", "--omit=optional"],
         capture_output=True,
     )
     if result.returncode != 0:
