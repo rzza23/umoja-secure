@@ -234,7 +234,7 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npm run sbom
-      - run: python3 ../scripts/ci/check-prohibited.py backend/sbom.json
+      - run: python3 ../scripts/ci/check-prohibited.py sbom.json
       - run: npm audit --json > /tmp/audit.json || true
       - run: python3 ../scripts/ci/check-cve-exceptions.py /tmp/audit.json ../docs/security/DEPENDENCY-EXCEPTIONS.md
       - run: python3 ../scripts/ci/check-dep-tree-refresh.py
@@ -285,7 +285,7 @@ Structural JSON parse of SBOM `components`:
 
 1. Compare `git diff --name-only origin/${{ github.base_ref }}...HEAD`
 2. If `backend/package-lock.json` changed but `artifacts/dep-tree.json` did not → fail
-3. Regenerate `artifacts/dep-tree.json` into a temp file (`npm ls --all --json`); if byte-identical to committed → pass; if not byte-identical AND lockfile did not change → fail (spurious refresh or unpinned state)
+3. **Amended 2026-10-22:** Verify the `_meta.lockfile_sha` in `artifacts/dep-tree.json` matches the sha256 of the current `package-lock.json`. Fail if they differ (tree is stale). Do not compare `npm ls` output — it is not platform-reproducible. Use `regen-dep-tree.py` to refresh the tree; §11 enforcement for optional deps remains in the SBOM check.
 4. Output the byte-diff for review if it fails
 
 **Artifacts upload.** `sbom.json` (gitignored, generated per PR), `artifacts/dep-tree.json` (tracked; refreshed only when lockfile changes per `artifacts/README.md`), and `audit.json` are uploaded on `always()` so a failing run leaves evidence for triage.
@@ -304,6 +304,8 @@ Structural JSON parse of SBOM `components`:
 4. **Require linear history.** Not strictly a dependency-gate concern, but prevents merge-commit paths that could skip check re-evaluation.
 
 These settings live in the GitHub repository settings UI. They are a manual setup step recorded in the implementation session's completion notes. The ADR names them as acceptance requirements.
+
+**Plan-Tier Requirement (Added 2026-10-22):** GitHub does not enforce rulesets on private repositories on the Free tier. Z-26-B initially configured this on a private repo and discovered the rulesets were saved but dormant. The repository was made public to activate enforcement. If the repo returns to private without upgrading to GitHub Pro/Team, these settings will silently revert to dormant.
 
 **Verification per implementation session.** Completion criteria include: enable branch protection, open a deliberately-failing throwaway PR, observe the merge button refuses. The ADR names this as the acceptance test that distinguishes "workflow ran" from "gate worked" — the same discipline as P1-038's three-case acceptance (a green case alone cannot distinguish a working gate from a sticky-open one).
 
@@ -368,3 +370,4 @@ Named so a future session doesn't expand:
 | Version | Date | Changes |
 |---|---|---|
 | v0.1 | 2026-10-21 | Initial ADR. Provider (GitHub Actions), enforcement policy (every PR, fail-closed, §6 exception escape valve), staged rollout (backend then Android), workflow design, branch-protection requirements, test matrix, exception-mechanism detail. |
+| v0.2 | 2026-10-22 | Z-26 implementation corrections. §5 line 237 path fix (`sbom.json` not `backend/sbom.json`). §5 rule 288 amended to `lockfile_sha` freshness check (platform-invariant) instead of byte-identical `npm ls`. §6 note added on plan-tier ruleset limitations for private repos. |
