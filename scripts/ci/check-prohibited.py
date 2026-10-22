@@ -15,8 +15,13 @@ annotations so a failing CI run names the offending component.
 
 Implements ADR-CI-GATE-001 §5 lines 265-272:
 
-  1. Filter to runtime-scope components (scope == "required";
-     dev-only deps don't ship -- §11 is about runtime reachability).
+  1. Filter to runtime components. cyclonedx-npm@6.0.1 does not use
+     the `scope: "required"` convention: runtime deps are implicit (no
+     marker), dev deps carry `cdx:npm:package:development: true` in
+     their `properties`, optional deps carry `scope: "optional"`. For
+     §11 (absolute), optional deps ARE included -- any dep that could
+     be installed in any environment is a risk. Only dev-marked
+     components are excluded.
   2. Match group+name against §11 list (structural, not grep).
   3. On match, look up DEPENDENCY-EXCEPTIONS.md §2 for exact
      `<artifact>@<version>`.
@@ -118,6 +123,33 @@ def load_carveouts(path: Path) -> set:
     return carveouts
 
 
+def is_runtime_component(c: dict) -> bool:
+    """Return True if this component ships at runtime.
+
+    cyclonedx-npm@6.0.1 does not emit scope="required" for runtime
+    deps. Its actual convention:
+
+      - Runtime deps: no `cdx:npm:package:development` property.
+        Implicit rather than explicit.
+      - Dev deps: carry `properties` entry with
+        name="cdx:npm:package:development", value="true".
+      - Optional deps: carry scope="optional" (no dev marker).
+
+    For §11's absolute prohibition, optional deps ARE runtime-reachable
+    -- any dep that a user's environment could install is a risk. Only
+    explicit dev-marked components are excluded.
+
+    Discovered at PR #1: the original filter assumed scope="required"
+    per the CycloneDX spec; cyclonedx-npm@6.0.1 doesn't emit that.
+    The gate failed-closed on zero components, which is what caught it.
+    """
+    for prop in c.get("properties", []):
+        if (prop.get("name") == "cdx:npm:package:development"
+                and str(prop.get("value")).lower() == "true"):
+            return False
+    return True
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print("usage: check-prohibited.py <sbom.json> [exceptions.md]",
@@ -147,15 +179,16 @@ def main() -> int:
     carveouts = load_carveouts(exceptions_path)
 
     runtime = [c for c in components
-               if isinstance(c, dict) and c.get("scope") == "required"]
+               if isinstance(c, dict) and is_runtime_component(c)]
 
     # Fail-closed on the meta-case: no runtime components means the
-    # filter cannot run. If cyclonedx-npm's scope marking changes, this
+    # filter cannot run. If cyclonedx-npm's output format changes, this
     # check should fail loudly, not pass vacuously.
     if not runtime:
-        print("::error::no runtime-scope components in SBOM -- check "
-              "cyclonedx-npm scope marking (expected scope: \"required\") -- "
-              "FAIL", file=sys.stderr)
+        print("::error::no runtime components in SBOM -- check "
+              "cyclonedx-npm output format (expected: dev deps marked "
+              "with cdx:npm:package:development property) -- FAIL",
+              file=sys.stderr)
         return 1
 
     print(f"SBOM: {len(components)} components total, "
