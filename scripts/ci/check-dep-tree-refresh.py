@@ -1,62 +1,39 @@
 #!/usr/bin/env python3
 """
-check-dep-tree-refresh.py -- fail-closed dep-tree refresh discipline check.
+check-dep-tree-refresh.py -- verify artifacts/dep-tree.json freshness.
 
-Verifies that artifacts/dep-tree.json is consistent with
-backend/package-lock.json: if the lockfile changed in the PR, the tree
-must have been regenerated; and the committed tree must be byte-
-identical to a fresh `npm ls --all --json --omit=optional` output.
+Two rules:
+
+  287. If backend/package-lock.json changed in this PR,
+       artifacts/dep-tree.json must also change. Catches "forgot to
+       regenerate."
+
+  288. The tree's _meta.lockfile_sha must match sha256 of the current
+       backend/package-lock.json. Catches "stale tree."
+
+Rule 288 was originally "byte-identical to a fresh npm ls regeneration."
+That is infeasible cross-platform: npm ls --all --json includes optional,
+os-constrained deps (fsevents on macOS, @esbuild/darwin-arm64 vs
+@esbuild/linux-x64, lightningcss-*, etc.) whose presence differs by
+operating system. --omit=optional drops only those declared as
+optionalDependencies (7 of 51 in the current tree); the rest are regular
+deps with os constraints. No enumeration makes byte or semantic
+comparison achievable. The lockfile_sha check is deterministic and
+platform-independent, and catches the same class of error.
+
+Regenerate the tree with:
+  cd backend && python3 ../scripts/ci/regen-dep-tree.py
 
 Usage (from backend/ cwd -- matches the workflow's working-directory):
   python3 ../scripts/ci/check-dep-tree-refresh.py [--no-git] [--base-ref=<ref>]
 
-Exit 0 on pass, 1 on fail, 2 on usage error. Emits ::error:: workflow
-annotations on failure with a first-differing-line excerpt for triage.
+Exit 0 on pass, 1 on fail, 2 on usage error.
 
-Implements ADR-CI-GATE-001 §5 lines 284-289:
-
-  1. git diff --name-only <base>...HEAD.
-  2. If package-lock.json changed but dep-tree.json did not → fail
-     (rule 287: refresh discipline violated).
-  3. Regenerate with `npm ls --all --json --omit=optional`; if byte-identical to
-     committed → pass; if not byte-identical AND lockfile did not
-     change → fail (rule 288: spurious refresh or unpinned state).
-  4. Print a first-differing-line excerpt on failure.
-
-ADR AMBIGUITY, RESOLVED FAIL-CLOSED:
-  The ADR does not explicitly state the outcome for "lockfile changed
-  AND tree changed AND not byte-identical to regenerated". Three
-  interpretations exist: (a) pass because the developer touched the
-  tree; (b) fail because the tree is stale; (c) fail because the diff
-  is unverifiable. This implementation takes (b): if the committed
-  tree differs from what the current lockfile would produce, it is
-  stale or partially refreshed. Fail-closed. Flagged for Z-26-B's
-  close commit — ADR §5 line 287-288 may need softening if real-world
-  PRs hit this case legitimately.
-
-BASE REF RESOLUTION:
-  --base-ref=<ref>  explicit override (highest precedence)
-  GITHUB_BASE_REF   CI env var (GitHub Actions sets this on
-                    pull_request runs); prefixed with origin/
-  fallback          origin/main
-
-LOCAL MODE --no-git:
-  Skips git diff (and both rule-287 and rule-288's lockfile branches),
-  runs only the byte comparison. For local smoke testing without
-  requiring throwaway git state. NOT used in CI. Does NOT weaken the
-  byte comparison check.
-
-FAIL-CLOSED ON META-FAILURES: missing tree file, missing
-docker-compose.yml anchor (cwd not backend/), invalid JSON in
-regenerated output, npm ls exit != 0, git diff failure (base ref
-missing, etc.) -- all exit 1. Zero-diff PRs (HEAD == base) pass the
-git diff but still run byte comparison: a tree that mismatches with
-no changes is drift-not-tracked, fail-closed.
-
-Task: TASK-P1-027b (implementation, Z-26-A block 3c)
-ADR:  ADR-CI-GATE-001 §5
+Task: TASK-P1-027b (implementation, Z-26-B)
+ADR:  ADR-CI-GATE-001 section 5 (amended 2026-10-22, see Z-26-B close)
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -66,15 +43,6 @@ from pathlib import Path
 TREE_REL_FROM_BACKEND = "../artifacts/dep-tree.json"
 LOCKFILE_REL_IN_REPO = "backend/package-lock.json"
 TREE_REL_IN_REPO = "artifacts/dep-tree.json"
-
-# Deps that legitimately vary by platform. `npm ls --all --json --omit=optional` only
-# includes optional deps whose `os` constraint matches the current
-# platform. macOS gets fsevents (via chokidar); Linux omits it. The
-# committed tree (generated on macOS at Z-9) and a CI-regenerated tree
-# (Linux) will differ byte-wise by exactly these entries -- that is
-# platform reality, not drift. When adding to this list, verify the
-# dep's `os` field in package-lock.json and record the platform here.
-PLATFORM_VARYING_DEPS = {"fsevents"}  # macOS-only; absent on Linux
 
 
 def detect_repo_root() -> Path:
@@ -91,12 +59,7 @@ def detect_repo_root() -> Path:
 
 
 def git_diff_names(base_ref: str, repo_root: Path) -> set:
-    """Run git diff --name-only base...HEAD, return set of paths.
-
-    Triple-dot = merge-base diff (shows PR's changes only, not drift on
-    base since the branch point). Fails closed on git error (missing
-    remote ref, no history, non-git cwd).
-    """
+    """git diff --name-only base...HEAD; triple-dot is merge-base diff."""
     result = subprocess.run(
         ["git", "diff", "--name-only", f"{base_ref}...HEAD"],
         cwd=repo_root, capture_output=True, text=True,
@@ -109,99 +72,7 @@ def git_diff_names(base_ref: str, repo_root: Path) -> set:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
-def regenerate_tree() -> bytes:
-    """Run npm ls --all --json, return stdout bytes.
-
-    Uses --omit=optional to exclude platform-varying optional
-    dependencies. npm ls --all --json on macOS includes fsevents and
-    darwin-specific esbuild/rollup binaries; on Linux it includes the
-    linux-specific variants instead. Those are optional, os-constrained
-    deps. Excluding them makes the tree deterministic across platforms.
-    The SBOM check (check-prohibited.py) includes optional deps for
-    §11's absolute prohibition -- the tree is the human-review artifact,
-    the SBOM is the machine-check.
-
-    Fails closed on non-zero exit. `npm ci` runs before this in CI, so
-    the environment is clean and exit should be 0. Exit != 0 in CI
-    means the lockfile/node_modules pair is inconsistent, which is
-    itself a defect the byte comparison might miss if the committed
-    tree was regenerated from the same broken state.
-    """
-    result = subprocess.run(
-        ["npm", "ls", "--all", "--json", "--omit=optional"],
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        stderr_excerpt = result.stderr.decode("utf-8", errors="replace").strip()[:500]
-        raise RuntimeError(
-            f"npm ls --all --json exited {result.returncode}: {stderr_excerpt}"
-        )
-    return result.stdout
-
-
-def emit_diff(committed: bytes, regenerated: bytes) -> None:
-    """Print first-differing-line context to stderr (first 100 chars each)."""
-    a = committed.decode("utf-8", errors="replace").splitlines()
-    b = regenerated.decode("utf-8", errors="replace").splitlines()
-    for i, (la, lb) in enumerate(zip(a, b)):
-        if la != lb:
-            print(f"  first diff at line {i+1}:", file=sys.stderr)
-            print(f"    committed:   {la[:100]}", file=sys.stderr)
-            print(f"    regenerated: {lb[:100]}", file=sys.stderr)
-            return
-    # One is a prefix of the other
-    shorter = min(len(a), len(b))
-    longer_label = "committed" if len(a) > len(b) else "regenerated"
-    longer_lines = a if len(a) > len(b) else b
-    extra = longer_lines[shorter][:100] if shorter < len(longer_lines) else ""
-    print(
-        f"  line count differs: committed={len(a)} regenerated={len(b)}; "
-        f"{longer_label} extra line at {shorter+1}: {extra!r}",
-        file=sys.stderr,
-    )
-
-
-def extract_dependency_set(tree_bytes: bytes) -> set:
-    """Extract (path, version) pairs from npm ls --all --json output.
-
-    Path is the nested dependency chain, so "vitest/chokidar/fsevents"
-    is distinct from "some-other-pkg/fsevents". Platform-varying deps
-    (see PLATFORM_VARYING_DEPS) are excluded so that trees generated
-    on macOS and Linux compare equal for the same lockfile.
-
-    Why semantic, not byte comparison: npm ls output varies by platform
-    (fsevents on macOS, absent on Linux) and by npm minor version
-    (formatting). Byte-identity was never achievable for a cross-platform
-    project. What rule 288 wants to catch -- tree stale relative to
-    lockfile -- is a semantic property, not a byte property.
-
-    Discovered at PR #2: the workflow reached this check for the first
-    time (PR #1 aborted earlier at check-prohibited) and failed with
-    "drift not tracked" on a tree that was semantically correct.
-    """
-    d = json.loads(tree_bytes)
-    result = set()
-
-    def walk(node, path):
-        deps = node.get("dependencies") or {}
-        if not isinstance(deps, dict):
-            return
-        for name, info in deps.items():
-            if not isinstance(info, dict):
-                continue
-            if name in PLATFORM_VARYING_DEPS:
-                continue
-            version = info.get("version")
-            if version:
-                result.add((path + name, version))
-            walk(info, path + name + "/")
-
-    walk(d, "")
-    return result
-
-
 def main() -> int:
-    # Parse CLI
     skip_git = "--no-git" in sys.argv
     base_ref = None
     for arg in sys.argv[1:]:
@@ -212,7 +83,6 @@ def main() -> int:
         github_base = os.environ.get("GITHUB_BASE_REF")
         base_ref = f"origin/{github_base}" if github_base else "origin/main"
 
-    # Resolve paths
     try:
         repo_root = detect_repo_root()
     except RuntimeError as e:
@@ -221,11 +91,9 @@ def main() -> int:
 
     tree_path = Path.cwd() / TREE_REL_FROM_BACKEND
     if not tree_path.exists():
-        print(f"::error::committed dep-tree not found: {tree_path}",
-              file=sys.stderr)
+        print(f"::error::committed dep-tree not found: {tree_path}", file=sys.stderr)
         return 1
 
-    # Determine changed files
     if skip_git:
         print("::notice::--no-git: skipping git diff (local smoke only)")
         lockfile_changed = False
@@ -243,101 +111,66 @@ def main() -> int:
             f"lockfile_changed={lockfile_changed}, tree_changed={tree_changed}"
         )
 
-    # Regenerate
-    try:
-        regenerated = regenerate_tree()
-    except RuntimeError as e:
-        print(f"::error::{e}", file=sys.stderr)
-        return 1
-
-    # Reject empty regen as fail-closed (npm ls always emits at least "{}")
-    try:
-        parsed = json.loads(regenerated)
-    except json.JSONDecodeError as e:
-        print(f"::error::npm ls output is not valid JSON: {e}", file=sys.stderr)
-        return 1
-    if not isinstance(parsed, dict):
-        print("::error::npm ls output is not a JSON object", file=sys.stderr)
-        return 1
-
-    committed = tree_path.read_bytes()
-
-    try:
-        committed_set = extract_dependency_set(committed)
-        regenerated_set = extract_dependency_set(regenerated)
-    except (json.JSONDecodeError, KeyError, TypeError) as e:
-        print(f"::error::failed to parse dependency tree for comparison: {e}",
-              file=sys.stderr)
-        return 1
-
-    semantic_identical = (committed_set == regenerated_set)
-    byte_identical = (regenerated == committed)
-
-    print(
-        f"committed: {len(committed)} bytes, {len(committed_set)} deps; "
-        f"regenerated: {len(regenerated)} bytes, {len(regenerated_set)} deps; "
-        f"semantic_identical={semantic_identical} byte_identical={byte_identical}"
-    )
-
-    if semantic_identical and not byte_identical:
-        print(
-            "::warning::committed tree differs byte-wise from regenerated "
-            "but semantic dependency set matches (likely platform variance "
-            "or npm formatting). PASS.",
-        )
-
-    # Rule 287: lockfile changed but tree didn't → fail
+    # Rule 287
     if lockfile_changed and not tree_changed:
         print(
-            f"::error::{LOCKFILE_REL_IN_REPO} changed but "
-            f"{TREE_REL_IN_REPO} did not. Regenerate with: "
-            f"cd backend && npm ls --all --json > ../artifacts/dep-tree.json",
+            f"::error::{LOCKFILE_REL_IN_REPO} changed but {TREE_REL_IN_REPO} "
+            f"did not. Regenerate with: cd backend && "
+            f"python3 ../scripts/ci/regen-dep-tree.py",
             file=sys.stderr,
         )
         return 1
 
-    # Semantic comparison — the substantive check
-    if semantic_identical:
-        print("PASS: dependency set matches (platform-independent)")
-        return 0
+    # Rule 288
+    try:
+        tree = json.loads(tree_path.read_bytes())
+    except json.JSONDecodeError as e:
+        print(f"::error::committed dep-tree is not valid JSON: {e}", file=sys.stderr)
+        return 1
+    if not isinstance(tree, dict):
+        print("::error::committed dep-tree is not a JSON object", file=sys.stderr)
+        return 1
 
-    # Semantic set differs: fail-closed, with named missing/extra entries
-    missing = committed_set - regenerated_set
-    extra = regenerated_set - committed_set
+    meta = tree.get("_meta")
+    if not isinstance(meta, dict):
+        print(
+            "::error::committed dep-tree has no _meta block. "
+            "Regenerate with: cd backend && python3 ../scripts/ci/regen-dep-tree.py",
+            file=sys.stderr,
+        )
+        return 1
 
-    if skip_git:
-        reason = "--no-git: committed tree differs from regenerated"
-    elif lockfile_changed:
-        reason = (
-            "lockfile changed, tree changed, but regenerated tree differs — "
-            "tree is stale or partially refreshed (fail-closed per ADR §5 "
-            "line 287-288 ambiguity)"
+    expected_sha = meta.get("lockfile_sha")
+    if not isinstance(expected_sha, str) or len(expected_sha) != 64:
+        print(
+            f"::error::committed dep-tree _meta.lockfile_sha is missing or "
+            f"malformed (expected 64-char hex, got {expected_sha!r})",
+            file=sys.stderr,
         )
-    elif tree_changed:
-        reason = (
-            "tree changed but lockfile did not — spurious refresh or "
-            "unpinned state"
-        )
-    else:
-        reason = (
-            "tree differs from regenerated with no lockfile or tree changes "
-            "in the PR — drift not tracked"
-        )
+        return 1
 
-    print(f"::error::{reason}", file=sys.stderr)
-    if missing:
-        print(f"  missing from regenerated ({len(missing)} entries):", file=sys.stderr)
-        for path, version in sorted(missing)[:20]:
-            print(f"    {path}@{version}", file=sys.stderr)
-        if len(missing) > 20:
-            print(f"    ... and {len(missing) - 20} more", file=sys.stderr)
-    if extra:
-        print(f"  extra in regenerated ({len(extra)} entries):", file=sys.stderr)
-        for path, version in sorted(extra)[:20]:
-            print(f"    {path}@{version}", file=sys.stderr)
-        if len(extra) > 20:
-            print(f"    ... and {len(extra) - 20} more", file=sys.stderr)
-    return 1
+    lockfile_path = repo_root / "backend" / "package-lock.json"
+    if not lockfile_path.exists():
+        print(f"::error::lockfile not found: {lockfile_path}", file=sys.stderr)
+        return 1
+    actual_sha = hashlib.sha256(lockfile_path.read_bytes()).hexdigest()
+
+    if expected_sha != actual_sha:
+        print(
+            f"::error::dep-tree is stale: _meta.lockfile_sha={expected_sha[:16]}... "
+            f"but current package-lock.json hash={actual_sha[:16]}... "
+            f"Regenerate with: cd backend && python3 ../scripts/ci/regen-dep-tree.py",
+            file=sys.stderr,
+        )
+        return 1
+
+    print("PASS: dep-tree _meta.lockfile_sha matches current lockfile")
+    if tree_changed and not lockfile_changed and not skip_git:
+        print(
+            "::warning::tree changed but lockfile did not -- spurious "
+            "refresh, review if intentional",
+        )
+    return 0
 
 
 if __name__ == "__main__":
