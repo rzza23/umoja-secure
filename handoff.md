@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-21 (Session Z-25 — **P1-027b decision DONE** at `f6a0c20`. `ADR-CI-GATE-001` (369 lines, 10 sections) resolves the CI-provider blocker that §B P1-027b line 75-76 named. Two rulings: (D1) provider = GitHub Actions — native integration eliminates auth surface; `services: postgres:` gives Postgres 16; `android-actions/setup-android` matches AGP 9.4.1 / Kotlin 2.2.10 / Gradle 9.8.0; branch protection integrates natively and IS the actual enforcement. (D2) enforcement = every PR, fail-closed — §B line 71-74 is explicit "per-PR"; a transitive CVE can be disclosed against a dep no PR touches; exception escape valve is Build Master §6 DEPENDENCY-EXCEPTIONS.md §1 with expiry ≤90 days, not silence. Fail-closed on the gate itself. Three load-bearing sections: §6 (branch protection is the merge refusal, not the workflow), §7 (test matrix maps §B four TEST-CI-* to exercise procedures), §8 (CVE exceptions time-limited, §11 carve-outs semantic not time-limited; fail-closed on unreadable exception file). Staged rollout per §B line 76-78: Z-26 backend workflow + throwaway-branch end-to-end; Z-27 Android workflow + end-to-end. Incidental §7 fix from Z-24: JVM-method-names bullet tail was displaced when the new §7 bullets were inserted; corollary tightened, orphan removed. Doc-only. Counts unchanged (backend 291, JVM 300/314). **P1-035 3/4** (035d hardware-blocked), **P1-033 4/5** (033e hardware-blocked). **Next: Z-26** backend workflow implementation, OR hardware sessions for 033e/035d, OR nothing.)
+Last updated: 2026-10-22 (Session Z-26 — **P1-027b DONE** at `b902ad5`. The backend CI dependency gate is implemented and fully proven on GitHub Actions. Staged rollout: Z-26-A (workflow + scripts), Z-26-B (branch protection, PR acceptance). Discovered four class-level defects in the check scripts, all fixed by invariants (lockfile_sha). Counts unchanged (backend 291, JVM 300/314). **P1-027b Executed** (Z-27 Android workflow pending). **Next: Z-27** (Android workflow) OR 035d/033e (hardware) OR P1-036 (client handlers) OR nothing.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -5623,6 +5623,44 @@ for 033e/035d, OR nothing.
 
 ---
 
+### Session Z-26 — TASK-P1-027b DONE: backend dependency gate (2026-10-21/22)
+
+Backend CI dependency gate implemented and fully accepted. Five PRs, one merge, four CI-script defects found and fixed.
+
+**What shipped.**
+- `.github/workflows/dependency-gate.yml`: Runs on PRs. Node 24, Postgres 16. Steps: npm ci, SBOM, three check scripts, npm test.
+- `check-prohibited.py`: Structural SBOM parse. Checks §11 list. Exact-version carve-outs from DEPENDENCY-EXCEPTIONS.md.
+- `check-cve-exceptions.py`: Parses `npm audit` JSON. Fails on HIGH/CRITICAL without an active, unexpired exception in DEPENDENCY-EXCEPTIONS.md §1.
+- `check-dep-tree-refresh.py`: Rule 287 (lockfile changed → tree changed) + Rule 288 (tree `_meta.lockfile_sha` matches current lockfile).
+- `regen-dep-tree.py`: Generates tree with `_meta` block.
+- `ADR-CI-GATE-001` amended to v0.2 (path fix, lockfile_sha rule, plan-tier note).
+
+**The 4 fail-closed discoveries (the CI gate debugging itself).**
+1. PR #1 (throwaway): `check-prohibited.py` assumed CycloneDX `scope: required`. cyclonedx-npm@6.0.1 uses `cdx:npm:package:development` property instead. Fail-closed on zero components caught it.
+2. PR #2 run 1: `check-dep-tree-refresh.py` assumed `npm ls` is byte-reproducible. macOS `fsevents` vs Linux broke it.
+3. PR #2 run 2: `--omit=optional` fix caught 7 of 51 varying deps. Not the class.
+4. PR #2 run 4: `lockfile_sha` invariant. The class fix (Z-24's `str.count` lesson applied to CI design).
+
+**PR sequence.**
+- PR #1: Throwaway clean test. Failed at check-prohibited.
+- PR #2: Real fix PR. Failed three times, then green at `422f508` (merged `b902ad5`). Proved TEST-CI-CLEAN-PASSES.
+- PR #3: Deliberately pin `ws@8.18.0`. Failed at check-cve-exceptions. Proved TEST-CI-HIGH-CVE-BLOCKED.
+- PR #4: Deliberately add `firebase-admin`. Failed at check-prohibited. Proved TEST-CI-PROHIBITED-BLOCKED.
+
+**Plan-tier limitation resolved.** Branch protection rulesets on private repos require GitHub Pro. The repo was made public to activate enforcement. Tested: green PRs enable merge; red PRs disable merge.
+
+**Process lessons earned (now in §7).**
+- `path` is a zsh special variable (clobbers `$PATH`).
+- A fix that enumerates instances (fsevents, --omit=optional) will fail the next instance. Find the invariant.
+- `git checkout -b` failure does not abort the shell.
+- `mergeable_state` via API is async/stale; UI is authoritative.
+
+**Filing P1-043.** Libsignal version pin + AGPL posture check is a distinct layer from general dependency review. Filed as a proposed task with an open question (prose parse vs machine-readable file).
+
+**Next.** Z-27 (Android workflow for TEST-ANDROID-DEP-PARSE) OR P1-035d/P1-033e (hardware) OR P1-036.
+
+---
+
 ## 4. Known issues
 
 ### KI-001 (FIXED): OkHttp cannot reach .onion through SOCKS
@@ -7573,6 +7611,12 @@ Rebuild after flipping — read at HttpClient construction time.
   PROVISIONING-CEREMONY fragmentation — a track record, not a new
   failure class. What's new this session: the failure shape (YAML
   block) is identifiable before the write, not after.
+
+
+- **`path` is a zsh special variable.** In zsh, `$path` is an array tied to `$PATH`. Assigning `path="..."` rebinds `$PATH`. A loop variable named `path` silently corrupted the shell environment, exporting a broken `$PATH` to all child processes. Use `fp`, `p`, `item`. Same for `fpath`, `manpath`, `cdpath`, `mailpath`.
+- **A fix that enumerates instances fails the next instance.** `PLATFORM_VARYING_DEPS={"fsevents"}` missed esbuild. `--omit=optional` missed regular `os`-constrained deps. Ask what the class is and find a representation invariant to it (e.g., `lockfile_sha`).
+- **`git checkout -b` failure does not abort the shell.** If the branch exists, the command fails but the script continues. Guard with `[ "$(git branch --show-current)" = "$BRANCH" ] || exit 1`.
+- **`mergeable_state` via the GitHub `/pulls?head=...` list endpoint is often `None`.** Use `/pulls/{number}`. Even then, it is cached asynchronously. The browser UI computes it on page load and is authoritative.
 
 Current verified state: **300 Android JVM tests (client flavor) / 314 (signing flavor)** (2026-10-21),
 **71 androidTest** (2026-10-18, 8 files, from connectedAndroidTest XML

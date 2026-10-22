@@ -1,9 +1,9 @@
-# US-TASK-P1-001-v0.14 — Phase 1 Task Registry Reconciliation
+# US-TASK-P1-001-v0.15 — Phase 1 Task Registry Reconciliation
 
 Document ID: US-TASK-P1-001
-Version: 0.14
+Version: 0.15
 Date: October 2026
-Supersedes: v0.13
+Supersedes: v0.14
 Purpose: Reconcile the Phase 1 task registry with UMOJA-SECURE-BUILD-MASTER.md v1.4.2.
 Authority: Derived from US-MASTER-001 + US-ADD-001. Cannot override them.
 
@@ -95,7 +95,12 @@ added)
 - TEST-CI-CLEAN-PASSES
 - TEST-ANDROID-DEP-PARSE
 
-**Status:** **DECISION DONE 2026-10-21** — provider chosen and documented in ADR-CI-GATE-001 (`f6a0c20`). Implementation split: Z-26 (backend workflow + end-to-end), Z-27 (Android workflow + end-to-end), per §B line 76-78's staged rollout instruction.
+**Status:** **EXECUTED 2026-10-22** (Backend half). PR #2 merged (`b902ad5`). Z-26 proved both green and red paths on GitHub Actions. Z-27 (Android workflow) remains.
+
+**Implementation notes (v0.15, 2026-10-22):**
+- The workflow and three check scripts are live on `main`.
+- Discovered and fixed during implementation: CycloneDX `scope: required` is missing in cyclonedx-npm@6.0.1 (replaced with `cdx:npm:package:development` filter); `npm ls` output is not byte-reproducible cross-platform (replaced byte comparison with `lockfile_sha` invariant check).
+- Test matrix proven: TEST-CI-CLEAN-PASSES (PR #2), TEST-CI-HIGH-CVE-BLOCKED (PR #3), TEST-CI-PROHIBITED-BLOCKED (PR #4). TEST-ANDROID-DEP-PARSE deferred to Z-27.
 
 **Implementation notes (v0.14, 2026-10-21):**
 
@@ -612,6 +617,31 @@ P1-035 is four sessions of work, not one. Sub-tasks numbered 035a–035d. Each l
 
 ---
 
+### TASK-P1-043: Libsignal pin + AGPL posture CI check
+
+**Phase:** 1
+**Priority:** Medium
+**Dependencies:** TASK-P1-027b, TASK-P1-005, ADR-SIGNAL-UPGRADE-001
+**Security classification:** Internal
+
+**Objective and non-goals:**
+- Add a fourth CI check script (`check-libsignal-pin.py`) that verifies the `libsignal` version in `android/gradle/libs.versions.toml` matches the version approved in `ADR-SIGNAL-UPGRADE-001`.
+- Verify the AGPLv3 license posture (the artifact license hasn't material shifted).
+- **Open question:** How is the "approved version" read? Option A: Parse the prose in `ADR-SIGNAL-UPGRADE-001` §5.4 (brittle). Option B: A machine-readable file like `docs/crypto/approved-libsignal-version.txt` (robust). This must be decided before implementation.
+- Do NOT implement the CI workflow changes (Z-27 owns the Android workflow).
+
+**Acceptance criteria:**
+- [ ] Approved version source is decided and documented.
+- [ ] Check fails if the pinned version in `libs.versions.toml` differs from the approved version.
+- [ ] Check fails if AGPL-NOTICE is missing or malformed.
+
+**Required tests:**
+- TEST-CI-LIBSIGNAL-MISMATCH-BLOCKED
+
+**Status:** Proposed
+
+---
+
 ## §B — UPDATED TASKS
 
 ### TASK-P1-004 — Extended
@@ -892,7 +922,8 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-025 | Admin provisioning tool | 3.5 | New |
 | TASK-P1-026 | Authorization matrix + verification | 3.5 | Updated |
 | TASK-P1-027a | SBOM + dependency review, per-session | 1 | Executed 2026-10-19 |
-| TASK-P1-027b | CI enforcement gate for dep review | 1 | Decision 2026-10-21 |
+| TASK-P1-027b | CI enforcement gate for dep review | 1 | Executed 2026-10-22 |
+| TASK-P1-043 | Libsignal pin + AGPL posture CI check | 1 | New |
 | TASK-P1-028 | Log redaction audit | 10 | New |
 | TASK-P1-029a | Signing-key custody — design | 1 | Executed 2026-10-19 |
 | TASK-P1-029b | Signing-key custody — implementation | 1 | Executed 2026-10-19 |
@@ -917,7 +948,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-041 | Failed-verification operator logging | 1 | Proposed |
 | TASK-P1-042 | WS revocation listener reconnect + re-reconcile | 1 | DONE |
 
-**Total Phase 1 task identifiers:** 52 (001–020, 021a, 021b, 022–026, 027a, 027b, 028, 029a, 029b, 030–032, 033a–033e, 034, 035a–035d, 036–042).
+**Total Phase 1 task identifiers:** 53 (001–020, 021a, 021b, 022–026, 027a, 027b, 028, 029a, 029b, 030–032, 033a–033e, 034, 035a–035d, 036–042).
 
 **Execution order (dependency-respecting):**
 TASK-P1-001 → TASK-P1-002 → TASK-P1-027 → TASK-P1-032 → TASK-P1-003 → TASK-P1-034 → TASK-P1-004 → TASK-P1-005 → TASK-P1-006 → TASK-P1-013 → TASK-P1-007 → TASK-P1-008 → TASK-P1-025 → TASK-P1-026 → TASK-P1-029 → TASK-P1-033 → TASK-P1-035 → TASK-P1-014 → TASK-P1-015 → TASK-P1-016 → TASK-P1-009 → TASK-P1-010 → TASK-P1-011 → TASK-P1-012 → TASK-P1-019 → TASK-P1-020 → TASK-P1-021a → TASK-P1-021b → TASK-P1-030 → TASK-P1-017 → TASK-P1-018 → TASK-P1-022 → TASK-P1-023 → TASK-P1-024 → TASK-P1-028 → TASK-P1-031
