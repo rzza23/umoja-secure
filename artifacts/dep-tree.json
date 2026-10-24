@@ -2297,16 +2297,16 @@
       }
     },
     "zod": {
-      "version": "3.23.8",
-      "resolved": "https://registry.npmjs.org/zod/-/zod-3.23.8.tgz",
+      "version": "4.6.7",
+      "resolved": "https://registry.npmjs.org/zod/-/zod-4.6.7.tgz",
       "overridden": false
     }
   },
   "_meta": {
-    "lockfile_sha": "50437ef1b44722ae1ebf2ab3dcc5426e8ec4bd94c494605f8c34039cb5a4f32d",
+    "lockfile_sha": "251a588b067a5536e8cf2f4dcc5637bc6ff2fa5f90a9a264236875d510b1cc5f",
     "lockfile_path": "backend/package-lock.json",
     "schema": "umoja-dep-tree.v1",
-    "generated_at_utc": "2026-10-22T22:52:25Z",
+    "generated_at_utc": "2026-10-24T13:11:32Z",
     "generated_by": "scripts/ci/regen-dep-tree.py"
   }
 }
