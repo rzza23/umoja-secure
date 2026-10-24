@@ -1,6 +1,6 @@
 # Umoja Secure — Handoff
 
-Last updated: 2026-10-22 (Session Z-26 — **P1-027b DONE** at `b902ad5`. The backend CI dependency gate is implemented and fully proven on GitHub Actions. Staged rollout: Z-26-A (workflow + scripts), Z-26-B (branch protection, PR acceptance). Discovered four class-level defects in the check scripts, all fixed by invariants (lockfile_sha). Counts unchanged (backend 291, JVM 300/314). **P1-027b Executed** (Z-27 Android workflow pending). **Next: Z-27** (Android workflow) OR 035d/033e (hardware) OR P1-036 (client handlers) OR nothing.)
+Last updated: 2026-10-22 (Session Z-27 — doc hygiene + IC_* helper dedupe. **Not a feature session.** Cleaned four stale backlog items (KI-016 continuation: `IdentityChangeAck.kt` 3 file-private helpers removed, 4 call sites use shared `Base64UrlValidation.kt`; Z-21 file-count; Z-21 ANSI grep; KI-018 row). Reconciled header-vs-registry drift on P1-027b: header said "DONE" but registry says "Backend half Executed 2026-10-22; Android workflow Z-28 pending" — header corrected to match registry. Also lands `658b5d4` (Z-26 tail toggle-workflow doc) in a session entry for git-log map accuracy. Counts unchanged: backend 291, JVM 300/314, androidTest 71. **Next: Z-28** (P1-027b Android workflow) OR 035d/033e (hardware) OR nothing.)
 
 Purpose: Enable a new AI agent or developer session to pick up the
 project without re-reading the entire chat history.
@@ -340,7 +340,6 @@ enrolling device's QR payload includes the wipe-confirmation pubkey).
 An early `POST /enrollment` during the bootstrap returned client-side
 `network_error`. This was transient. A subsequent attempt reached the
 backend over the onion:
-
 
 ### TASK-P1-019 — enrolling-device QR generator (commit `a4ec1f9`)
 
@@ -1878,7 +1877,6 @@ check). Per ADR §9 v0.2 item 2, `lookupSession` does not
 currently differentiate expired from revoked; the backend change
 is confirmed needed.
 
-
 ### Session R — TASK-P1-040-A DONE (2026-10-18)
 
 Backend half of ADR-HARDENING-001 §2's revoked-vs-expired ruling
@@ -1952,7 +1950,6 @@ recursion guard, retry-original-call interceptor, AppRoot routing
 rewrite — is 040-B through 040-E, each comparable to 040-A in
 scope. Session R closes with the backend half done and verified,
 not with the task marked complete.
-
 
 ### Session R-2 — TASK-P1-040-B DONE (2026-10-18)
 
@@ -2041,7 +2038,6 @@ greenfield work ADR §2 presupposed existed; `HttpClient.kt` has
 zero 401 handling, each API catches its own errors via domain
 exceptions) is R-3's second commit. 040-E (emulator acceptance
 for expired/revoked/network paths) is R-3's third.
-
 
 ### Session R-3 — TASK-P1-040-C DONE (2026-10-18)
 
@@ -2182,7 +2178,6 @@ session, revoked device, network-failure paths) needs both
 040-D and the state machine's triggering chain. R-4 opens on
 040-D.
 
-
 ### Session R-4 — TASK-P1-040-D DONE (2026-10-18)
 
 HttpClient 401 interceptor wired end-to-end. TEST-SESSION-
@@ -2289,7 +2284,6 @@ test (`TEST-SESSION-NETWORK-DURING-REAUTH`) still need manual
 emulator verification; both require the interceptor in place,
 which landed this session. R-5 opens on 040-E.
 
-
 ### Session R-5 — TASK-P1-040-E DONE (2026-10-18)
 
 Final acceptance for TASK-P1-040. Two manual emulator tests, both
@@ -2367,7 +2361,6 @@ acceptance criterion and required test now accounted for:
 companion commit) noting 040's completion and the 037-041 chain
 being closed except 041.
 
-
 ### Session S-1 — bootstrap-enrollment-token.sh DONE (2026-10-18)
 
 Backlog item filed at Session R-4 close, implemented here.
@@ -2424,7 +2417,6 @@ Three modes:
 
 **Counts.** Android JVM 198 unchanged. Backend 250 unchanged.
 Script-only session.
-
 
 ### Session T-1 — TASK-P1-041 DONE (2026-10-18)
 
@@ -2539,7 +2531,6 @@ range-based structural anchors. Same class as Session C's
 `8adde6b` (commit message overstates scope); not amended
 because already pushed. The correct fix is the follow-up with
 honest framing, not a force-push.
-
 
 ### Session U-1 — MessageStore leak + backlog hygiene (2026-10-18)
 
@@ -2658,7 +2649,6 @@ One real defect fixed, three backlog items closed. Three commits.
 behavior; the tests prove it). Backend 250 unchanged. Full-suite
 green after every command.
 
-
 ### Session U-2 — backlog finish (2026-10-18)
 
 Two code+doc commits + one handoff. **Backlog closed except for
@@ -2732,7 +2722,6 @@ one real defect (SQLite leak) fixed at U-1. Three dedup/extraction
 backlog items closed at U-1 and U-2. USER-ONBOARDING.md closed at
 U-2. What remains is Phase 2 preparation (choice, not obligation)
 and standing conditions (KI-005, double-fetch, instrumented tests).
-
 
 ### Session U-3 — KI-005 sweep: AUTH-SPEC-001 v0.1 → v0.2 + TASK-P1-042 filed (2026-10-18)
 
@@ -2900,7 +2889,6 @@ claim's phrasing before closing (see §7 addition below).
 US-MASTER-001. Each is one session of reconnaissance-plus-
 amendment. No blocking work depends on any of them.
 
-
 ### Session W-1 — KI-005 sweep COMPLETE: US-ADD-001 v0.3 + US-MASTER-001 v0.2 (2026-10-18)
 
 Third and final KI-005 sweep session (U-3 AUTH-SPEC-001, V-1
@@ -3001,7 +2989,6 @@ One new task could have been filed (P1-042 already existed from U-3);
 zero new tasks filed in W-1. One document under `USER-ONBOARDING.md`
 mentioned as needed (U-2 wrote it; the sweep confirmed its inclusion
 in US-MASTER-001 §7).
-
 
 ### Session X-1 — TASK-P1-042 DONE: WS revocation listener reconnect + re-reconcile (2026-10-18)
 
@@ -3131,7 +3118,6 @@ three standing conditions (double-fetch dedupe, instrumented
 Compose tests, KI-005 re-sweep cadence as needed). No task in
 the registry is `Proposed` for a blocking gap.
 
-
 ### Session Y-1 — doc-hygiene pass closing X-1's own last paragraph (2026-10-18)
 
 X-1's close file named two §7 lessons as "belong in §7 at the next
@@ -3195,8 +3181,6 @@ persistent tracker; the handoff is.
 **Counts.** Backend 254, Android JVM 212, androidTest 46 — all
 unchanged (doc-only session).
 
-
-
 ### Session Z-1 — two standing deferrals addressed (2026-10-18)
 
 Both U-2 standing deferrals closed or re-scoped on evidence, not
@@ -3254,7 +3238,6 @@ count window) and one about test infrastructure (Espresso version).
 Each was caught by a verification step rather than shipped, which is
 the honest summary: the discipline worked, the initial assumptions did
 not always hold.
-
 
 ### Session Z-2 — Compose refactor arc, session A: AdminScreen extract (2026-10-18)
 
@@ -3336,7 +3319,6 @@ exercise it.
 **Counts.** All unchanged: Backend 254, Android JVM 212, androidTest
 57. This session adds no tests — that's session B and D.
 
-
 ### Session Z-3 — Compose refactor arc, session B: AdminScreenStateTest (2026-10-18)
 
 Second of four planned sessions for the Compose test coverage deferral
@@ -3388,7 +3370,6 @@ Z-2's §3 entry.
 
 **One §7 lesson earned** (the "already exists?" check must target the
 new entry identifier, not strings the entry references). See §7 below.
-
 
 ### Session Z-4 — Compose refactor arc, session C: ChatViewModel testability + tests (2026-10-18)
 
@@ -3478,7 +3459,6 @@ used ASCII-only patterns per the seventh §7 lesson; the C7 evidence gate
 is a practice rather than a new failure-class lesson). Adding lessons for
 methodical sessions dilutes the section's signal — recording the absence
 is honest.
-
 
 ### Session Z-5 — Compose refactor arc, session D: ChatScreenTest, ARC COMPLETE (2026-10-18)
 
@@ -3575,7 +3555,6 @@ in A and C) emulator acceptance.
 
 **Three new §7 lessons earned** (the measurement chain) — see below.
 
-
 ### Session Z-6 — Phase 2 opening: ADR-SIGNAL-UPGRADE-001 (2026-10-18)
 
 First Phase-2 session. Design-only. One commit: `aa6860e` —
@@ -3664,7 +3643,6 @@ because the existing one covers it exactly.
 **Counts.** Backend 254, Android JVM 244, androidTest 71 — all
 unchanged (docs-only session).
 
-
 ### Session Z-7 — ADR approval round: ADR-SIGNAL-UPGRADE-001 v0.1 → v0.2 (2026-10-18)
 
 Second Phase-2 session. Doc-only. One commit: `5fd44aa` — ADR v0.2,
@@ -3750,7 +3728,6 @@ citation-by-primary-source, not citation-by-prior-claim.
 
 **Counts.** Backend 254, Android JVM 244, androidTest 71 — all
 unchanged.
-
 
 ### Session Z-8 — Phase 2, session P2-3: libsignal upgrade executed (2026-10-18/19)
 
@@ -3839,7 +3816,6 @@ documented, JNI documented, version review documented).
 **Counts.** Backend 254, Android JVM 244, androidTest 71 — all
 unchanged (only version swap + mechanical adaptation; no test adds).
 
-
 ### Session Z-9 — Phase 2, TASK-P1-027(a): dependency review executed (2026-10-19)
 
 Fourth Phase-2 session. Two commits: `9a1173e` (ws CVE fix) +
@@ -3915,7 +3891,6 @@ REAL security finding of the project, not a doc inconsistency.
 
 **Counts.** Backend 254, Android JVM 244, androidTest 71 per
 emulator — all unchanged (fix + docs only; no test adds).
-
 
 ### Session Z-10 — Phase 2, handoff §8 refresh (bounded) (2026-10-19)
 
@@ -4002,7 +3977,6 @@ prevents a future reader from thinking the refresh missed them.
 **Counts.** Backend 254, Android JVM 244, androidTest 71 — all
 unchanged (doc-only session).
 
-
 ### Session Z-11 — Phase 2, suspend HTTP surface refactor (2026-10-19)
 
 Sixth Phase-2 session, and the last substantive Phase-2 item. One
@@ -4080,7 +4054,6 @@ Applied, not re-learned.
 **Counts.** Backend 254 (Android-only refactor), Android JVM 244,
 androidTest 71 per emulator — all unchanged.
 
-
 ### Session Z-12 — Phase 1 DoD, TASK-P1-029 design: KEY-CUSTODY.md (2026-10-19)
 
 Seventh Phase-1-DoD session (after Phase 2 closure). One commit:
@@ -4155,7 +4128,6 @@ ceremony) has the ceremony spec it will operationalize.
 
 **Counts.** Backend 254, Android JVM 244, androidTest 71 per
 emulator — all unchanged (doc-only session).
-
 
 ### Session Z-13 — TASK-P1-029b DONE: ProvisioningKeys DEBUG/PROD split (2026-10-19)
 
@@ -4248,7 +4220,6 @@ test key."
 **Counts.** Backend 254 unchanged. Android JVM 244 → 246 (+2).
 androidTest 71 unchanged. Registry v0.9 unchanged (029b status:
 New → Executed 2026-10-19; no count change — split was at Z-12).
-
 
 ### Session Z-14 — TASK-P1-033 SPLIT into 033a–033e (2026-10-20)
 
@@ -4363,7 +4334,6 @@ Env config `PROVISIONING_PUBKEY_B64U` test default; required in
 production. Rot seam named in KDoc (single key today; P1-036 extends
 to `{previous, current}` set). GET /me/matrix KDoc gains the
 verify-on-write/relay-on-read asymmetry note in the same commit.
-
 
 ### Session Z-15 — TASK-P1-033a DONE: POST /admin/matrices/:device_id (2026-10-20)
 
@@ -4480,7 +4450,6 @@ AdminScreen UI: QR render of canonical + hash, signature ingest (QR
 scanner or paste field per P1-025's debug path), push button. Error
 states mirror `AdminApiException` taxonomy. ~1 session.
 
-
 ### Session Z-16 — TASK-P1-033b DONE: admin-side signing flow (2026-10-20)
 
 Second code session of the P1-033 arc. Admin app can now construct,
@@ -4571,7 +4540,6 @@ hash, sign SHA-256 digest via `MatrixSigner.sign()` with provisioning
 key from `DeviceKeyManager`, QR-emit signature. ~1 session. Physical
 network isolation is KEY-CUSTODY §4.3's domain; `SIGNING_ONLY`
 guards are defense-in-depth.
-
 
 ### Session Z-17 — TASK-P1-033c DONE: offline signing app (2026-10-20)
 
@@ -4703,7 +4671,6 @@ two-person procedure with paper log, dumpsys connectivity capture
 chain of custody (§4.4). Links to KEY-CUSTODY §2's 8-step
 generation ceremony. Names the backend `PROVISIONING_PUBKEY_B64U`
 env config step (033a's dependency). Doc-only, ~1 session.
-
 
 ### Session Z-18 — TASK-P1-033d DONE: provisioning ceremony runbook (2026-10-20)
 
@@ -4892,7 +4859,6 @@ decision pending. The P1-021b re-scope moves P1-021a (emergency lock)
 off the critical path as a distinct task; P1-035 was already next,
 unaffected.
 
-
 ### Session Z-20 — TASK-P1-035 SPLIT into 035a–035d (2026-10-20)
 
 Scoping session. Registry v0.11 → v0.12, total 49 → 52 (+3 net:
@@ -5016,7 +4982,6 @@ and `key_revocation` types, `canonical-recovery-notice-test-vectors.json`,
 generator extension, ~12 tests. Deps 029, 033 are done. 035a can open
 fresh next session.
 
-
 ### Session Z-21 — TASK-P1-035a DONE: recovery-notice schema + vectors + tests (2026-10-20)
 
 First code session of the P1-035 arc. Backend signing-side schema
@@ -5108,7 +5073,6 @@ vector tests fail rather than the drift shipping silently.
 cross-language byte-identity tests on 035a's 5 vectors. ~1 session.
 Blocks P1-036 (client-side parsing). 035c runbook and 035d drill
 remain.
-
 
 ### Session Z-22 — TASK-P1-035b DONE: Kotlin recovery-notice schema (2026-10-20)
 
@@ -5230,7 +5194,6 @@ custodian), split device passcode, Safe #2 different physical
 location, annual rotation per KEY-CUSTODY §3.5, compromise →
 physical re-provisioning per §3.6. Paper log template.
 Doc-only, ~1 session.
-
 
 ### Session Z-23 — TASK-P1-035c DONE: recovery ceremony runbook (2026-10-20)
 
@@ -5658,6 +5621,100 @@ Backend CI dependency gate implemented and fully accepted. Five PRs, one merge, 
 **Filing P1-043.** Libsignal version pin + AGPL posture check is a distinct layer from general dependency review. Filed as a proposed task with an open question (prose parse vs machine-readable file).
 
 **Next.** Z-27 (Android workflow for TEST-ANDROID-DEP-PARSE) OR P1-035d/P1-033e (hardware) OR P1-036.
+
+
+### Session Z-27 — doc hygiene + IC_* helper dedupe (2026-10-22)
+
+Not a feature session. Scope: clear stale backlog items, resolve
+the header-vs-registry drift on P1-027b, remove the last
+file-private helper duplication in the crypto package. Two code
+files touched (one Kotlin dedupe, one KDoc update), no test-file
+changes, no registry change.
+
+**WHAT SHIPPED.**
+
+- `IdentityChangeAck.kt` (134 → 91 lines): removed 3 file-private
+  helpers `IC_REQUIRE_STRING`, `IC_REQUIRE_BASE64URL32`,
+  `IC_BASE64URL32_RE`. Call sites (4: notice_hash, acking_device_id,
+  decision, issued_at) now use the `internal` shared helpers
+  `requireString` / `requireBase64Url32` from `Base64UrlValidation.kt`.
+  Same-package visibility resolves without import. Session F's `IC_`
+  prefix discipline is superseded by the extraction.
+- `Base64UrlValidation.kt` (94 → 109 lines, KDoc only): the
+  "known remaining duplication" paragraph became a "Resolved
+  2026-10-24 (Session Z-27)" note. The note names the three removed
+  helpers by their old identifiers so the historical record survives.
+
+**Test verification of the message-wording change.** The IC helper
+combined two failure modes into one message; the shared helper splits
+them. No test asserts on either message text:
+`IdentityChangeAckTest` uses `assertThrows(IllegalArgumentException::class.java)`
+without message matching. Verified by reading `IdentityChangeAckTest.kt`
+before committing.
+
+**RECONCILED DRIFT — P1-027b header vs. registry.** The Z-26 header
+said "P1-027b DONE at b902ad5"; the registry (section-B line 98) said
+"Backend half EXECUTED 2026-10-22 ... Z-27 (Android workflow)
+remains." Registry is correct: section-B line 86 names Android
+workflow as separate acceptance from backend workflow; Z-26 shipped
+only the backend. Z-27 corrects the header to match registry. Same
+discipline Z-14 applied to the 033a route-shape correction and Z-20
+applied to the key_rotation signing authority.
+
+**LANDED `658b5d4` IN A SESSION ENTRY.** The public/private toggle
+workflow doc landed as `658b5d4` after Z-26's close commit `ed60ce0`.
+It appeared in git log between the two closes without a handoff
+section-3 entry. This entry names it for git-log/map accuracy; treat
+`ADR-CI-GATE-001` section 5 as authoritative on the gate itself.
+
+**BACKLOG CLEANUP — FOUR STALE ITEMS.**
+
+1. IC-* helper dedupe (KI-016 continued): shipped this session.
+2. File-count reconciliation (Z-21): confirmed 22 files (7 in src/,
+   15 in test/); handoff already shows 22. Removed.
+3. ANSI grep pattern (Z-21): fix recorded verbatim in section 7 and
+   Z-21 entry. Removed; section-7 note stands.
+4. KI-018 backend current-matrix-version tracking: resolved Session
+   C (`6013077`), confirmed in section 4 (line 5817). Removed.
+
+**PRESERVED BACKLOG.** `canonicalJson` deduplication (KI-008) is
+still open; `audit/log.ts` and `audit/verify.ts` copies not extracted.
+
+**VERIFICATION.** Scoped: `IdentityChangeAckTest: 9/9`. Full:
+`300 client / 0 failures`. Compile: clean.
+
+**BRANCH-PROTECTION DISCOVERY — Z-26'S GATE FIRES ON Z-27'S PUSH.**
+The Z-27 close exposed the operational change Z-26 shipped but did
+not fully narrate: with branch protection live, direct pushes to
+`main` are refused. First push attempt returned:
+
+    remote: - Required status check "backend-dependency-gate" is expected.
+    remote: - Changes must be made through a pull request.
+
+Both rules fired. This is the gate working exactly as designed —
+fail-closed, not warn-open. But it changes the contribution model for
+every future session: commits land via PR, not direct push.
+
+**RECOVERY DISCIPLINE, NAMED HONESTLY.** Three failed recovery
+attempts occurred before this entry landed, each with the same root
+cause: multi-line shell blocks containing `#` comments or branching
+`if`/`then` flow fragmented across pastes, and the fragments executed
+partially. The zsh `#`-as-command trap fired three times in one
+session. The final successful recovery was four commands on four
+lines, no comments, no branching. Section 7 already names the
+underlying rules; this incident is a re-application, not a new
+lesson. Recorded here so Z-28's recovery discipline (if needed)
+starts from the four-command form.
+
+**COUNTS.** Backend 291, Android JVM 300 client / 314 signing,
+androidTest 71 — all unchanged. Registry v0.15 total 53 unchanged.
+
+**NEXT: Z-28** — P1-027b Android workflow per `ADR-CI-GATE-001`
+section 6 staged rollout; `TEST-ANDROID-DEP-PARSE` still pending. OR
+035d/033e (hardware-blocked). OR nothing — map at this close is
+accurate; two arcs closed at hardware boundary, P1-027b half-shipped
+with honest status in registry, branch protection live and refusing
+direct pushes.
 
 ---
 
@@ -6413,9 +6470,10 @@ Original phrasing preserved below for history:
       **P1-036** (client notice handlers, unblocked by 035b).
       **Hardware-blocked:** P1-021a (emergency lock), P1-021b (duress
       wipe), P1-034 (TEE Ed25519 verification on target hardware),
-      P1-033e, P1-035d. **Decided, in-flight:** P1-027b — CI provider
-      chosen 2026-10-21 (`ADR-CI-GATE-001`, `f6a0c20`); implementation
-      Z-26 + Z-27. **Independent of all:** P1-024 (external security
+      P1-033e, P1-035d. **P1-027b backend Executed 2026-10-22**
+      (`ADR-CI-GATE-001` `f6a0c20` provider decision; PR #2 `b902ad5`
+      backend workflow + branch protection proven). **Android half
+      pending Z-28.** **Independent of all:** P1-024 (external security
       review), scheduled against a candidate release.
     - **TASK-P1-027b** — CI enforcement gate + Android dependency
       tooling. **Decision done 2026-10-21** (ADR-CI-GATE-001,
@@ -6429,16 +6487,6 @@ Original phrasing preserved below for history:
       double-matrix-fetch dedupe (R-5 §7 note).
 
 **Backlog items (not scheduled):**
-- **Documentation counts: test-file count reconciliation (Z-21, 2026-10-20).**
-  Handoff §2 and §7 claimed "20 files" for the backend suite;
-  Z-21 preflight found 7 in src/ + 15 in test/ = 22. The 20 was stale
-  by (at least) one file prior to this session. Count updated to 22;
-  when the drift started is not audited.
-- **Count-reconciliation grep pattern needs ANSI stripping (Z-21, 2026-10-20).**
-  Full-suite `grep "Tests\s+[0-9]+ passed"` on vitest output returned
-  zero matches (ANSI escape codes around the summary line). Count was
-  verified by eye via `grep "Tests "`. Fix for future sessions: pipe
-  through `sed 's/\x1b\[[0-9;]*m//g'` or set `NO_COLOR=1`.
 - ~~Instrumented Compose tests for admin flows~~ — **RESOLVED
   2026-10-18, arc complete. 5 of 5 sub-deliverables landed.**
   **Delivered across the arc:** AckDialog (`bf13dcc`, 11 Compose
@@ -6460,10 +6508,8 @@ Original phrasing preserved below for history:
   C each verified by emulator acceptance in addition to unit tests).
   **Deferral closed.** See §3 Session Z-5 entry for the full arc
   retrospective.
-- Deduplicate base64url validators (KI-016).
 - `canonicalJson` deduplication between `audit/log.ts` and
   `audit/verify.ts` (KI-008).
-- Backend current-matrix-version tracking (KI-018).
 - **`scripts/bootstrap-enrollment-token.sh` — DONE Session S-1.**
   See §3 Session S-1 entry. Eliminated the manual psql procedure
   that recurred 5x across Sessions A–R-4.
@@ -7378,7 +7424,6 @@ Rebuild after flipping — read at HttpClient construction time.
   found, **anchor the fix on the minimal unique substring that
   names it**, not on the fully-formed assumed corrupted value.
 
-
 - **`exit 1` in a pasted block can terminate the interactive shell,**
   even inside a subshell. Session Z-1 hit this in block 3 (subshell
   `exit 1` fired after a compile check, zsh terminated). The abort
@@ -7611,7 +7656,6 @@ Rebuild after flipping — read at HttpClient construction time.
   PROVISIONING-CEREMONY fragmentation — a track record, not a new
   failure class. What's new this session: the failure shape (YAML
   block) is identifiable before the write, not after.
-
 
 - **`path` is a zsh special variable.** In zsh, `$path` is an array tied to `$PATH`. Assigning `path="..."` rebinds `$PATH`. A loop variable named `path` silently corrupted the shell environment, exporting a broken `$PATH` to all child processes. Use `fp`, `p`, `item`. Same for `fpath`, `manpath`, `cdpath`, `mailpath`.
 - **A fix that enumerates instances fails the next instance.** `PLATFORM_VARYING_DEPS={"fsevents"}` missed esbuild. `--omit=optional` missed regular `os`-constrained deps. Ask what the class is and find a representation invariant to it (e.g., `lockfile_sha`).
