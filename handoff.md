@@ -5709,6 +5709,65 @@ starts from the four-command form.
 **COUNTS.** Backend 291, Android JVM 300 client / 314 signing,
 androidTest 71 — all unchanged. Registry v0.15 total 53 unchanged.
 
+**POST-CLOSE DISCOVERIES — GATE FIRINGS ON THE FIRST PR.** The
+close commit `576b3ad` landed, the branch pushed, and the Z-26
+dependency gate fired twice before passing. Both firings were
+legitimate findings, not defects:
+
+1. **First fire (run `40096263318`) — zod CVE.** The gate's
+   `check-cve-exceptions.py` flagged GHSA-mrhx-c7xc-m3w5 /
+   CVE-2023-54404 (HIGH, CVSS 7.5) on `zod@3.23.8`, a direct
+   backend dependency. The advisory was published after Z-26's
+   gate tests ran; the PR did not cause the vulnerability, but
+   the tree carried it. Two options per Build Master §6 (fix or
+   documented exception); the session took the fix. `grep` proved
+   no unbounded array schemas exist in the backend, so the DoS
+   attack vector was not reachable -- an exception would have
+   been defensible -- but the bump to `zod@4.6.7` was one line and
+   the 291-test suite confirmed compatibility on the first run.
+   Fixed at `9b19e29`.
+2. **Second fire (run `40096845086`) — dep-tree staleness.** The
+   gate's `check-dep-tree-refresh.py` flagged that
+   `backend/package-lock.json` changed but `artifacts/dep-tree.json`
+   did not. Build Master §6 step 3 requires the artifact to
+   reflect the lockfile. My pre-commit check had missed this --
+   the zod bump triggers a second gate rule I had not read as
+   load-bearing. Fixed by running the workflow's own regen script
+   (`backend/scripts/ci/regen-dep-tree.py`); diff was zod version
+   line plus `_meta` fields. Fixed at `203c92a`.
+
+**The gate enforces its rules independently, one at a time.** A PR
+can pass rule A and fail rule B; fix B and pass B, and a third
+rule C might fire. Each firing is a legitimate finding on its own
+rule, not a symptom of a broken gate. The iteration is the flow:
+fix the named issue, push, watch the next. This is fail-closed
+working as designed -- no silent skips, no warnings-only, no
+aggregation that hides the specific rule that fired.
+
+**Two mental-model gaps the gate exposed:**
+
+- My `zod` bump commit (`9b19e29`) should have included the
+  dep-tree regen in the same commit. Build Master §6 step 3 is
+  a pre-commit check: "any lockfile change requires the artifact
+  refreshed." The next session that bumps a dependency writes
+  the regen into the same commit, not as a follow-up.
+- The pre-commit reading list for "add or bump a dependency" is:
+  (a) `npm test` (the suite as oracle), (b) `npm audit` (the
+  CVE state), (c) `check-dep-tree-refresh` (the artifact), (d)
+  `check-prohibited` (the runtime list). Four checks, all
+  pre-commit, not three-plus-iterate.
+
+**What the gate caught that tests could not.** The 291-test suite
+passed on both `zod@3.23.8` and `zod@4.6.7` -- it has no
+visibility into CVEs or artifact consistency. The gate has exactly
+that visibility and exactly those rules. Complementary coverage;
+neither substitutes for the other.
+
+**Branch state at this addendum.** `z27-session` carries four
+commits before merge: `526f6ab` (code dedupe), `576b3ad` (handoff
+close), `9b19e29` (zod bump), `203c92a` (dep-tree regen), plus
+this addendum. Squash-merge to `main` collapses them to one; the
+individual commits remain reachable via the PR link for audit.
 **NEXT: Z-28** — P1-027b Android workflow per `ADR-CI-GATE-001`
 section 6 staged rollout; `TEST-ANDROID-DEP-PARSE` still pending. OR
 035d/033e (hardware-blocked). OR nothing — map at this close is
