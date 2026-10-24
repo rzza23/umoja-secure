@@ -1,9 +1,9 @@
-# US-TASK-P1-001-v0.15 — Phase 1 Task Registry Reconciliation
+# US-TASK-P1-001-v0.16 — Phase 1 Task Registry Reconciliation
 
 Document ID: US-TASK-P1-001
-Version: 0.15
+Version: 0.16
 Date: October 2026
-Supersedes: v0.14
+Supersedes: v0.15
 Purpose: Reconcile the Phase 1 task registry with UMOJA-SECURE-BUILD-MASTER.md v1.4.2.
 Authority: Derived from US-MASTER-001 + US-ADD-001. Cannot override them.
 
@@ -61,7 +61,7 @@ added)
 
 **Phase:** 1
 **Priority:** Medium
-**Dependencies:** TASK-P1-027a (recommended before this); ADR-CI-GATE-001 (v0.1, 2026-10-21)
+**Dependencies:** TASK-P1-027a (recommended before this); ADR-CI-GATE-001 (v0.2, 2026-10-24)
 **Security classification:** Internal
 
 **Objective and non-goals:**
@@ -95,7 +95,14 @@ added)
 - TEST-CI-CLEAN-PASSES
 - TEST-ANDROID-DEP-PARSE
 
-**Status:** **EXECUTED 2026-10-22** (Backend half). PR #2 merged (`b902ad5`). Z-26 proved both green and red paths on GitHub Actions. Z-27 (Android workflow) remains.
+**Status:** **EXECUTED 2026-10-24** (Backend half 2026-10-22 at Z-26; Android workflow 2026-10-24 at Z-28). Both halves end-to-end verified on throwaway PRs. All four §B required tests proven in both directions. See v0.16 implementation notes below for Z-28 detail.
+
+**Implementation notes (v0.16, 2026-10-24):**
+- Android workflow landed at Z-28: `android-dependency-gate` job in `.github/workflows/dependency-gate.yml` (checkout, setup-python 3.12, prohibited check, freshness check, artifact upload). No JDK/SDK needed -- the job parses the committed `artifacts/dep-tree-android.json`, not a live Gradle build.
+- Command corrected in ADR-CI-GATE-001 §4 v0.2: `releaseRuntimeClasspath` -> `clientReleaseRuntimeClasspath` (Z-17 flavor split). The §B objective bullet still names the old command; the ADR is design authority, §B is written-authority history.
+- Two extractions under `scripts/ci/` keep the two ecosystems from drifting: `prohibited_common.py` (shared §11 patterns + §2 parser) and `gradle_lockfile_sha.py` (three-file `_meta` sha, one definition for producer and consumer).
+- Second §2 carve-out added: `com.google.guava:listenablefuture@1.0` (transitive of `androidx.concurrent:concurrent-futures:1.1.0` via `androidx.core:core:1.16.0`). Same US-ADD-001 §8.1 reasoning as the zxing carve-out.
+- **TEST-ANDROID-DEP-PARSE** proven in both directions (clean case 118 deps / 2 notices / 0 violations / exit 0; deliberate-failure case names the offending artifact, exit 1). All four §B required tests now proven in both directions.
 
 **Implementation notes (v0.15, 2026-10-22):**
 - The workflow and three check scripts are live on `main`.
@@ -922,7 +929,7 @@ comparison is admin-error-catching, not adversary-catching.
 | TASK-P1-025 | Admin provisioning tool | 3.5 | New |
 | TASK-P1-026 | Authorization matrix + verification | 3.5 | Updated |
 | TASK-P1-027a | SBOM + dependency review, per-session | 1 | Executed 2026-10-19 |
-| TASK-P1-027b | CI enforcement gate for dep review | 1 | Executed 2026-10-22 |
+| TASK-P1-027b | CI enforcement gate for dep review | 1 | Executed 2026-10-24 |
 | TASK-P1-043 | Libsignal pin + AGPL posture CI check | 1 | New |
 | TASK-P1-028 | Log redaction audit | 10 | New |
 | TASK-P1-029a | Signing-key custody — design | 1 | Executed 2026-10-19 |

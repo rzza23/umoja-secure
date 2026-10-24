@@ -173,11 +173,33 @@ Per §B line 76–78:
   merge button refuses on a deliberately-failing throwaway PR
 - Commit
 
-**Session Z-27 — Android workflow + end-to-end.**
+**Session Z-28 — Android workflow + end-to-end.**
 - Extend `.github/workflows/dependency-gate.yml` with Android job
-- `./gradlew :app:dependencies --configuration releaseRuntimeClasspath`
-  capture, prohibited-package parse on the release runtime tree
-- End-to-end verified on a throwaway branch
+- `./gradlew :app:dependencies --configuration
+  clientReleaseRuntimeClasspath --console=plain` capture via
+  `scripts/ci/regen-dep-tree-android.py`; parsed to 118 deps on this
+  tree, written to `artifacts/dep-tree-android.json` with a `_meta`
+  block. (Amended 2026-10-24 at Z-28: the Z-17 client/signing flavor
+  split removed the flavor-agnostic `releaseRuntimeClasspath`; the
+  client flavor is what reaches a user device, so it is the §11
+  enforcement surface.)
+- Prohibited-package check (`scripts/ci/check-prohibited-android.py`)
+  shares §11 patterns and carve-out parsing with the backend gate via
+  `scripts/ci/prohibited_common.py` (extracted this session -- same
+  discipline as Sessions U-1 and Z-27 on the crypto side)
+- Freshness check (`scripts/ci/check-dep-tree-refresh-android.py`)
+  mirrors backend Rules 287 + 288; `_meta.lockfile_sha` is a combined
+  hash over three gradle inputs (`libs.versions.toml`,
+  `app/build.gradle.kts`, `settings.gradle.kts`), produced and
+  consumed by `scripts/ci/gradle_lockfile_sha.py`. See
+  `artifacts/README.md` §`dep-tree-android.json`.
+- Second §2 carve-out added: `com.google.guava:listenablefuture@1.0`
+  (transitive of `androidx.concurrent:concurrent-futures:1.1.0`; the
+  same class of historical-com.google-groupId interface artifact the
+  zxing carve-out already establishes)
+- End-to-end verified on a throwaway branch: clean case 118 deps, 2
+  notices, 0 violations, exit 0; deliberate-failure case names the
+  offending artifact
 - Branch protection named check added for the Android job
 - Commit
 
@@ -320,7 +342,7 @@ These settings live in the GitHub repository settings UI. They are a manual setu
 | **TEST-CI-PROHIBITED-BLOCKED** | `check-prohibited.py` | Add a `com.google.firebase*` runtime dep to `backend/package.json`; `npm install`; open throwaway PR. Gate fails at SBOM parse. Merge refused. |
 | **TEST-CI-HIGH-CVE-BLOCKED** | `check-cve-exceptions.py` | Add a dep with a known HIGH advisory, no exception entry. Gate fails at audit parse. Merge refused. |
 | **TEST-CI-CLEAN-PASSES** | Full workflow | Open throwaway PR with a no-op change. All jobs green. Merge button enabled. |
-| **TEST-ANDROID-DEP-PARSE** | Android workflow (Z-27) | Add a `com.google.*` dep to `releaseRuntimeClasspath` in a throwaway branch. Gate fails at parse. Remove and re-run: green. |
+| **TEST-ANDROID-DEP-PARSE** | Android workflow (Z-28) | Add a `com.google.*` dep to `clientReleaseRuntimeClasspath` in a throwaway branch. Gate fails at parse. Remove and re-run: green. |
 
 §B line 89–90's "both a clean pass and a deliberately-failing case" is the per-test pairing: **each test must be observed in both directions** — a `TEST-CI-PROHIBITED-BLOCKED` that only passes the clean case is indistinguishable from a gate that never fires. This is the Z-24 / P D-1 lesson applied to CI: a gate that doesn't fail is not a gate.
 
@@ -370,4 +392,5 @@ Named so a future session doesn't expand:
 | Version | Date | Changes |
 |---|---|---|
 | v0.1 | 2026-10-21 | Initial ADR. Provider (GitHub Actions), enforcement policy (every PR, fail-closed, §6 exception escape valve), staged rollout (backend then Android), workflow design, branch-protection requirements, test matrix, exception-mechanism detail. |
+| v0.2 | 2026-10-24 | Android workflow executed (Session Z-28). §4: Z-27 → Z-28 session label; command corrected `releaseRuntimeClasspath` → `clientReleaseRuntimeClasspath` (Z-17 flavor split); actual Z-28 shape recorded (5 workflow steps, `prohibited_common.py` and `gradle_lockfile_sha.py` extractions, three-file `_meta.lockfile_sha`, new `artifacts/dep-tree-android.json`); second §2 carve-out added (`com.google.guava:listenablefuture@1.0`). §7: TEST-ANDROID-DEP-PARSE row command + session corrected. §9: no change (Android SBOM and release build automation remain out of scope). |
 | v0.2 | 2026-10-22 | Z-26 implementation corrections. §5 line 237 path fix (`sbom.json` not `backend/sbom.json`). §5 rule 288 amended to `lockfile_sha` freshness check (platform-invariant) instead of byte-identical `npm ls`. §6 note updated for public/private toggle workflow. |

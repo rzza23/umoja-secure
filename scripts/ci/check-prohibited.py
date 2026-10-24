@@ -39,39 +39,26 @@ that cannot run is not a gate that passed. The zero-runtime case is
 deliberately fail-closed -- if cyclonedx-npm's scope marking changes,
 the gate fails loudly rather than passing vacuously.
 
-Task: TASK-P1-027b (implementation, Z-26-A block 3a)
+PROHIBITED patterns and load_carveouts live in prohibited_common.py,
+shared with check-prohibited-android.py (Session Z-28). The SBOM-
+specific helpers (component_full_name, is_runtime_component) stay
+here because the Android Gradle tree has a different shape.
+
+Task: TASK-P1-027b (implementation, Z-26-A block 3a; refactored Z-28)
 ADR:  ADR-CI-GATE-001 §5
 """
 
 import json
-import re
 import sys
 from pathlib import Path
 
-# Build Master §11 prohibited patterns. Each entry is (label, matcher)
-# where matcher(full_name) -> bool. Matching is structural (startswith /
-# exact / prefix-wildcard), not substring. Per ADR §5 line 272,
-# "com.google.zxing:core cannot be silently passed by grepping 'google'"
-# -- that is a statement about the matching method, so the identifier is
-# built from JSON fields and compared structurally.
-PROHIBITED = [
-    ("@google/*",           lambda n: n.startswith("@google/")),
-    ("com.google.*",        lambda n: n.startswith("com.google.")),
-    ("googleapis",          lambda n: n == "googleapis"),
-    ("gaxios",              lambda n: n == "gaxios"),
-    ("google-auth-library", lambda n: n == "google-auth-library"),
-    # firebase* -- §11's wildcard on the "firebase" prefix. All actual
-    # npm firebase packages are `firebase` or `firebase-*`; matching
-    # startswith("firebase-") or exact "firebase" avoids false positives
-    # like a hypothetical "firebasefoo" (not a real package).
-    ("firebase*",           lambda n: n == "firebase" or n.startswith("firebase-")),
-    ("tink",                lambda n: n == "tink"),
-]
+# Ensure the sibling shared module is importable regardless of the
+# invocation cwd. When invoked as `python3 ../scripts/ci/check-
+# prohibited.py` from backend/, sys.path[0] is already this directory;
+# the insert is belt-and-suspenders for IDE runners and unusual cwds.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# Carve-out entry format in DEPENDENCY-EXCEPTIONS.md §2:
-#   ### `<artifact>` @ <version>
-# e.g. ### `com.google.zxing:core` @ 3.4.1
-CARVEOUT_RE = re.compile(r"^###\s+`([^`]+)`\s+@\s+(\S+)\s*$")
+from prohibited_common import PROHIBITED, load_carveouts
 
 
 def component_full_name(c: dict) -> str:
@@ -92,35 +79,6 @@ def component_full_name(c: dict) -> str:
     if group.startswith("@"):
         return f"{group}/{name}"
     return f"{group}:{name}"
-
-
-def load_carveouts(path: Path) -> set:
-    """Parse DEPENDENCY-EXCEPTIONS.md §2 for exact-version carve-outs.
-
-    Returns a set of strings "artifact@version". Only §2 entries count
-    here -- §1 CVE exceptions are a different mechanism (handled by
-    check-cve-exceptions.py).
-    """
-    if not path.exists():
-        print(f"::error::carve-out file not found: {path}", file=sys.stderr)
-        sys.exit(1)
-    carveouts = set()
-    in_section_2 = False
-    for line in path.read_text().splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## 2."):
-            in_section_2 = True
-            continue
-        if in_section_2 and stripped.startswith("## "):
-            in_section_2 = False
-            continue
-        if not in_section_2:
-            continue
-        m = CARVEOUT_RE.match(stripped)
-        if m:
-            artifact, version = m.group(1), m.group(2)
-            carveouts.add(f"{artifact}@{version}")
-    return carveouts
 
 
 def is_runtime_component(c: dict) -> bool:
