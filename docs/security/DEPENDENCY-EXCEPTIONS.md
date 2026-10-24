@@ -67,6 +67,17 @@ date.
 | Approver | Project owner — see US-ADD-001 §8.1 |
 | Date | 2026-10-14 |
 
+### `com.google.guava:listenablefuture` @ 1.0
+
+| Field | Value |
+|-------|-------|
+| Artifact | `com.google.guava:listenablefuture` |
+| Version | 1.0 |
+| Pulled by | `androidx.concurrent:concurrent-futures:1.1.0` (runtime scope, via `androidx.core:core:1.16.0`, transitively via `androidx.compose:compose-bom:2026.02.01`) |
+| Rationale | Standalone `ListenableFuture` interface artifact. Not Guava -- a minimal interface-only extraction published under `com.google.guava` so androidx and Compose can depend on the `ListenableFuture` type without pulling the full Guava library (which would be a genuine §11 concern). Apache License 2.0. No Google service dependency, no Google runtime callback, no network egress to Google-controlled infrastructure. The `com.google.` groupId is a Maven-publishing artifact: Guava's Maven line ships `9999.0-empty-to-avoid-conflict-with-guava` for this same interface to prevent duplicate classes when both are on the classpath. The code predates Google's Maven namespace conventions. Reviewed against US-ADD-001 §8.1 and cleared. |
+| Approver | Project owner -- see US-ADD-001 §8.1 |
+| Date | 2026-10-24 |
+
 ---
 
 ## Provenance

@@ -48,3 +48,26 @@ jobs:
             backend/sbom.json
             artifacts/dep-tree.json
             /tmp/audit.json
+
+  android-dependency-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prohibited-package check (§11)
+        run: python3 scripts/ci/check-prohibited-android.py artifacts/dep-tree-android.json docs/security/DEPENDENCY-EXCEPTIONS.md
+      - name: Dep-tree freshness check (Rules 287 + 288)
+        run: python3 scripts/ci/check-dep-tree-refresh-android.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-dep-artifacts
+          path: artifacts/dep-tree-android.json
