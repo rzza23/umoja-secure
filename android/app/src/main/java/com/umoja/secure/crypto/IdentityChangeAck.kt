@@ -42,10 +42,10 @@ data class IdentityChangeAck(
 
     companion object {
         fun fromJsonMap(m: Map<String, Any?>): IdentityChangeAck {
-            val noticeHash = IC_REQUIRE_BASE64URL32(m["notice_hash"], "notice_hash")
-            val ackingDeviceId = IC_REQUIRE_STRING(m["acking_device_id"], "acking_device_id")
-            val decision = IC_REQUIRE_STRING(m["decision"], "decision")
-            val issuedAt = IC_REQUIRE_STRING(m["issued_at"], "issued_at")
+            val noticeHash = requireBase64Url32(m["notice_hash"], "notice_hash")
+            val ackingDeviceId = requireString(m["acking_device_id"], "acking_device_id")
+            val decision = requireString(m["decision"], "decision")
+            val issuedAt = requireString(m["issued_at"], "issued_at")
             require(decision == "accept" || decision == "reject") {
                 "decision: expected \"accept\" or \"reject\", got \"$decision\""
             }
@@ -88,45 +88,4 @@ data class SignedIdentityChangeAck(
             )
         }
     }
-}
-
-// ---------- validation helpers ----------
-//
-// IC_ prefix on BOTH declarations and call sites. Per handoff §7
-// (Session F lesson): prefixing declarations without prefixing call
-// sites lets an unprefixed call resolve to another file's file-private
-// declaration and fail compile. Consistency is what matters.
-//
-// No custom exception class — Kotlin crypto convention is `require()` →
-// IllegalArgumentException, matching AuthorizationMatrix.kt and
-// ReplacementNotice.kt. TS's IdentityChangeAckError is a TS idiom
-// (Error subclass with .name); Kotlin uses the built-in.
-
-private val IC_BASE64URL32_RE = Regex("^[A-Za-z0-9_-]{43}$")
-
-private fun IC_REQUIRE_STRING(value: Any?, field: String): String {
-    val s = value as? String
-        ?: throw IllegalArgumentException(
-            "$field: expected string, got ${value?.let { it::class.simpleName } ?: "null"}",
-        )
-    if (s.isEmpty()) {
-        throw IllegalArgumentException("$field: empty string not permitted")
-    }
-    return s
-}
-
-private fun IC_REQUIRE_BASE64URL32(value: Any?, field: String): String {
-    val s = IC_REQUIRE_STRING(value, field)
-    if (!IC_BASE64URL32_RE.matches(s)) {
-        throw IllegalArgumentException(
-            "$field: not base64url (no padding, [A-Za-z0-9_-] only) or wrong length (expected 43)",
-        )
-    }
-    val decoded = Base64.getUrlDecoder().decode(s)
-    if (decoded.size != 32) {
-        throw IllegalArgumentException(
-            "$field: decodes to ${decoded.size} bytes, expected 32",
-        )
-    }
-    return s
 }
