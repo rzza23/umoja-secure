@@ -50,14 +50,11 @@ import java.util.Base64
  * extraction: byte-identical private helpers across files are a
  * drift hazard, and extraction supersedes the prefix discipline.
  *
- * **Known remaining duplication (backlog item, not this session):**
- * [IdentityChangeAck] still has `IC_REQUIRE_STRING`,
- * `IC_REQUIRE_BASE64URL32`, and `IC_BASE64URL32_RE` — three
- * file-private copies of helpers this file already provides. They
- * predate U-1's extraction to this file (U-1 did not touch
- * IdentityChangeAck). Filed separately for a future doc-hygiene
- * pass; this session does not fold them in, to keep the 035b
- * pre-condition refactor bounded.
+ * **Resolved 2026-10-24 (Session Z-27).** [IdentityChangeAck]'s three
+ * file-private copies (`IC_REQUIRE_STRING`, `IC_REQUIRE_BASE64URL32`,
+ * `IC_BASE64URL32_RE`) were removed; the call sites now use the shared
+ * helpers above. That closes the "known remaining duplication" backlog
+ * item this KDoc previously tracked.
  */
 internal val BASE64URL_RE = Regex("^[A-Za-z0-9_-]+$")
 
